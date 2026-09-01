@@ -9,3 +9,112 @@
   .controls{grid-template-columns:1fr 1fr}
   .control{font-size:12px;min-height:48px}
 }
+
+/* V14: Peserta lelang tampil sebagai kotak/card grid */
+.ranking-list{grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.rank-card.rank-box{position:relative;min-height:178px;display:flex;flex-direction:column;align-items:center;text-align:center;gap:7px;padding:13px 10px 14px;border-radius:18px;background:linear-gradient(145deg,#151c25,#0b1016);border:1px solid #2b3542;overflow:hidden;box-shadow:inset 0 1px #ffffff08,0 10px 22px #00000022}
+.rank-card.rank-box:before,.rank-card.rank-box:after{content:"";position:absolute;width:28px;height:28px;border-color:var(--green);opacity:.75}.rank-card.rank-box:before{left:0;top:0;border-left:2px solid;border-top:2px solid;border-radius:16px 0 0 0}.rank-card.rank-box:after{right:0;bottom:0;border-right:2px solid;border-bottom:2px solid;border-radius:0 0 16px 0}.rank-card.rank-box.top1{border-color:#8daa32;background:linear-gradient(145deg,#1d2616,#10160f);box-shadow:0 0 22px #b8ff2c18,inset 0 1px #ffffff0a}.box-top{width:100%;display:flex;align-items:center;justify-content:space-between;gap:6px}.rank-box .rank-no{width:auto;min-width:34px;height:28px;padding:2px 8px;border-radius:9px;background:#202b35;display:grid;place-items:center;font-size:16px;line-height:1}.rank-box.top1 .rank-no{background:#4b5520;color:#efffc5}.box-rank{font-size:8px;letter-spacing:1.1px;color:var(--muted);font-weight:900}.rank-box .user-avatar{width:56px;height:56px;border-radius:17px;background:linear-gradient(145deg,#27323d,#161d25);border:1px solid #34414e;font-size:20px;flex:none}.rank-box .rank-info{width:100%;flex:0}.rank-box .rank-info strong{font-size:13px;max-width:100%;padding:0 3px}.rank-box .rank-info span{font-size:8px;letter-spacing:1.2px;text-transform:uppercase}.rank-box .coin{width:100%;margin-top:auto;padding-top:8px;border-top:1px solid #28313b;text-align:center}.rank-box .coin strong{font-size:20px;color:var(--green);text-shadow:0 0 14px #b8ff2c22}.rank-box.draw-box{animation:boxDrawPulse .8s infinite alternate;border-color:var(--yellow)}.empty-box{grid-column:1/-1;min-height:120px!important;align-items:flex-start!important;text-align:left!important;padding:22px!important}
+@keyframes boxDrawPulse{to{box-shadow:0 0 22px #ffd84d44;transform:translateY(-2px)}}
+@media(min-width:560px){.ranking-list{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:360px){.ranking-list{grid-template-columns:1fr}.rank-card.rank-box{min-height:150px}}
+
+
+/* V15: Judul, waktu dan peserta menjadi satu area board dengan kotak-kotak */
+.auction-board-dashboard{position:relative;margin:0 0 18px;padding:14px;border:1px solid #293540;border-radius:26px;background:linear-gradient(145deg,#0d1218,#080c11);box-shadow:0 14px 35px #00000033;overflow:hidden}.auction-board-dashboard:before,.auction-board-dashboard:after{content:"";position:absolute;width:42px;height:42px;border-color:var(--green);opacity:.65;pointer-events:none}.auction-board-dashboard:before{left:0;top:0;border-left:2px solid;border-top:2px solid;border-radius:25px 0 0 0}.auction-board-dashboard:after{right:0;bottom:0;border-right:2px solid;border-bottom:2px solid;border-radius:0 0 25px 0}.auction-board-dashboard .auction-title-card,.auction-board-dashboard .timer-card{position:relative;margin-bottom:12px;border-radius:18px;border-color:#2d3945}.auction-board-dashboard .ranking-section{position:relative;padding:14px;border-radius:18px;border:1px solid #2d3945;background:linear-gradient(145deg,#121821,#0c1117)}.auction-board-dashboard .section-title{margin:0 3px 12px}.auction-board-dashboard .ranking-section:before{content:"PESERTA LELANG";display:inline-block;margin:0 0 6px;color:var(--green);font-size:9px;font-weight:900;letter-spacing:1.8px}@media(max-width:480px){.auction-board-dashboard{padding:10px;border-radius:20px}.auction-board-dashboard .ranking-section{padding:10px}}
+
+/* V16: Tiga bagian utama lelang benar-benar berada dalam kotak terpisah */
+.auction-board-dashboard{display:grid;grid-template-columns:1fr;gap:12px;padding:0;border:0;background:transparent;box-shadow:none;overflow:visible}
+.auction-board-dashboard:before,.auction-board-dashboard:after{display:none}
+.auction-board-dashboard .auction-title-card,
+.auction-board-dashboard .timer-card,
+.auction-board-dashboard .ranking-section{
+  margin:0!important;
+  border:1px solid #34414d!important;
+  border-radius:22px!important;
+  background:linear-gradient(145deg,#151c25,#0a0f15)!important;
+  box-shadow:0 12px 30px #0000002b,inset 0 1px #ffffff08;
+  overflow:hidden;
+}
+.auction-board-dashboard .auction-title-card{padding:22px 18px!important;position:relative}
+.auction-board-dashboard .timer-card{padding:22px 18px!important;position:relative}
+.auction-board-dashboard .ranking-section{padding:18px!important;position:relative}
+.auction-board-dashboard .auction-title-card:before,
+.auction-board-dashboard .timer-card:before,
+.auction-board-dashboard .ranking-section:before{
+  position:absolute;left:0;top:0;margin:0!important;padding:7px 12px;
+  border-right:1px solid #405020;border-bottom:1px solid #405020;
+  border-radius:0 0 12px 0;background:#151d0e;color:var(--green);
+  font-size:9px;font-weight:900;letter-spacing:1.6px;z-index:1;
+}
+.auction-board-dashboard .auction-title-card:before{content:'JUDUL LELANG'}
+.auction-board-dashboard .timer-card:before{content:'WAKTU LELANG'}
+.auction-board-dashboard .ranking-section:before{content:'PESERTA LELANG'}
+.auction-board-dashboard .auction-title-card .label,
+.auction-board-dashboard .timer-card .label,
+.auction-board-dashboard .ranking-section>.section-title .label{display:none}
+.auction-board-dashboard .auction-title-card h2{margin-top:18px}
+.auction-board-dashboard .timer-card .timer{margin-top:18px}
+.auction-board-dashboard .ranking-section .section-title{margin-top:28px!important}
+@media(max-width:480px){
+ .auction-board-dashboard .auction-title-card,.auction-board-dashboard .timer-card,.auction-board-dashboard .ranking-section{border-radius:18px!important}
+ .auction-board-dashboard .ranking-section{padding:12px!important}
+}
+
+/* V17: Panel lelang seperti referensi - semua informasi berada dalam kotak neon */
+.auction-board-dashboard{gap:14px!important}
+.auction-board-dashboard .auction-title-card,
+.auction-board-dashboard .timer-card,
+.auction-board-dashboard .ranking-section{
+  border:2px solid #79e85d!important;
+  border-radius:16px!important;
+  background:linear-gradient(145deg,#151a1e 0%,#0b0f13 60%,#11170f 100%)!important;
+  box-shadow:0 0 0 2px #ffffff08 inset,0 0 18px #76ff6b26,0 12px 28px #00000066!important;
+}
+.auction-board-dashboard .auction-title-card:after,
+.auction-board-dashboard .timer-card:after,
+.auction-board-dashboard .ranking-section:after{
+  content:"";position:absolute;right:-2px;top:-2px;width:58px;height:8px;
+  background:linear-gradient(90deg,#f0df43,#65ff82);box-shadow:0 0 14px #b8ff2c88;
+  clip-path:polygon(10% 0,100% 0,88% 100%,0 100%);
+}
+.auction-board-dashboard .auction-title-card:before,
+.auction-board-dashboard .timer-card:before,
+.auction-board-dashboard .ranking-section:before{
+  background:linear-gradient(90deg,#23391d,#172414)!important;
+  border-right:1px solid #7ae866!important;border-bottom:1px solid #7ae866!important;
+  color:#effff0!important;text-shadow:0 0 8px #8cff73aa;
+}
+.auction-board-dashboard .auction-title-card h2{font-size:clamp(23px,5vw,34px)!important;color:#f4f7f4!important;text-shadow:0 0 14px #ffffff18;margin-top:24px!important}
+.auction-board-dashboard .auction-title-card .title-note{color:#a9ff89!important;letter-spacing:1.2px;font-weight:800}
+.auction-board-dashboard .timer-card .timer{font-size:clamp(52px,13vw,78px)!important;color:#d7ff9a;text-shadow:0 0 20px #b8ff2c44;margin-top:24px!important}
+.auction-board-dashboard .ranking-section .section-title h2{font-size:24px;color:#f4f7f4}
+.auction-board-dashboard .ranking-section .count{border:1px solid #456b39;padding:6px 9px;border-radius:999px;color:#b8ff2c;background:#101a0d}
+.auction-board-dashboard .ranking-section{padding-top:44px!important}
+.auction-board-dashboard .ranking-section .section-title{margin-top:0!important;padding-bottom:10px;border-bottom:1px solid #314032}
+.ranking-list{grid-template-columns:repeat(2,minmax(0,1fr));gap:12px!important}
+.rank-card.rank-box{border:2px solid #49d86b!important;border-radius:14px!important;min-height:165px!important;background:linear-gradient(145deg,#111a19,#090d12)!important;box-shadow:0 0 12px #3cff7220,inset 0 1px #ffffff0a!important}
+.rank-card.rank-box.top1{border-color:#ffd84d!important;box-shadow:0 0 18px #ffd84d35!important}
+.rank-card.rank-box .rank-no{background:#168b49!important;color:#fff!important;border-radius:7px!important}
+.rank-card.rank-box.top1 .rank-no{background:#d4a51d!important;color:#fff!important}
+.rank-box .coin strong{color:#92ff73!important;font-size:22px!important}
+@media(min-width:560px){.ranking-list{grid-template-columns:repeat(4,minmax(0,1fr))}.rank-card.rank-box{min-height:155px!important}}
+
+/* V18 SIMPLE DASHBOARD — gaya kotak hitam/putih seperti referensi */
+:root{--bg:#09090b;--panel:#111114;--panel2:#17171b;--line:#34343a;--text:#f5f5f5;--muted:#9a9aa2;--green:#ffffff;--green2:#d8d8d8;--red:#ff4050;--yellow:#ffd84d}
+body{background:#09090b}
+.app-shell{max-width:760px;padding:18px 14px 100px}
+.topbar{padding:14px 16px;border:2px solid #f1f1f1;border-radius:16px;background:#111114;margin:0 0 16px}
+.topbar h1{font-size:20px;letter-spacing:.8px}.eyebrow,.label{color:#a9a9b0}.icon-btn{border-color:#4a4a50;background:#0d0d10;border-radius:10px}.live-dot{box-shadow:none}
+.hero-banner{display:none!important}
+.status-card,.timer-card,.settings-card,.activity-card,.auction-title-card{background:#141417;border:1px solid #36363c;border-radius:14px;box-shadow:none}
+.connect-btn,.save-settings{background:#f3f3f3;color:#111;border-radius:10px;box-shadow:none}
+.controls{gap:8px;margin:0 0 14px}.control{background:#151519;border-color:#45454b;border-radius:10px}.start{background:#f2f2f2;color:#111}.pause,.reset,.finish{color:#f1f1f1}
+.auction-board-dashboard{display:block!important;border:5px solid #f1f1f1!important;border-radius:18px!important;background:#17171b!important;padding:20px!important;box-shadow:none!important;gap:0!important}
+.auction-board-dashboard .auction-title-card,.auction-board-dashboard .timer-card,.auction-board-dashboard .ranking-section{border:0!important;border-radius:0!important;background:transparent!important;box-shadow:none!important;overflow:visible!important;padding:0!important}
+.auction-board-dashboard .auction-title-card:before,.auction-board-dashboard .timer-card:before,.auction-board-dashboard .ranking-section:before,.auction-board-dashboard .auction-title-card:after,.auction-board-dashboard .timer-card:after,.auction-board-dashboard .ranking-section:after{display:none!important}
+.auction-board-dashboard .auction-title-card{padding-bottom:18px!important;border-bottom:1px solid #35353b!important;text-align:left!important}
+.auction-board-dashboard .auction-title-card .label{display:block!important;font-size:11px;margin:0 0 8px;color:#a5a5ad}
+.auction-board-dashboard .auction-title-card h2{margin:0!important;color:#f5f5f5!important;text-shadow:none!important;font-size:clamp(22px,6vw,36px)!important;line-height:1.25!important;max-height:none!important}
+.auction-board-dashboard .auction-title-card .title-note{display:none!important}
+.auction-board-dashboard .timer-card{text-align:center!important;padding:24px 0 20px!important;border-bottom:1px solid #35353b!important}
+.auction-board-dashboard .timer

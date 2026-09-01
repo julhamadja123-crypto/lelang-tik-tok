@@ -1,7 +1,20 @@
 const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
-const { WebcastPushConnection } = require("tiktok-live-connector");
+// Connector TikTok LIVE v1.x memakai CommonJS. Beberapa build mengemas export
+// di dalam `default`, jadi ambil kedua bentuk agar tidak muncul
+// "WebcastPushConnection is not a constructor".
+const TikTokConnectorModule = require("tiktok-live-connector");
+const WebcastPushConnection =
+  TikTokConnectorModule?.WebcastPushConnection ||
+  TikTokConnectorModule?.default?.WebcastPushConnection ||
+  TikTokConnectorModule?.default;
+
+if (typeof WebcastPushConnection !== "function") {
+  throw new Error(
+    "TikTok connector yang terpasang tidak kompatibel. Gunakan tiktok-live-connector versi 1.2.0 sesuai package.json."
+  );
+}
 
 const app = express();
 const server = http.createServer(app);
@@ -171,8 +184,8 @@ async function connectToLive(rawUsername) {
   // Penting: extended gift info dimatikan saat koneksi.
   // Pada beberapa koneksi TikTok, fetch gift list dapat menghasilkan 403 dan membuat connect gagal.
   const conn = new WebcastPushConnection(username, {
-    // Menggunakan connector v1.2.3 yang masih memakai signing flow legacy,
-    // sehingga tidak memanggil endpoint premium fetchWebcastSignatureFromEulerRoute.
+    // Menggunakan connector v1.2.0 dengan API legacy WebcastPushConnection.
+    // Versi ini cocok dengan kode CommonJS di server ini.
     processInitialData: false,
     fetchRoomInfoOnConnect: true,
     enableExtendedGiftInfo: true,
@@ -221,7 +234,7 @@ async function connectToLive(rawUsername) {
     if (liveConnection === conn) liveConnection = null;
     const message = err?.message || String(err) || "Gagal terhubung ke TikTok LIVE";
     const friendlyMessage = /Business plan|fetchWebcastSignatureFromEulerRoute/i.test(message)
-      ? "Server masih memakai connector baru yang membutuhkan endpoint premium. Pastikan deployment memasang tiktok-live-connector 1.2.3 secara bersih."
+      ? "Server memasang versi connector yang tidak sesuai. Hapus cache deployment lalu install ulang tiktok-live-connector 1.2.0 sesuai package.json."
       : message;
     emitStatus(`Gagal terhubung @${username}: ${friendlyMessage}`);
     throw err;

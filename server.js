@@ -567,7 +567,7 @@ async function connectToLive(rawUsername) {
 
   console.log(
     `[TikTok] Signing API key: ${
-      signApiKey ? "TERSEDIA" : "4bfe46a08908826d5271b060411475473f773117ab6bb74e535294a9bf406bd1"
+      signApiKey ? "TERSEDIA" : "TIDAK ADA"
     }`
   );
 
@@ -732,4 +732,344 @@ async function connectToLive(rawUsername) {
       return;
     }
 
-    emit
+    emitStatus(
+      `Koneksi @${activeUsername} terputus. Mencoba ulang...`
+    );
+
+    clearTimeout(
+      reconnectTimer
+    );
+
+    reconnectTimer =
+      setTimeout(() => {
+        if (
+          !manualDisconnect &&
+          activeUsername
+        ) {
+          connectToLive(
+            activeUsername
+          ).catch((err) => {
+            emitStatus(
+              `Reconnect gagal: ${formatTikTokError(err)}`
+            );
+          });
+        }
+      }, 5000);
+  });
+
+  /*
+   |--------------------------------------------------------------------------
+   | ERROR
+   |--------------------------------------------------------------------------
+   */
+
+  conn.on("error", (err) => {
+    console.error(
+      "[TikTok] Error:",
+      err
+    );
+
+    emitStatus(
+      `Error TikTok: ${formatTikTokError(err)}`
+    );
+  });
+
+  /*
+   |--------------------------------------------------------------------------
+   | CONNECT
+   |--------------------------------------------------------------------------
+   */
+
+  try {
+    const state =
+      await conn.connect();
+
+    /*
+     * Pastikan koneksi yang aktif
+     * masih connection yang sama.
+     */
+    if (liveConnection !== conn) {
+      try {
+        await conn.disconnect();
+      } catch (_) {
+        // Abaikan error disconnect
+      }
+
+      throw new Error(
+        "Koneksi TikTok digantikan oleh koneksi lain."
+      );
+    }
+
+    const roomId =
+      state?.roomId ||
+      conn.roomId ||
+      "aktif";
+
+    emitStatus(
+      `Terhubung ke LIVE @${username} • Room ${roomId}`,
+      true
+    );
+
+    console.log(
+      `[TikTok] BERHASIL TERHUBUNG @${username}`
+    );
+
+    return state;
+
+  } catch (err) {
+    if (
+      liveConnection === conn
+    ) {
+      liveConnection = null;
+    }
+
+    const friendly =
+      formatTikTokError(err);
+
+    console.error(
+      "[TikTok] Gagal connect:",
+      err
+    );
+
+    emitStatus(
+      `Gagal terhubung @${username}: ${friendly}`
+    );
+
+    throw new Error(
+      friendly
+    );
+  }
+}
+
+/*
+|--------------------------------------------------------------------------
+| SOCKET.IO
+|--------------------------------------------------------------------------
+*/
+
+io.on("connection", (socket) => {
+  console.log(
+    `[Socket] Client terhubung: ${socket.id}`
+  );
+
+  /*
+   * Kirim status saat frontend pertama kali membuka halaman.
+   */
+  const connected =
+    Boolean(
+      liveConnection?.isConnected ||
+      liveConnection?.state?.isConnected
+    );
+
+  socket.emit(
+    "live:status",
+    {
+      ok: connected,
+
+      message:
+        connected
+          ? `Terhubung ke @${activeUsername}`
+          : "Belum terhubung ke TikTok LIVE"
+    }
+  );
+
+  /*
+   |--------------------------------------------------------------------------
+   | CONNECT
+   |--------------------------------------------------------------------------
+   */
+
+  socket.on(
+    "live:connect",
+    async (data = {}) => {
+      try {
+        const username =
+          data.username;
+
+        console.log(
+          `[Socket] Request connect: @${username}`
+        );
+
+        await connectToLive(
+          username
+        );
+
+      } catch (err) {
+        console.error(
+          "[Socket] live:connect error:",
+          err
+        );
+
+        socket.emit(
+          "live:error",
+          {
+            message:
+              err?.message ||
+              "Gagal menghubungkan TikTok LIVE."
+          }
+        );
+      }
+    }
+  );
+
+  /*
+   |--------------------------------------------------------------------------
+   | AUCTION STATE
+   |--------------------------------------------------------------------------
+   */
+
+  socket.on(
+    "auction:state",
+    (data = {}) => {
+      auctionActive =
+        Boolean(data.active);
+
+      console.log(
+        `[Auction] ${
+          auctionActive
+            ? "ACTIVE"
+            : "INACTIVE"
+        }`
+      );
+    }
+  );
+
+  /*
+   |--------------------------------------------------------------------------
+   | DISCONNECT TIKTOK
+   |--------------------------------------------------------------------------
+   */
+
+  socket.on(
+    "live:disconnect",
+    async () => {
+      console.log(
+        "[Socket] Request disconnect TikTok."
+      );
+
+      auctionActive = false;
+
+      await stopConnection();
+
+      activeUsername = null;
+
+      emitStatus(
+        "Koneksi TikTok LIVE diputus."
+      );
+    }
+  );
+
+  /*
+   |--------------------------------------------------------------------------
+   | SOCKET DISCONNECT
+   |--------------------------------------------------------------------------
+   */
+
+  socket.on(
+    "disconnect",
+    () => {
+      console.log(
+        `[Socket] Client terputus: ${socket.id}`
+      );
+    }
+  );
+});
+
+/*
+|--------------------------------------------------------------------------
+| HEALTH CHECK
+|--------------------------------------------------------------------------
+*/
+
+app.get(
+  "/health",
+  (req, res) => {
+    res.status(200).json({
+      ok: true,
+
+      service:
+        "tiktok-live-coin-auction",
+
+      connected:
+        Boolean(liveConnection),
+
+      username:
+        activeUsername,
+
+      auctionActive:
+        auctionActive
+    });
+  }
+);
+
+/*
+|--------------------------------------------------------------------------
+| FRONTEND
+|--------------------------------------------------------------------------
+*/
+
+app.get(
+  "/",
+  (req, res) => {
+    res.sendFile(
+      __dirname + "/index.html"
+    );
+  }
+);
+
+/*
+|--------------------------------------------------------------------------
+| SERVER
+|--------------------------------------------------------------------------
+*/
+
+const PORT =
+  process.env.PORT || 3000;
+
+server.listen(
+  PORT,
+  "0.0.0.0",
+  () => {
+    console.log(
+      "=============================================="
+    );
+
+    console.log(
+      `Server berjalan di port ${PORT}`
+    );
+
+    console.log(
+      "TikTok Live Coin Auction siap."
+    );
+
+    console.log(
+      "=============================================="
+    );
+  }
+);
+
+/*
+|--------------------------------------------------------------------------
+| PROCESS ERROR HANDLERS
+|--------------------------------------------------------------------------
+*/
+
+process.on(
+  "unhandledRejection",
+  (reason) => {
+    console.error(
+      "[PROCESS] Unhandled Promise Rejection:",
+      reason
+    );
+  }
+);
+
+process.on(
+  "uncaughtException",
+  (error) => {
+    console.error(
+      "[PROCESS] Uncaught Exception:",
+      error
+    );
+  }
+);

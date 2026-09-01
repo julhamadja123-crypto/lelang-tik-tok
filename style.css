@@ -117,4 +117,58 @@ body{background:#09090b}
 .auction-board-dashboard .auction-title-card h2{margin:0!important;color:#f5f5f5!important;text-shadow:none!important;font-size:clamp(22px,6vw,36px)!important;line-height:1.25!important;max-height:none!important}
 .auction-board-dashboard .auction-title-card .title-note{display:none!important}
 .auction-board-dashboard .timer-card{text-align:center!important;padding:24px 0 20px!important;border-bottom:1px solid #35353b!important}
-.auction-board-dashboard .timer
+.auction-board-dashboard .timer-card .label{display:block!important;color:#a5a5ad;font-size:11px}
+.auction-board-dashboard .timer-card .timer{margin:6px 0 10px!important;color:#ff4050!important;text-shadow:none!important;font-size:clamp(54px,16vw,86px)!important}
+.progress{height:5px;background:#2a2a2f;margin:14px 0 10px}.progress span{background:#f1f1f1}.timer-note{color:#c7c7cd}
+.auction-board-dashboard .ranking-section{padding-top:18px!important}
+.auction-board-dashboard .ranking-section .section-title{margin:0 0 14px!important;padding:0!important;border:0!important}.auction-board-dashboard .ranking-section .section-title h2{font-size:19px;color:#f5f5f5}.auction-board-dashboard .ranking-section .count{border:0!important;background:transparent!important;padding:0!important;color:#aaa!important}
+.ranking-list{grid-template-columns:1fr!important;gap:9px!important}
+.rank-card.rank-box{min-height:0!important;display:grid!important;grid-template-columns:40px 48px 1fr auto!important;align-items:center!important;text-align:left!important;gap:10px!important;padding:10px!important;border:1px solid #393940!important;border-radius:10px!important;background:#101013!important;box-shadow:none!important;overflow:visible!important;flex-direction:unset!important}
+.rank-card.rank-box:before,.rank-card.rank-box:after{display:none!important}.rank-card.rank-box.top1{border-color:#6b6b73!important;background:#19191d!important;box-shadow:none!important}
+.box-top{display:contents!important}.rank-box .rank-no{width:40px!important;min-width:40px!important;height:40px!important;padding:0!important;border-radius:8px!important;background:#f1f1f1!important;color:#111!important;font-size:18px!important}.rank-card.rank-box.top1 .rank-no{background:#ffd84d!important}
+.box-rank{display:none!important}.rank-box .user-avatar{width:48px!important;height:48px!important;border-radius:50%!important;background:#2a2a2f!important;border:1px solid #4a4a50!important;font-size:16px!important}.rank-box .rank-info{width:auto!important;min-width:0!important}.rank-box .rank-info strong{font-size:14px!important}.rank-box .rank-info span{font-size:9px!important;letter-spacing:.8px!important}.rank-box .coin{width:auto!important;margin:0!important;padding:0!important;border:0!important;text-align:right!important}.rank-box .coin strong{color:#f3f3f3!important;text-shadow:none!important;font-size:17px!important}.rank-box .coin span{font-size:8px!important}
+.settings-card,.activity-card{border-radius:14px}.settings-grid input,.settings-grid select,.settings-grid.one textarea{background:#0e0e11;border-color:#3b3b42;border-radius:9px}.draw-info{border-color:#3a3a41;background:#101013}.bottom-nav{background:#101014ee;border-color:#35353b}.nav-item.active{color:#fff}.status-badge.online{background:#e9e9e9;color:#111}.connection-log.ok{border-color:#666;color:#eee}
+@media(max-width:480px){.auction-board-dashboard{border-width:4px!important;padding:16px!important}.rank-card.rank-box{grid-template-columns:36px 42px 1fr auto!important;gap:8px!important}.rank-box .rank-no{width:36px!important;min-width:36px!important;height:36px!important}.rank-box .user-avatar{width:42px!important;height:42px!important}.rank-box .coin strong{font-size:14px!important}}
+
+
+/* Foto profil TikTok + coin peserta */
+.rank-box .user-avatar{overflow:hidden!important;background:#242429!important}
+.rank-box .user-avatar img{width:100%;height:100%;display:block;object-fit:cover;border-radius:50%}
+.rank-box .coin{display:flex!important;align-items:center!important;justify-content:flex-end!important;gap:6px!important;white-space:nowrap}
+.rank-box .coin-icon{font-size:20px!important;line-height:1!important}
+.activity{display:grid!important;grid-template-columns:46px 1fr auto!important;align-items:center!important;gap:10px!important}
+.activity-avatar{width:42px!important;height:42px!important;border-radius:50%!important;overflow:hidden!important;display:flex!important;align-items:center!important;justify-content:center!important;background:#29292f!important;border:1px solid #4a4a50!important}
+.activity-avatar img{width:100%;height:100%;object-fit:cover;border-radius:50%;display:block}
+.event-coin{display:flex!important;align-items:center!important;gap:5px!important;font-weight:800!important}
+@media(max-width:480px){.rank-box .coin-icon{font-size:17px!important}.activity{grid-template-columns:42px 1fr auto!important;gap:8px!important}.activity-avatar{width:38px!important;height:38px!important}}
+
+
+/* Perbaikan dashboard: waktu lebih kecil, area peserta lebih luas */
+.auction-board-dashboard .timer-card .timer{font-size:clamp(42px,12vw,62px)!important;letter-spacing:1px!important}
+.auction-board-dashboard .timer-card{padding:18px 0 16px!important}
+.auction-board-dashboard .timer-card .label{font-size:9px!important;letter-spacing:1px!important}
+.settings-grid label{font-size:10px!important}
+.settings-grid input,.settings-grid select{padding:9px 10px!important;font-size:13px!important}
+.auction-board-dashboard .ranking-section{padding-top:14px!important}
+.auction-board-dashboard .ranking-section .section-title h2{font-size:22px!important}
+.ranking-list{max-height:620px;overflow-y:auto;padding-right:2px;scrollbar-width:thin}
+.rank-card.rank-box{min-height:68px!important;padding:9px 12px!important}
+.rank-box .user-avatar{width:46px!important;height:46px!important;min-width:46px!important}
+.rank-box .rank-info strong{font-size:14px!important}
+@media(min-width:560px){.ranking-list{max-height:760px}.rank-card.rank-box{min-height:78px!important}}
+
+/* V18: Header lelang diperkecil agar area peserta lebih luas */
+.auction-board-dashboard .auction-title-card{padding:8px 10px!important;margin-bottom:6px!important;border-radius:10px!important}
+.auction-board-dashboard .auction-title-card .label{font-size:8px!important;margin-bottom:2px!important;letter-spacing:1px!important}
+.auction-board-dashboard .auction-title-card h2{font-size:16px!important;line-height:1.1!important;margin:1px 0!important;max-height:38px!important}
+.auction-board-dashboard .auction-title-card .title-note{font-size:8px!important;line-height:1.2!important}
+.auction-board-dashboard .timer-card{padding:10px 0 8px!important;margin-bottom:6px!important}
+.auction-board-dashboard .timer-card .timer{font-size:clamp(34px,9vw,48px)!important;line-height:1!important;margin:2px 0 5px!important}
+.auction-board-dashboard .timer-card .label{font-size:8px!important;margin-bottom:1px!important}
+.auction-board-dashboard .timer-card .progress{margin:7px 0 5px!important;height:4px!important}
+.auction-board-dashboard .timer-card .timer-note{font-size:9px!important}
+.auction-board-dashboard .ranking-section{padding-top:8px!important}
+.auction-board-dashboard .ranking-section .section-title{margin-bottom:8px!important}
+.auction-board-dashboard .ranking-section .section-title h2{font-size:24px!important}
+.ranking-list{max-height:calc(100vh - 270px)!important;min-height:420px!important;padding-bottom:10px!important}
+@media(max-width:480px){.ranking-list{max-height:calc(100vh - 240px)!important;min-height:470px!important}.auction-board-dashboard .ranking-section .section-title h2{font-size:21px!important}}

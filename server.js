@@ -51,74 +51,12 @@ const signingMode =
     : "public";
 
 /* =========================================================
-   GIFT DUPLICATE PROTECTION
+   DUPLICATE PROTECTION
    ========================================================= */
 
 const processedGiftEvents = new Map();
 
 const GIFT_TTL = 60 * 1000;
-
-/*
- * Untuk gift streak, TikTok dapat mengirim:
- *
- * repeatCount = 1
- * repeatCount = 2
- * repeatCount = 3
- * ...
- * repeatEnd = true
- *
- * Kita hanya menghitung event terakhir.
- */
-
-/* =========================================================
-   FALLBACK GIFT CATALOG
-   =========================================================
- *
- * Nilai di sini adalah HARGA COIN GIFT TIKTOK,
- * bukan payout diamond.
- *
- * Contoh:
- *
- * Rose        = 1
- * Finger Heart = 5
- * Hand Heart  = 100
- *
- * Kalau TikTok mengirim diamondCount langsung,
- * nilainya akan dipakai terlebih dahulu.
- *
- * Catalog ini menjadi fallback berdasarkan giftId/nama.
- */
-
-const FALLBACK_GIFT_CATALOG = {
-
-  /* Rose */
-  "5655": 1,
-
-  /* Finger Heart / Jari Hati */
-  "5487": 5,
-
-  /* Hand Heart / Tangan Bentuk Hati */
-  "6968": 100,
-
-  /* Hearts */
-  "5586": 199
-
-};
-
-/* Nama gift fallback */
-const FALLBACK_GIFT_NAME_CATALOG = {
-  "rose": 1,
-  "mawar": 1,
-
-  "finger heart": 5,
-  "jari hati": 5,
-
-  "hand heart": 100,
-  "tangan bentuk hati": 100,
-
-  "hearts": 199,
-  "hati": 199
-};
 
 /* =========================================================
    CONNECTOR LOADER
@@ -358,11 +296,6 @@ function getUserData(event) {
     event?.profilePicture ||
     null;
 
-  /*
-   * Beberapa versi connector memakai
-   * profilePictureUrls.
-   */
-
   if (
     !avatar &&
     Array.isArray(
@@ -411,22 +344,28 @@ function getUserData(event) {
 }
 
 /* =========================================================
-   GET GIFT UNIT COINS
+   AMBIL COIN LANGSUNG DARI DATA TIKTOK
+   =========================================================
+   
+   PENTING:
+   
+   TIDAK ADA:
+   - nama gift sebagai harga
+   - Gift ID sebagai harga
+   - catalog buatan sendiri
+   - harga manual
+   - fallback
+   
+   Hanya nilai coin/diamond yang ada di event TikTok.
+   
    ========================================================= */
 
-function getGiftUnitCoins(
-  event,
-  giftId,
-  giftName
-) {
+function getTikTokCoinValue(event) {
   /*
-   * Prioritas 1:
-   *
-   * coinValue / coinCount jika connector
-   * menyediakannya.
+   * Prioritas nilai coin langsung.
    */
 
-  const directCoinValue =
+  const directCoin =
     numberPositive(
       event?.coinValue,
       event?.coin_value,
@@ -444,93 +383,48 @@ function getGiftUnitCoins(
       event?.giftDetails?.coin_count
     );
 
-  if (
-    directCoinValue > 0
-  ) {
-    return directCoinValue;
+  if (directCoin > 0) {
+    return directCoin;
   }
 
   /*
-   * Prioritas 2:
+   * Nilai diamondCount dari event TikTok.
    *
-   * diamondCount / diamond_count.
-   *
-   * Pada katalog gift connector ini,
-   * diamond_count digunakan sebagai harga
-   * gift per unit.
-   *
-   * Contoh:
-   *
-   * Finger Heart = 5
-   * Rose = 1
+   * Pada connector, diamondCount merupakan
+   * nilai coin/diamond gift per unit.
    */
 
-  const catalogDiamondValue =
+  const diamondCount =
     numberPositive(
       event?.diamondCount,
       event?.diamond_count,
 
       event?.gift?.diamondCount,
       event?.gift?.diamond_count,
-      event?.gift?.diamondCost,
-      event?.gift?.diamond_cost,
 
       event?.giftDetails?.diamondCount,
       event?.giftDetails?.diamond_count,
-      event?.giftDetails?.diamondCost,
-      event?.giftDetails?.diamond_cost,
 
       event?.extendedGiftInfo?.diamondCount,
-      event?.extendedGiftInfo?.diamond_count,
-      event?.extendedGiftInfo?.diamondCost,
-      event?.extendedGiftInfo?.diamond_cost
+      event?.extendedGiftInfo?.diamond_count
     );
 
-  if (
-    catalogDiamondValue > 0
-  ) {
-    return catalogDiamondValue;
+  if (diamondCount > 0) {
+    return diamondCount;
   }
 
   /*
-   * Prioritas 3:
-   * fallback berdasarkan gift ID.
-   */
-
-  const id =
-    String(giftId || "");
-
-  if (
-    FALLBACK_GIFT_CATALOG[id]
-  ) {
-    return FALLBACK_GIFT_CATALOG[id];
-  }
-
-  /*
-   * Prioritas 4:
-   * fallback berdasarkan nama.
-   */
-
-  const name =
-    String(giftName || "")
-      .trim()
-      .toLowerCase();
-
-  if (
-    FALLBACK_GIFT_NAME_CATALOG[name]
-  ) {
-    return FALLBACK_GIFT_NAME_CATALOG[name];
-  }
-
-  /*
-   * Tidak diketahui.
+   * TIDAK ADA FALLBACK.
+   *
+   * Kalau TikTok tidak mengirim nilai,
+   * jangan menebak.
    */
 
   return 0;
 }
 
 /* =========================================================
-   GIFT DATA
+   PARSE GIFT
    ========================================================= */
 
 function parseGift(event) {
@@ -540,6 +434,11 @@ function parseGift(event) {
 
   const user =
     getUserData(event);
+
+  /*
+   * Nama dan ID hanya untuk informasi.
+   * TIDAK PERNAH dipakai untuk menentukan coin.
+   */
 
   const giftId =
     String(
@@ -552,14 +451,6 @@ function parseGift(event) {
       ""
     );
 
-  if (!giftId) {
-    console.warn(
-      "[Gift] Gift ID tidak ditemukan."
-    );
-
-    return null;
-  }
-
   const giftName =
     event.giftName ||
     event.gift_name ||
@@ -567,31 +458,56 @@ function parseGift(event) {
     event.gift?.name ||
     event.giftDetails?.giftName ||
     event.giftDetails?.name ||
-    (
-      giftId
-        ? `Gift #${giftId}`
-        : "Gift"
-    );
+    "Gift";
+
+  /* =======================================================
+     NILAI COIN TIKTOK
+     ======================================================= */
+
+  const tikTokCoin =
+    getTikTokCoinValue(event);
 
   /*
-   * Nilai 1 gift.
+   * Kalau TikTok tidak memberikan nilai coin,
+   * STOP.
    *
-   * CONTOH:
-   *
-   * Finger Heart = 5
-   * Rose = 1
+   * Jangan menggunakan nama.
+   * Jangan menggunakan ID.
+   * Jangan mengarang harga.
    */
 
-  const giftUnitCoins =
-    getGiftUnitCoins(
-      event,
-      giftId,
+  if (
+    tikTokCoin <= 0
+  ) {
+    console.warn(
+      "[Gift] COIN TIKTOK TIDAK DITEMUKAN."
+    );
+
+    console.warn(
+      "[Gift] Gift diabaikan agar tidak salah hitung."
+    );
+
+    console.log(
+      "[Gift] Nama hanya informasi:",
       giftName
     );
 
-  /*
-   * Repeat count.
-   */
+    console.log(
+      "[Gift] ID hanya informasi:",
+      giftId
+    );
+
+    console.log(
+      "[Gift] Event:",
+      JSON.stringify(event)
+    );
+
+    return null;
+  }
+
+  /* =======================================================
+     REPEAT COUNT
+     ======================================================= */
 
   const repeatCount =
     Math.max(
@@ -612,11 +528,9 @@ function parseGift(event) {
       )
     );
 
-  /*
-   * Gift type.
-   *
-   * 1 = streakable.
-   */
+  /* =======================================================
+     GIFT TYPE
+     ======================================================= */
 
   const giftType =
     Number(
@@ -629,9 +543,9 @@ function parseGift(event) {
       0
     );
 
-  /*
-   * Repeat end.
-   */
+  /* =======================================================
+     REPEAT END
+     ======================================================= */
 
   const repeatValue =
     event.repeatEnd ??
@@ -646,24 +560,12 @@ function parseGift(event) {
     repeatValue === "true";
 
   /*
-   * ======================================================
-   * STREAK PROTECTION
-   * ======================================================
+   * Gift streak:
    *
-   * Jangan proses event sementara.
+   * Selama belum selesai, jangan kirim.
    *
-   * Untuk gift type 1:
-   *
-   * repeatCount 1 -> jangan hitung
-   * repeatCount 2 -> jangan hitung
-   * repeatCount 3 -> jangan hitung
-   * repeatEnd true -> hitung 3 x harga gift
-   *
-   * Jadi:
-   *
-   * Jari Hati x5
-   * = 5 x 5
-   * = 25 coin lelang
+   * Saat repeatEnd=true,
+   * kirim jumlah akhirnya.
    */
 
   if (
@@ -671,43 +573,32 @@ function parseGift(event) {
     !repeatEnd
   ) {
     console.log(
-      `[Gift] Streak sementara: @${user.uniqueId} | ${giftName} x${repeatCount}`
+      `[Gift] Streak sementara @${user.uniqueId}: ${repeatCount}x`
     );
 
     return null;
   }
 
-  /*
-   * Kalau harga gift tidak diketahui,
-   * jangan mengarang nilai.
-   */
+  /* =======================================================
+     TOTAL COIN
+     =======================================================
+     
+     INI SATU-SATUNYA PERHITUNGAN.
+     
+     Nilai dari TikTok × jumlah yang dikirim.
+     
+     Tidak memakai nama.
+     Tidak memakai ID.
+     
+     ======================================================= */
 
-  if (
-    giftUnitCoins <= 0
-  ) {
-    console.warn(
-      `[Gift] Nilai coin tidak ditemukan: ${giftName} (${giftId})`
-    );
-
-    return null;
-  }
-
-  /*
-   * TOTAL COIN LELANG.
-   *
-   * Tidak ada ×2.
-   * Tidak ada pembagian.
-   */
-
-  const coinValue =
-    giftUnitCoins *
+  const totalCoin =
+    tikTokCoin *
     repeatCount;
 
-  /*
-   * ======================================================
-   * EVENT ID
-   * ======================================================
-   */
+  /* =======================================================
+     DUPLICATE KEY
+     ======================================================= */
 
   const eventKey =
     String(
@@ -715,14 +606,14 @@ function parseGift(event) {
       event.transactionId ||
       event.transaction_id ||
       event.messageId ||
-      `${event.groupId || ""}|${user.userId}|${giftId}|${repeatCount}|${event.createTime || event.timestamp || ""}|${repeatEnd}`
+      `${event.groupId || ""}|${user.userId}|${repeatCount}|${event.createTime || event.timestamp || ""}|${repeatEnd}`
     );
 
   const now =
     Date.now();
 
   /*
-   * Hapus event lama.
+   * Bersihkan event lama.
    */
 
   for (
@@ -742,7 +633,7 @@ function parseGift(event) {
   }
 
   /*
-   * Duplicate protection.
+   * Cegah event yang sama masuk dua kali.
    */
 
   if (
@@ -762,9 +653,9 @@ function parseGift(event) {
     now
   );
 
-  /*
-   * LOG YANG JELAS
-   */
+  /* =======================================================
+     LOG
+     ======================================================= */
 
   console.log(
     "================================================"
@@ -775,32 +666,37 @@ function parseGift(event) {
   );
 
   console.log(
-    `Gift       : ${giftName}`
+    `Coin TikTok : ${tikTokCoin}`
   );
 
   console.log(
-    `Gift ID    : ${giftId}`
+    `Jumlah      : ${repeatCount}x`
   );
 
   console.log(
-    `Harga 1x   : ${giftUnitCoins} coin`
+    `TOTAL LELANG: ${totalCoin} coin`
+  );
+
+  /*
+   * Nama dan ID hanya ditampilkan untuk debugging.
+   * BUKAN sumber harga.
+   */
+
+  console.log(
+    `Nama gift   : ${giftName}`
   );
 
   console.log(
-    `Jumlah     : ${repeatCount}x`
-  );
-
-  console.log(
-    `TOTAL      : ${coinValue} coin lelang`
-  );
-
-  console.log(
-    `Avatar     : ${user.avatar ? "ADA" : "TIDAK ADA"}`
+    `Gift ID     : ${giftId || "-"}`
   );
 
   console.log(
     "================================================"
   );
+
+  /* =======================================================
+     DATA KE WEB LELANG
+     ======================================================= */
 
   return {
     username:
@@ -815,15 +711,23 @@ function parseGift(event) {
     avatar:
       user.avatar,
 
+    /*
+     * Informasi saja.
+     */
+
     giftName,
 
     giftId,
 
     /*
-     * Harga 1 gift.
+     * Nilai coin asli dari TikTok.
      */
 
-    giftUnitCoins,
+    giftUnitCoins:
+      tikTokCoin,
+
+    diamondCount:
+      tikTokCoin,
 
     /*
      * Jumlah gift.
@@ -832,20 +736,11 @@ function parseGift(event) {
     repeatCount,
 
     /*
-     * TOTAL NILAI LELANG.
-     *
-     * Ini yang dipakai app.js.
+     * TOTAL YANG MASUK WEB LELANG.
      */
 
-    coinValue,
-
-    /*
-     * Tetap kirim field ini
-     * untuk kompatibilitas/debug.
-     */
-
-    diamondCount:
-      giftUnitCoins,
+    coinValue:
+      totalCoin,
 
     giftType,
 
@@ -1005,20 +900,14 @@ async function connectToLive(
     `Mencari LIVE @${username}...`
   );
 
-  /*
-   * Options
-   */
-
   const options = {
     processInitialData: false,
 
     fetchRoomInfoOnConnect: false,
 
     /*
-     * Tetap false.
-     *
-     * Nilai gift utama berasal dari
-     * event gift + fallback catalog.
+     * Tidak menggunakan catalog gift
+     * buatan aplikasi.
      */
 
     enableExtendedGiftInfo: false,
@@ -1089,6 +978,11 @@ async function connectToLive(
       if (!gift) {
         return;
       }
+
+      /*
+       * coinValue sudah dihitung
+       * hanya dari data TikTok.
+       */
 
       io.emit(
         "live:gift",
@@ -1718,6 +1612,10 @@ server.listen(
           ? "YA"
           : "TIDAK"
       }`
+    );
+
+    console.log(
+      "MODE COIN: HANYA DATA COIN TIKTOK"
     );
 
     console.log(

@@ -172,3 +172,22 @@ body{background:#09090b}
 .auction-board-dashboard .ranking-section .section-title h2{font-size:24px!important}
 .ranking-list{max-height:calc(100vh - 270px)!important;min-height:420px!important;padding-bottom:10px!important}
 @media(max-width:480px){.ranking-list{max-height:calc(100vh - 240px)!important;min-height:470px!important}.auction-board-dashboard .ranking-section .section-title h2{font-size:21px!important}}
+
+/* Judul lelang diperpanjang ke bawah */
+.auction-board-dashboard .auction-title-card{
+  min-height: 190px!important;
+  display:flex!important;
+  flex-direction:column!important;
+  justify-content:flex-start!important;
+}
+.auction-board-dashboard .auction-title-card h2{
+  min-height: 120px!important;
+  display:flex!important;
+  align-items:center!important;
+  overflow-wrap:anywhere!important;
+  white-space:normal!important;
+}
+@media(max-width:480px){
+  .auction-board-dashboard .auction-title-card{min-height:170px!important}
+  .auction-board-dashboard .auction-title-card h2{min-height:105px!important}
+}

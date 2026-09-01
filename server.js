@@ -1054,3 +1054,57 @@ app.get(
       },
 
      
+/*
+|--------------------------------------------------------------------------
+| HEALTH CHECK
+|--------------------------------------------------------------------------
+*/
+
+app.get("/health", (req, res) => {
+  res.status(200).json({
+    ok: true,
+    service: "tiktok-live-coin-auction",
+    connected: Boolean(liveConnection),
+    username: activeUsername,
+    auctionActive
+  });
+});
+
+/*
+|--------------------------------------------------------------------------
+| FRONTEND
+|--------------------------------------------------------------------------
+*/
+
+app.get("/", (req, res) => {
+  res.sendFile(__dirname + "/index.html");
+});
+
+/*
+|--------------------------------------------------------------------------
+| SERVER
+|--------------------------------------------------------------------------
+*/
+
+const PORT = process.env.PORT || 3000;
+
+server.listen(PORT, "0.0.0.0", () => {
+  console.log("==============================================");
+  console.log(`Server berjalan di port ${PORT}`);
+  console.log("TikTok Live Coin Auction siap.");
+  console.log("==============================================");
+});
+
+/*
+|--------------------------------------------------------------------------
+| PROCESS ERROR HANDLERS
+|--------------------------------------------------------------------------
+*/
+
+process.on("unhandledRejection", (reason) => {
+  console.error("[PROCESS] Unhandled Promise Rejection:", reason);
+});
+
+process.on("uncaughtException", (error) => {
+  console.error("[PROCESS] Uncaught Exception:", error);
+});

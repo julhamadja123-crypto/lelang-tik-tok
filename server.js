@@ -58,9 +58,9 @@ function cleanupProcessedGiftEvents(now = Date.now()) {
 function getGiftData(event) {
   // Format utama connector v2 memakai field level atas.
   // Beberapa versi masih menyimpan data di giftDetails / gift / extendedGiftInfo.
-  const details = event.giftDetails || event.giftInfo || {};
+  const details = event.giftDetails || event.giftInfo || event.gift || {};
   const rawGift = event.gift || {};
-  const extended = event.extendedGiftInfo || {};
+  const extended = event.extendedGiftInfo || event.giftDetails?.extendedGiftInfo || {};
 
   const giftId = String(
     event.giftId ?? details.giftId ?? details.gift_id ?? rawGift.giftId ?? rawGift.gift_id ?? extended.id ?? ''
@@ -81,7 +81,12 @@ function getGiftData(event) {
     extended.diamondCount,
     extended.diamond_count,
     extended.diamondCost,
-    extended.diamond_cost
+    extended.diamond_cost,
+    event.gift?.diamondCount,
+    event.gift?.diamond_count,
+    event.gift?.diamondCost,
+    event.gift?.diamond_cost,
+    event.giftDetails?.gift?.diamondCount
   );
 
   const repeatCount = Math.max(1, Math.floor(toPositiveNumber(
@@ -104,13 +109,15 @@ function getGiftData(event) {
   if (giftType === 1 && !repeatEnd) return null;
 
   if (!giftId || diamondCount <= 0) {
-    console.warn('Gift diabaikan karena ID/harga TikTok tidak lengkap', {
-      giftId,
-      giftName,
-      diamondCount,
-      repeatCount,
-      msgId: event.msgId,
-      groupId: event.groupId
+    const debug = {
+      giftId, giftName, diamondCount, repeatCount,
+      msgId: event.msgId, groupId: event.groupId,
+      keys: Object.keys(event || {})
+    };
+    console.warn('Gift diterima tetapi nilai coin belum terbaca', debug);
+    io.emit('live:gift-debug', {
+      message: `Gift ${giftName} diterima, tetapi harga coin belum terbaca dari TikTok. Pastikan server memakai koneksi gift info terbaru.`,
+      debug
     });
     return null;
   }
@@ -166,14 +173,14 @@ async function connectToLive(rawUsername) {
   const conn = new TikTokLiveConnection(username, {
     processInitialData: false,
     fetchRoomInfoOnConnect: true,
-    enableExtendedGiftInfo: false,
+    enableExtendedGiftInfo: true,
     requestPollingIntervalMs: 1000
   });
 
   liveConnection = conn;
 
   conn.on(WebcastEvent.GIFT, (event) => {
-    // Gift sebelum tombol Mulai atau setelah lelang selesai tidak dihitung.
+    console.log("Gift event diterima", { active: auctionActive, giftId: event?.giftId, giftName: event?.giftName });
     if (!auctionActive) return;
     const gift = getGiftData(event);
     if (!gift) return;

@@ -1,1 +1,38 @@
-<!DOCTYPE html><html lang="id"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Coin Auction Overlay V3</title><link rel="stylesheet" href="overlay.css"></head><body><div class="overlay"><header><div class="live"><i></i> LIVE AUCTION</div><div class="total">🪙 <b id="totalCoins">0</b> COIN</div></header><section class="hero"><div class="title-line"></div><h1 id="auctionTitle">LIVE COIN AUCTION</h1><p>TOP PESERTA SAAT INI</p><small>SISA WAKTU</small><div id="timer">05:00</div><div class="progress"><span id="progressBar"></span></div></section><main id="rankingList"></main><footer>● GIFT = TAMBAH COIN &nbsp;&nbsp; • &nbsp;&nbsp; COIN TERBANYAK MENANG</footer></div><div id="winnerPopup"><div><span>👑</span><p>PEMENANG LELANG</p><h2 id="winnerName">-</h2><strong id="winnerCoins">0 COIN</strong></div></div><script src="/socket.io/socket.io.js"></script><script src="overlay.js"></script></body></html>
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Coin Auction Overlay Simple</title>
+<link rel="stylesheet" href="overlay.css">
+</head>
+<body>
+<div class="overlay">
+  <div class="simple-panel">
+    <section class="title-section">
+      <h1 id="auctionTitle">TOP 1-3 SAMAKAN TIGA GAMBAR (NOMINIM COIN) WAJIB LOVE OREN DI AWAL 🧡 GA LOVE OREN GA SAH</h1>
+    </section>
+
+    <section class="timer-section">
+      <div id="timer">05:00</div>
+      <div class="timer-label">Waktu Tambahan(detik)</div>
+      <div class="progress"><span id="progressBar"></span></div>
+    </section>
+
+    <section class="participants-box">
+      <div class="participants-head">
+        <span class="box-label">PESERTA SAAT INI</span>
+        <span class="participants-total">REALTIME</span>
+      </div>
+      <main id="rankingList"></main>
+    </section>
+
+    <div class="coin-total">🪙 <b id="totalCoins">0</b> COIN</div>
+  </div>
+</div>
+
+<div id="winnerPopup"><div><span>👑</span><p>PEMENANG LELANG</p><h2 id="winnerName">-</h2><strong id="winnerCoins">0 COIN</strong></div></div>
+<script src="/socket.io/socket.io.js"></script>
+<script src="overlay.js"></script>
+</body>
+</html>

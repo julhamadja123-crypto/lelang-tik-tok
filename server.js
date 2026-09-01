@@ -344,56 +344,26 @@ function getUserData(event) {
 }
 
 /* =========================================================
-   AMBIL COIN LANGSUNG DARI DATA TIKTOK
+   TIKTOK COIN VALUE
    =========================================================
-   
+
    PENTING:
-   
-   TIDAK ADA:
-   - nama gift sebagai harga
-   - Gift ID sebagai harga
-   - catalog buatan sendiri
-   - harga manual
-   - fallback
-   
-   Hanya nilai coin/diamond yang ada di event TikTok.
-   
+
+   HANYA diamondCount yang digunakan sebagai
+   nilai 1 gift.
+
+   TIDAK menggunakan:
+   - coinValue
+   - coinCount
+   - coin_value
+   - coin_count
+
+   Karena field tersebut tidak kita jadikan
+   sumber harga gift.
+
    ========================================================= */
 
 function getTikTokCoinValue(event) {
-  /*
-   * Prioritas nilai coin langsung.
-   */
-
-  const directCoin =
-    numberPositive(
-      event?.coinValue,
-      event?.coin_value,
-      event?.coinCount,
-      event?.coin_count,
-
-      event?.gift?.coinValue,
-      event?.gift?.coin_value,
-      event?.gift?.coinCount,
-      event?.gift?.coin_count,
-
-      event?.giftDetails?.coinValue,
-      event?.giftDetails?.coin_value,
-      event?.giftDetails?.coinCount,
-      event?.giftDetails?.coin_count
-    );
-
-  if (directCoin > 0) {
-    return directCoin;
-  }
-
-  /*
-   * Nilai diamondCount dari event TikTok.
-   *
-   * Pada connector, diamondCount merupakan
-   * nilai coin/diamond gift per unit.
-   */
-
   const diamondCount =
     numberPositive(
       event?.diamondCount,
@@ -413,14 +383,159 @@ function getTikTokCoinValue(event) {
     return diamondCount;
   }
 
+  return 0;
+}
+
+/* =========================================================
+   GET REPEAT COUNT
+   ========================================================= */
+
+function getRepeatCount(event) {
+  const repeatCount =
+    numberPositive(
+      event?.repeatCount,
+      event?.repeat_count,
+
+      event?.gift?.repeatCount,
+      event?.gift?.repeat_count,
+
+      event?.giftDetails?.repeatCount,
+      event?.giftDetails?.repeat_count
+    );
+
+  if (repeatCount <= 0) {
+    return 1;
+  }
+
+  return Math.max(
+    1,
+    Math.floor(repeatCount)
+  );
+}
+
+/* =========================================================
+   GET GIFT TYPE
+   ========================================================= */
+
+function getGiftType(event) {
+  const value =
+    event?.giftType ??
+    event?.gift_type ??
+    event?.gift?.giftType ??
+    event?.gift?.gift_type ??
+    event?.giftDetails?.giftType ??
+    event?.giftDetails?.gift_type ??
+    0;
+
+  const result =
+    Number(value);
+
+  return Number.isFinite(result)
+    ? result
+    : 0;
+}
+
+/* =========================================================
+   GET REPEAT END
+   ========================================================= */
+
+function getRepeatEnd(event) {
+  const value =
+    event?.repeatEnd ??
+    event?.repeat_end ??
+    event?.gift?.repeatEnd ??
+    event?.gift?.repeat_end ??
+    event?.giftDetails?.repeatEnd ??
+    event?.giftDetails?.repeat_end;
+
+  return (
+    value === true ||
+    value === 1 ||
+    value === "1" ||
+    value === "true"
+  );
+}
+
+/* =========================================================
+   DUPLICATE CLEANUP
+   ========================================================= */
+
+function cleanupGiftEvents() {
+  const now =
+    Date.now();
+
+  for (
+    const [
+      key,
+      time
+    ] of processedGiftEvents
+  ) {
+    if (
+      now - time >
+      GIFT_TTL
+    ) {
+      processedGiftEvents.delete(
+        key
+      );
+    }
+  }
+}
+
+/* =========================================================
+   CREATE DUPLICATE KEY
+   ========================================================= */
+
+function createGiftEventKey(
+  event,
+  user,
+  repeatCount,
+  repeatEnd
+) {
   /*
-   * TIDAK ADA FALLBACK.
-   *
-   * Kalau TikTok tidak mengirim nilai,
-   * jangan menebak.
+   * Gunakan ID event TikTok jika tersedia.
    */
 
-  return 0;
+  const stableId =
+    event?.msgId ||
+    event?.msg_id ||
+    event?.transactionId ||
+    event?.transaction_id ||
+    event?.messageId ||
+    event?.message_id;
+
+  if (stableId) {
+    return String(stableId);
+  }
+
+  /*
+   * Kalau tidak ada ID,
+   * buat fingerprint dari data event.
+   */
+
+  return [
+    event?.groupId ||
+      event?.group_id ||
+      "",
+
+    user.userId,
+
+    event?.giftId ||
+      event?.gift_id ||
+      event?.gift?.giftId ||
+      event?.gift?.gift_id ||
+      "",
+
+    repeatCount,
+
+    event?.createTime ||
+      event?.create_time ||
+      event?.timestamp ||
+      "",
+
+    repeatEnd
+      ? "END"
+      : "LIVE"
+  ].join("|");
 }
 
 /* =========================================================
@@ -435,10 +550,9 @@ function parseGift(event) {
   const user =
     getUserData(event);
 
-  /*
-   * Nama dan ID hanya untuk informasi.
-   * TIDAK PERNAH dipakai untuk menentukan coin.
-   */
+  /* =======================================================
+     GIFT NAME / ID
+     ======================================================= */
 
   const giftId =
     String(
@@ -461,20 +575,11 @@ function parseGift(event) {
     "Gift";
 
   /* =======================================================
-     NILAI COIN TIKTOK
+     NILAI DASAR GIFT
      ======================================================= */
 
   const tikTokCoin =
     getTikTokCoinValue(event);
-
-  /*
-   * Kalau TikTok tidak memberikan nilai coin,
-   * STOP.
-   *
-   * Jangan menggunakan nama.
-   * Jangan menggunakan ID.
-   * Jangan mengarang harga.
-   */
 
   if (
     tikTokCoin <= 0
@@ -488,18 +593,13 @@ function parseGift(event) {
     );
 
     console.log(
-      "[Gift] Nama hanya informasi:",
+      "[Gift] Nama:",
       giftName
     );
 
     console.log(
-      "[Gift] ID hanya informasi:",
+      "[Gift] ID:",
       giftId
-    );
-
-    console.log(
-      "[Gift] Event:",
-      JSON.stringify(event)
     );
 
     return null;
@@ -510,62 +610,30 @@ function parseGift(event) {
      ======================================================= */
 
   const repeatCount =
-    Math.max(
-      1,
-      Math.floor(
-        numberPositive(
-          event.repeatCount,
-          event.repeat_count,
-
-          event.gift?.repeatCount,
-          event.gift?.repeat_count,
-
-          event.giftDetails?.repeatCount,
-          event.giftDetails?.repeat_count,
-
-          1
-        )
-      )
-    );
+    getRepeatCount(event);
 
   /* =======================================================
      GIFT TYPE
      ======================================================= */
 
   const giftType =
-    Number(
-      event.giftType ??
-      event.gift_type ??
-      event.gift?.giftType ??
-      event.gift?.gift_type ??
-      event.giftDetails?.giftType ??
-      event.giftDetails?.gift_type ??
-      0
-    );
+    getGiftType(event);
 
   /* =======================================================
      REPEAT END
      ======================================================= */
 
-  const repeatValue =
-    event.repeatEnd ??
-    event.repeat_end ??
-    event.gift?.repeatEnd ??
-    event.gift?.repeat_end;
-
   const repeatEnd =
-    repeatValue === true ||
-    repeatValue === 1 ||
-    repeatValue === "1" ||
-    repeatValue === "true";
+    getRepeatEnd(event);
+
+  /* =======================================================
+     STREAK HANDLING
+     ======================================================= */
 
   /*
-   * Gift streak:
+   * giftType 1 = gift yang dapat melakukan streak.
    *
-   * Selama belum selesai, jangan kirim.
-   *
-   * Saat repeatEnd=true,
-   * kirim jumlah akhirnya.
+   * Event sebelum streak selesai tidak dihitung.
    */
 
   if (
@@ -581,15 +649,6 @@ function parseGift(event) {
 
   /* =======================================================
      TOTAL COIN
-     =======================================================
-     
-     INI SATU-SATUNYA PERHITUNGAN.
-     
-     Nilai dari TikTok × jumlah yang dikirim.
-     
-     Tidak memakai nama.
-     Tidak memakai ID.
-     
      ======================================================= */
 
   const totalCoin =
@@ -597,44 +656,66 @@ function parseGift(event) {
     repeatCount;
 
   /* =======================================================
-     DUPLICATE KEY
+     LOG PERHITUNGAN
      ======================================================= */
 
+  console.log(
+    "================================================"
+  );
+
+  console.log(
+    "[GIFT CHECK]"
+  );
+
+  console.log(
+    `User        : @${user.uniqueId}`
+  );
+
+  console.log(
+    `diamondCount: ${tikTokCoin}`
+  );
+
+  console.log(
+    `repeatCount : ${repeatCount}`
+  );
+
+  console.log(
+    `giftType    : ${giftType}`
+  );
+
+  console.log(
+    `repeatEnd   : ${repeatEnd}`
+  );
+
+  console.log(
+    `TOTAL       : ${totalCoin}`
+  );
+
+  console.log(
+    `Nama gift   : ${giftName}`
+  );
+
+  console.log(
+    `Gift ID     : ${giftId || "-"}`
+  );
+
+  console.log(
+    "================================================"
+  );
+
+  /* =======================================================
+     DUPLICATE PROTECTION
+     ======================================================= */
+
+  cleanupGiftEvents();
+
   const eventKey =
-    String(
-      event.msgId ||
-      event.transactionId ||
-      event.transaction_id ||
-      event.messageId ||
-      `${event.groupId || ""}|${user.userId}|${repeatCount}|${event.createTime || event.timestamp || ""}|${repeatEnd}`
+    createGiftEventKey(
+      event,
+      user,
+      repeatCount,
+      repeatEnd
     );
-
-  const now =
-    Date.now();
-
-  /*
-   * Bersihkan event lama.
-   */
-
-  for (
-    const [
-      key,
-      time
-    ] of processedGiftEvents
-  ) {
-    if (
-      now - time >
-      GIFT_TTL
-    ) {
-      processedGiftEvents.delete(
-        key
-      );
-    }
-  }
-
-  /*
-   * Cegah event yang sama masuk dua kali.
-   */
 
   if (
     processedGiftEvents.has(
@@ -650,52 +731,11 @@ function parseGift(event) {
 
   processedGiftEvents.set(
     eventKey,
-    now
+    Date.now()
   );
 
   /* =======================================================
-     LOG
-     ======================================================= */
-
-  console.log(
-    "================================================"
-  );
-
-  console.log(
-    `[GIFT] @${user.uniqueId}`
-  );
-
-  console.log(
-    `Coin TikTok : ${tikTokCoin}`
-  );
-
-  console.log(
-    `Jumlah      : ${repeatCount}x`
-  );
-
-  console.log(
-    `TOTAL LELANG: ${totalCoin} coin`
-  );
-
-  /*
-   * Nama dan ID hanya ditampilkan untuk debugging.
-   * BUKAN sumber harga.
-   */
-
-  console.log(
-    `Nama gift   : ${giftName}`
-  );
-
-  console.log(
-    `Gift ID     : ${giftId || "-"}`
-  );
-
-  console.log(
-    "================================================"
-  );
-
-  /* =======================================================
-     DATA KE WEB LELANG
+     HASIL
      ======================================================= */
 
   return {
@@ -711,17 +751,9 @@ function parseGift(event) {
     avatar:
       user.avatar,
 
-    /*
-     * Informasi saja.
-     */
-
     giftName,
 
     giftId,
-
-    /*
-     * Nilai coin asli dari TikTok.
-     */
 
     giftUnitCoins:
       tikTokCoin,
@@ -729,15 +761,7 @@ function parseGift(event) {
     diamondCount:
       tikTokCoin,
 
-    /*
-     * Jumlah gift.
-     */
-
     repeatCount,
-
-    /*
-     * TOTAL YANG MASUK WEB LELANG.
-     */
 
     coinValue:
       totalCoin,
@@ -748,6 +772,7 @@ function parseGift(event) {
 
     msgId:
       event.msgId ||
+      event.msg_id ||
       null,
 
     transactionId:
@@ -905,11 +930,6 @@ async function connectToLive(
 
     fetchRoomInfoOnConnect: false,
 
-    /*
-     * Tidak menggunakan catalog gift
-     * buatan aplikasi.
-     */
-
     enableExtendedGiftInfo: false,
 
     webClientOptions: {
@@ -978,11 +998,6 @@ async function connectToLive(
       if (!gift) {
         return;
       }
-
-      /*
-       * coinValue sudah dihitung
-       * hanya dari data TikTok.
-       */
 
       io.emit(
         "live:gift",
@@ -1254,452 +1269,4 @@ async function connectToLive(
 
     const roomId =
       state?.roomId ||
-      connection?.roomId ||
-      "";
-
-    console.log(
-      "================================================"
-    );
-
-    console.log(
-      `[TikTok] BERHASIL TERHUBUNG @${username}`
-    );
-
-    console.log(
-      `[TikTok] Room ID: ${roomId || "unknown"}`
-    );
-
-    console.log(
-      "================================================"
-    );
-
-    emitStatus(
-      `Terhubung ke LIVE @${username}`,
-      true
-    );
-
-    io.emit(
-      "live:connected",
-      {
-        username,
-        roomId:
-          roomId || null
-      }
-    );
-
-    return state;
-
-  } catch (err) {
-    if (
-      liveConnection ===
-      connection
-    ) {
-      liveConnection =
-        null;
-    }
-
-    const friendly =
-      formatError(err);
-
-    console.error(
-      "================================================"
-    );
-
-    console.error(
-      `[TikTok] GAGAL CONNECT @${username}`
-    );
-
-    console.error(
-      "Friendly:",
-      friendly
-    );
-
-    console.error(
-      "Original:",
-      err
-    );
-
-    console.error(
-      "Message:",
-      err?.message
-    );
-
-    console.error(
-      "Reason:",
-      err?.reason
-    );
-
-    console.error(
-      "Request ID:",
-      err?.requestId
-    );
-
-    console.error(
-      "Agent ID:",
-      err?.agentId
-    );
-
-    console.error(
-      "================================================"
-    );
-
-    emitStatus(
-      `Gagal terhubung @${username}: ${friendly}`
-    );
-
-    throw err;
-  }
-}
-
-/* =========================================================
-   SOCKET.IO
-   ========================================================= */
-
-io.on(
-  "connection",
-  (socket) => {
-    console.log(
-      `[Socket] Client terhubung: ${socket.id}`
-    );
-
-    const connected =
-      Boolean(
-        liveConnection?.isConnected ||
-        liveConnection?.state?.isConnected
-      );
-
-    socket.emit(
-      "live:status",
-      {
-        ok: connected,
-
-        connected,
-
-        username:
-          activeUsername ||
-          null,
-
-        message:
-          connected
-            ? `Terhubung ke @${activeUsername}`
-            : "Belum terhubung ke TikTok LIVE"
-      }
-    );
-
-    /* =====================================================
-       LIVE CONNECT
-       ===================================================== */
-
-    socket.on(
-      "live:connect",
-      async (data = {}) => {
-        const username =
-          cleanUsername(
-            data.username
-          );
-
-        if (!username) {
-          socket.emit(
-            "live:error",
-            {
-              message:
-                "Masukkan username TikTok terlebih dahulu."
-            }
-          );
-
-          return;
-        }
-
-        try {
-          await connectToLive(
-            username
-          );
-
-          socket.emit(
-            "live:connected",
-            {
-              username
-            }
-          );
-
-        } catch (err) {
-          console.error(
-            "[Socket] live:connect:",
-            err
-          );
-
-          socket.emit(
-            "live:error",
-            {
-              message:
-                formatError(err),
-
-              raw:
-                err?.message ||
-                String(err)
-            }
-          );
-        }
-      }
-    );
-
-    /* =====================================================
-       AUCTION STATE
-       ===================================================== */
-
-    socket.on(
-      "auction:state",
-      (data = {}) => {
-        auctionActive =
-          Boolean(
-            data.active
-          );
-
-        console.log(
-          `[Auction] ${
-            auctionActive
-              ? "ACTIVE"
-              : "INACTIVE"
-          }`
-        );
-
-        io.emit(
-          "auction:state",
-          {
-            active:
-              auctionActive
-          }
-        );
-      }
-    );
-
-    /* =====================================================
-       DISCONNECT TIKTOK
-       ===================================================== */
-
-    socket.on(
-      "live:disconnect",
-      async () => {
-        console.log(
-          "[Socket] User meminta disconnect TikTok."
-        );
-
-        auctionActive = false;
-
-        await stopConnection();
-
-        activeUsername = null;
-
-        io.emit(
-          "auction:state",
-          {
-            active: false
-          }
-        );
-
-        emitStatus(
-          "Koneksi TikTok LIVE diputus."
-        );
-      }
-    );
-
-    /* =====================================================
-       SOCKET DISCONNECT
-       ===================================================== */
-
-    socket.on(
-      "disconnect",
-      () => {
-        console.log(
-          `[Socket] Client terputus: ${socket.id}`
-        );
-      }
-    );
-  }
-);
-
-/* =========================================================
-   HEALTH CHECK
-   ========================================================= */
-
-app.get(
-  "/health",
-  (req, res) => {
-    const connected =
-      Boolean(
-        liveConnection?.isConnected ||
-        liveConnection?.state?.isConnected
-      );
-
-    res.status(200).json({
-      ok: true,
-
-      service:
-        "tiktok-live-coin-auction",
-
-      connected,
-
-      username:
-        activeUsername,
-
-      auctionActive,
-
-      apiKeyConfigured:
-        Boolean(SIGN_API_KEY),
-
-      apiKeyUsed:
-        signingMode === "api-key",
-
-      signingMode
-    });
-  }
-);
-
-/* =========================================================
-   ROOT
-   ========================================================= */
-
-app.get(
-  "/",
-  (req, res) => {
-    res.sendFile(
-      __dirname +
-      "/index.html"
-    );
-  }
-);
-
-/* =========================================================
-   SERVER
-   ========================================================= */
-
-const PORT =
-  Number(
-    process.env.PORT
-  ) || 3000;
-
-server.listen(
-  PORT,
-  "0.0.0.0",
-  () => {
-    console.log(
-      "================================================"
-    );
-
-    console.log(
-      `Server berjalan di port ${PORT}`
-    );
-
-    console.log(
-      "TikTok Live Coin Auction siap."
-    );
-
-    console.log(
-      `Signing mode: ${signingMode}`
-    );
-
-    console.log(
-      `SIGN_API_KEY tersedia: ${
-        SIGN_API_KEY
-          ? "YA"
-          : "TIDAK"
-      }`
-    );
-
-    console.log(
-      `SIGN_API_KEY digunakan: ${
-        signingMode === "api-key"
-          ? "YA"
-          : "TIDAK"
-      }`
-    );
-
-    console.log(
-      "MODE COIN: HANYA DATA COIN TIKTOK"
-    );
-
-    console.log(
-      "================================================"
-    );
-  }
-);
-
-/* =========================================================
-   PROCESS ERROR
-   ========================================================= */
-
-process.on(
-  "unhandledRejection",
-  (reason) => {
-    console.error(
-      "[PROCESS] Unhandled Promise Rejection:",
-      reason
-    );
-  }
-);
-
-process.on(
-  "uncaughtException",
-  (error) => {
-    console.error(
-      "[PROCESS] Uncaught Exception:",
-      error
-    );
-  }
-);
-
-/* =========================================================
-   GRACEFUL SHUTDOWN
-   ========================================================= */
-
-async function shutdown(
-  signal
-) {
-  console.log(
-    `[PROCESS] ${signal} diterima. Shutdown...`
-  );
-
-  manualDisconnect = true;
-
-  try {
-    if (liveConnection) {
-      await liveConnection.disconnect();
-    }
-  } catch (err) {
-    console.warn(
-      "[PROCESS] Disconnect error:",
-      err?.message || err
-    );
-  }
-
-  server.close(
-    () => {
-      console.log(
-        "[PROCESS] Server berhenti."
-      );
-
-      process.exit(0);
-    }
-  );
-
-  setTimeout(
-    () => {
-      process.exit(0);
-    },
-    5000
-  ).unref();
-}
-
-process.on(
-  "SIGTERM",
-  () => {
-    shutdown("SIGTERM");
-  }
-);
-
-process.on(
-  "SIGINT",
-  () => {
-    shutdown("SIGINT");
-  }
-);
+      connection?.roomId

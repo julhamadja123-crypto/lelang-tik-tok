@@ -103,9 +103,15 @@ function setupSocket(){
     const username=d.username||d.nickname||"Viewer";
     const gift=d.giftName||"TikTok Gift";
     const coin=Number(d.coinValue)||0;
+    if(coin<=0){ updateConnectionLog(`Gift ${gift} diterima tetapi nilai coin tidak valid.`,"error"); return; }
     window.addGift(username,gift,coin,d.avatar||d.profilePictureUrl||d.profilePicture||"");
     liveEventCount++;
     const hv=$("heroViewer"); if(hv) hv.textContent=liveEventCount;
+    updateConnectionLog(`Gift masuk: ${username} • ${gift} • +${coin.toLocaleString("id-ID")} coin`,"ok");
+  });
+  socket.on("live:gift-debug",d=>{
+    updateConnectionLog(d.message||"Gift diterima tetapi data coin belum terbaca.","error");
+    console.warn("TikTok gift debug", d.debug||d);
   });
   socket.on("live:error",d=>{
     const msg=d.message||"koneksi gagal";

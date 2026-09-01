@@ -1,4 +1,4 @@
-let title="LIVE COIN AUCTION",duration=300,remaining=300,running=true;
+let title="TOP 1-3 SAMAKAN TIGA GAMBAR (NOMINIM COIN) WAJIB LOVE OREN DI AWAL 🧡 GA LOVE OREN GA SAH",duration=300,remaining=300,running=true;
 let drawDuration=20,drawRemaining=20,inDraw=false,finished=false;
 let users=[{name:"ANDI STORE",coins:1250},{name:"BUDI OFFICIAL",coins:980},{name:"RUDI LIVE",coins:750},{name:"SINTA SHOP",coins:620},{name:"JOKO ID",coins:510}];
 const $=id=>document.getElementById(id);
@@ -12,7 +12,7 @@ function render(){
  $("auctionTitle").textContent=inDraw?"⚡ DRAW TIME ⚡":title;
  $("progressBar").style.width=`${inDraw?((drawDuration-drawRemaining)/drawDuration)*100:((duration-remaining)/duration)*100}%`;
  $("totalCoins").textContent=a.reduce((s,x)=>s+x.coins,0).toLocaleString("id-ID");
- $("rankingList").innerHTML=a.slice(0,5).map((u,i)=>`<div class="rank ${i===0?"first":""} ${inDraw&&i<2?"draw":""}"><div class="place">${m[i]||"#"+(i+1)}</div><div class="user"><div class="avatar">${u.name[0]}</div><div><div class="name">${u.name}</div><div class="sub">${inDraw&&i<2?"⚡ TAMBAH COIN UNTUK MENANG":"PESERTA LIVE"}</div></div></div><div class="coins">${u.coins.toLocaleString("id-ID")}<small>COIN</small></div></div>`).join("");
+ $("rankingList").innerHTML=a.slice(0,5).map((u,i)=>`<div class="rank ${i===0?"first":""} ${inDraw&&i<2?"draw":""}"><div class="box-head"><div class="place">${m[i]||"#"+(i+1)}</div><span>TOP ${i+1}</span></div><div class="user"><div class="avatar">${u.name[0]}</div><div><div class="name">${u.name}</div><div class="sub">${inDraw&&i<2?"⚡ TAMBAH COIN UNTUK MENANG":"PESERTA LIVE"}</div></div></div><div class="coins">${u.coins.toLocaleString("id-ID")}<small>COIN</small></div></div>`).join("");
 }
 function finish(){running=false;finished=true;inDraw=false;let w=[...users].sort((a,b)=>b.coins-a.coins)[0];if(w){$("winnerName").textContent=w.name;$("winnerCoins").textContent=w.coins.toLocaleString("id-ID")+" COIN";$("winnerPopup").classList.add("show")}}
 function endTime(){if(!inDraw){leadersTie()?(inDraw=true,drawRemaining=drawDuration,render()):finish()}else{finish()}}

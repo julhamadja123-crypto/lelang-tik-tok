@@ -3,7 +3,19 @@ const http = require("http");
 const { Server } = require("socket.io");
 // TikTok LIVE Connector v1.x menggunakan CommonJS dan mengekspos
 // WebcastPushConnection sebagai named export.
-const { WebcastPushConnection } = require("tiktok-live-connector");
+// tiktok-live-connector v2 memakai TikTokLiveConnection.
+// Dynamic import membuat server CommonJS ini tetap kompatibel dengan package v2.
+let TikTokLiveConnection = null;
+
+async function loadTikTokConnector() {
+  if (TikTokLiveConnection) return TikTokLiveConnection;
+  const mod = await import("tiktok-live-connector");
+  TikTokLiveConnection = mod.TikTokLiveConnection || mod.default?.TikTokLiveConnection || mod.default;
+  if (typeof TikTokLiveConnection !== "function") {
+    throw new Error("TikTokLiveConnection tidak ditemukan pada tiktok-live-connector v2.");
+  }
+  return TikTokLiveConnection;
+}
 
 const app = express();
 const server = http.createServer(app);
@@ -14,6 +26,7 @@ app.use(express.static(__dirname));
 let liveConnection = null;
 let activeUsername = null;
 let reconnectTimer = null;
+let manualDisconnect = false;
 // Gift hanya boleh diteruskan saat lelang benar-benar aktif.
 let auctionActive = false;
 
@@ -29,10 +42,12 @@ function cleanUsername(value) {
 async function stopConnection() {
   clearTimeout(reconnectTimer);
   reconnectTimer = null;
-  if (liveConnection) {
-    try { await liveConnection.disconnect(); } catch (_) {}
-  }
+  manualDisconnect = true;
+  const connection = liveConnection;
   liveConnection = null;
+  if (connection) {
+    try { await connection.disconnect(); } catch (_) {}
+  }
 }
 
 function emitStatus(message, ok = false) {
@@ -162,28 +177,31 @@ function getGiftData(event) {
 }
 
 async function connectToLive(rawUsername) {
-  if (typeof WebcastPushConnection !== "function") {
-    throw new Error("TikTok connector tidak berhasil dimuat. Railway perlu memasang ulang dependency tiktok-live-connector.");
-  }
-
+  const Connector = await loadTikTokConnector();
   const username = cleanUsername(rawUsername);
   if (!username) throw new Error("Username TikTok kosong.");
 
   await stopConnection();
+  manualDisconnect = false;
   activeUsername = username;
 
   emitStatus(`Mencari LIVE @${username}...`);
 
-  // Penting: extended gift info dimatikan saat koneksi.
-  // Pada beberapa koneksi TikTok, fetch gift list dapat menghasilkan 403 dan membuat connect gagal.
-  const conn = new WebcastPushConnection(username, {
-    // Menggunakan connector v1.2.x dengan API legacy WebcastPushConnection.
-    // Versi ini cocok dengan kode CommonJS di server ini.
+  // TikTok Live Connector v2 menggunakan jalur WebSocket terbaru.
+  // API key bersifat opsional; jika disediakan Railway ENV, dipakai untuk
+  // signing yang lebih stabil / limit lebih tinggi.
+  const signApiKey = process.env.TIKTOK_SIGN_API_KEY || process.env.EULER_API_KEY || undefined;
+  const conn = new Connector(username, {
+    ...(signApiKey ? { signApiKey } : {}),
     processInitialData: false,
     fetchRoomInfoOnConnect: true,
     enableExtendedGiftInfo: true,
-    enableWebsocketUpgrade: true,
-    requestPollingIntervalMs: 1000
+    webClientOptions: {
+      timeout: { request: 15000 }
+    },
+    wsClientOptions: {
+      handshakeTimeout: 15000
+    }
   });
 
   liveConnection = conn;
@@ -201,44 +219,53 @@ async function connectToLive(rawUsername) {
   });
 
   conn.on("disconnected", () => {
+    if (manualDisconnect || liveConnection !== conn || !activeUsername) return;
     emitStatus(`Koneksi @${activeUsername} terputus. Mencoba ulang...`);
-    if (activeUsername) {
-      clearTimeout(reconnectTimer);
-      reconnectTimer = setTimeout(() => {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = setTimeout(() => {
+      if (!manualDisconnect && activeUsername) {
         connectToLive(activeUsername).catch(err => {
-          emitStatus(`Reconnect gagal: ${err.message}`);
+          emitStatus(`Reconnect gagal: ${formatTikTokError(err)}`);
         });
-      }, 5000);
-    }
+      }
+    }, 5000);
   });
 
   conn.on("error", (err) => {
-    emitStatus(`Error TikTok: ${err?.message || "unknown error"}`);
+    emitStatus(`Error TikTok: ${formatTikTokError(err)}`);
   });
 
   try {
     const state = await conn.connect();
-    emitStatus(
-      `Terhubung ke LIVE @${username} • Room ${state.roomId || "aktif"}`,
-      true
-    );
+    emitStatus(`Terhubung ke LIVE @${username} • Room ${state.roomId || conn.roomId || "aktif"}`, true);
     return state;
   } catch (err) {
     if (liveConnection === conn) liveConnection = null;
-    const message = err?.message || String(err) || "Gagal terhubung ke TikTok LIVE";
-    const friendlyMessage = /Business plan|fetchWebcastSignatureFromEulerRoute/i.test(message)
-      ? "Server memasang versi connector yang tidak sesuai. Hapus cache deployment lalu install ulang dependency TikTok Live Connector sesuai package.json."
-      : message;
+    const friendlyMessage = formatTikTokError(err);
     emitStatus(`Gagal terhubung @${username}: ${friendlyMessage}`);
-    throw err;
+    throw new Error(friendlyMessage);
   }
+}
 
+function formatTikTokError(err) {
+  const message = err?.message || String(err) || "Gagal terhubung ke TikTok LIVE";
+
+  if (/status code 404/i.test(message) && /webcast\/im\/fetch|sign request/i.test(message)) {
+    return "TikTok menolak jalur signing lama (404). Server ini sudah memakai connector v2. Jika setelah redeploy penuh masih muncul error signing, tambahkan Railway Variable TIKTOK_SIGN_API_KEY dari layanan signing yang didukung connector.";
+  }
+  if (/Business plan|fetchWebcastSignatureFromEulerRoute/i.test(message)) {
+    return "Signing provider menolak konfigurasi saat ini. Lakukan redeploy tanpa cache dan, bila diperlukan, isi Railway Variable TIKTOK_SIGN_API_KEY.";
+  }
+  if (/offline|not live|UserOffline/i.test(message)) {
+    return "Akun TikTok tidak sedang LIVE atau username bukan uniqueId yang benar.";
+  }
+  return message;
 }
 
 io.on("connection", (socket) => {
   socket.emit("live:status", {
-    ok: Boolean(liveConnection?.getState?.().isConnected),
-    message: liveConnection?.getState?.().isConnected
+    ok: Boolean(liveConnection?.isConnected || liveConnection?.state?.isConnected),
+    message: (liveConnection?.isConnected || liveConnection?.state?.isConnected)
       ? `Terhubung ke @${activeUsername}`
       : "Belum terhubung ke TikTok LIVE"
   });

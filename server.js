@@ -1,7 +1,7 @@
 const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
-const { TikTokLiveConnection, WebcastEvent } = require("tiktok-live-connector");
+const { WebcastPushConnection } = require("tiktok-live-connector");
 
 const app = express();
 const server = http.createServer(app);
@@ -170,16 +170,19 @@ async function connectToLive(rawUsername) {
 
   // Penting: extended gift info dimatikan saat koneksi.
   // Pada beberapa koneksi TikTok, fetch gift list dapat menghasilkan 403 dan membuat connect gagal.
-  const conn = new TikTokLiveConnection(username, {
+  const conn = new WebcastPushConnection(username, {
+    // Menggunakan connector v1.2.3 yang masih memakai signing flow legacy,
+    // sehingga tidak memanggil endpoint premium fetchWebcastSignatureFromEulerRoute.
     processInitialData: false,
     fetchRoomInfoOnConnect: true,
     enableExtendedGiftInfo: true,
+    enableWebsocketUpgrade: true,
     requestPollingIntervalMs: 1000
   });
 
   liveConnection = conn;
 
-  conn.on(WebcastEvent.GIFT, (event) => {
+  conn.on("gift", (event) => {
     console.log("Gift event diterima", { active: auctionActive, giftId: event?.giftId, giftName: event?.giftName });
     if (!auctionActive) return;
     const gift = getGiftData(event);
@@ -187,7 +190,7 @@ async function connectToLive(rawUsername) {
     io.emit("live:gift", gift);
   });
 
-  conn.on(WebcastEvent.CHAT, () => {
+  conn.on("chat", () => {
     io.emit("live:event", { type: "chat" });
   });
 
@@ -217,7 +220,10 @@ async function connectToLive(rawUsername) {
   } catch (err) {
     if (liveConnection === conn) liveConnection = null;
     const message = err?.message || String(err) || "Gagal terhubung ke TikTok LIVE";
-    emitStatus(`Gagal terhubung @${username}: ${message}`);
+    const friendlyMessage = /Business plan|fetchWebcastSignatureFromEulerRoute/i.test(message)
+      ? "Server masih memakai connector baru yang membutuhkan endpoint premium. Pastikan deployment memasang tiktok-live-connector 1.2.3 secara bersih."
+      : message;
+    emitStatus(`Gagal terhubung @${username}: ${friendlyMessage}`);
     throw err;
   }
 
@@ -225,8 +231,8 @@ async function connectToLive(rawUsername) {
 
 io.on("connection", (socket) => {
   socket.emit("live:status", {
-    ok: Boolean(liveConnection?.isConnected),
-    message: liveConnection?.isConnected
+    ok: Boolean(liveConnection?.getState?.().isConnected),
+    message: liveConnection?.getState?.().isConnected
       ? `Terhubung ke @${activeUsername}`
       : "Belum terhubung ke TikTok LIVE"
   });

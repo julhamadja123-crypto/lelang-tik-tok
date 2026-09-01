@@ -19,8 +19,9 @@ function render(){
   if(inDraw)$("timerNote").innerHTML=`⚡ DRAW TIME aktif — tetap berjalan sampai ${drawDuration} detik habis`;
   const sorted=sortedUsers();$("participantCount").textContent=`${sorted.length} peserta`;
   const medals=["🥇","🥈","🥉"];
-  $("rankingList").innerHTML=sorted.length?sorted.slice(0,topLimit).map((u,i)=>`<article class="rank-card ${i===0?"top1":""}"><div class="rank-no">${medals[i]||"#"+(i+1)}</div><div class="user-avatar">${esc(u.name[0])}</div><div class="rank-info"><strong>${esc(u.name)}</strong><span>${inDraw&&i<2?"⚡ DRAW TIME":"Peringkat "+(i+1)}</span></div><div class="coin"><strong>${u.coins.toLocaleString("id-ID")}</strong></div></article>`).join(""):`<div class="rank-card"><div class="rank-info"><strong>Menunggu peserta</strong><span>Gift TikTok LIVE akan muncul di sini.</span></div></div>`;
-  $("activityList").innerHTML=activities.length?activities.slice(0,5).map(a=>`<div class="activity"><div class="gift-icon">🎁</div><div><strong>${esc(a.name)}</strong><span>${esc(a.gift)}</span></div><div class="event-coin">+${a.coins.toLocaleString("id-ID")} 🪙</div></div>`).join(""):`<p class="empty">Belum ada gift masuk.</p>`;
+  const avatar=(u)=>u.avatar?`<img src="${esc(u.avatar)}" alt="Foto profil ${esc(u.name)}" referrerpolicy="no-referrer" onerror="this.parentNode.innerHTML='${esc(u.name[0]||"?")}'">`:esc(u.name[0]||"?");
+  $("rankingList").innerHTML=sorted.length?sorted.slice(0,topLimit).map((u,i)=>`<article class="rank-card rank-box ${i===0?"top1":""} ${inDraw&&i<2?"draw-box":""}"><div class="box-top"><span class="rank-no">${medals[i]||"#"+(i+1)}</span><span class="box-rank">PESERTA ${i+1}</span></div><div class="user-avatar">${avatar(u)}</div><div class="rank-info"><strong>${esc(u.name)}</strong><span>${inDraw&&i<2?"⚡ DRAW TIME":"GIFT TIKTOK LIVE"}</span></div><div class="coin"><span class="coin-icon">🪙</span><strong>${u.coins.toLocaleString("id-ID")}</strong></div></article>`).join(""):`<div class="rank-card rank-box empty-box"><div class="rank-info"><strong>Menunggu peserta</strong><span>Gift TikTok LIVE akan muncul di sini.</span></div></div>`;
+  $("activityList").innerHTML=activities.length?activities.slice(0,5).map(a=>`<div class="activity"><div class="user-avatar activity-avatar">${a.avatar?`<img src="${esc(a.avatar)}" alt="Foto profil ${esc(a.name)}" referrerpolicy="no-referrer">`:esc(a.name[0]||"?")}</div><div><strong>${esc(a.name)}</strong><span>${esc(a.gift)}</span></div><div class="event-coin"><span>🪙</span> +${a.coins.toLocaleString("id-ID")}</div></div>`).join(""):`<p class="empty">Belum ada gift masuk.</p>`;
 }
 function toast(m){const t=$("toast");t.textContent=m;t.classList.add("show");clearTimeout(window.tt);window.tt=setTimeout(()=>t.classList.remove("show"),2200)}
 function finishAuction(message="Lelang selesai — pemenang ditentukan"){running=false;clearInterval(interval);auctionFinished=true;inDraw=false;syncAuctionState();$("timerNote").textContent=message;render();toast("🏆 "+message)}
@@ -52,12 +53,13 @@ $("finishBtn").onclick=()=>{finishAuction();toast("Lelang diselesaikan")};
 $("saveSettings").onclick=()=>{const min=Math.max(0,Math.min(120,Number($("minuteInput").value)||0));const sec=Math.max(0,Math.min(59,Number($("secondInput").value)||0));if(min===0&&sec===0){toast("Waktu minimal 1 detik");return}duration=min*60+sec;remaining=duration;topLimit=Number($("topInput").value);auctionTitle=$("titleInput").value.trim()||"LIVE COIN AUCTION";setRunning(false);$("timerNote").textContent=`Pengaturan disimpan • Draw Time ${drawDuration} detik`;render();toast("Pengaturan disimpan")};
 $("connectBtn").onclick=()=>{liveConnected=!liveConnected;$("liveName").textContent=liveConnected?"@TikTokLiveDemo":"@Belum Terhubung";$("connectBtn").textContent=liveConnected?"TikTok LIVE Terhubung ✓":"Hubungkan TikTok LIVE";$("statusBadge").textContent=liveConnected?"ONLINE":"OFFLINE";$("statusBadge").className="status-badge "+(liveConnected?"online":"offline");toast(liveConnected?"Mode demo LIVE aktif":"TikTok LIVE diputus")};
 
-window.addGift=(name,gift,coins)=>{
+window.addGift=(name,gift,coins,avatar="")=>{
   // Gift hanya dihitung saat tombol Mulai Lelang aktif.
   if(!running || auctionFinished)return;
   coins=Number(coins)||0;let u=users.find(x=>x.name.toLowerCase()===String(name).toLowerCase());
-  if(!u){u={name:String(name),coins:0};users.push(u)}
-  u.coins+=coins;activities.unshift({name:String(name),gift:String(gift),coins});render();
+  if(!u){u={name:String(name),coins:0,avatar:String(avatar||"")};users.push(u)}
+  else if(avatar) u.avatar=String(avatar);
+  u.coins+=coins;activities.unshift({name:String(name),gift:String(gift),coins,avatar:String(avatar||u.avatar||"")});render();
   // Saat Draw Time, skor tetap diperbarui tetapi timer harus tetap berjalan sampai 20 detik habis.
 };
 render();
@@ -101,7 +103,7 @@ function setupSocket(){
     const username=d.username||d.nickname||"Viewer";
     const gift=d.giftName||"TikTok Gift";
     const coin=Number(d.coinValue)||0;
-    window.addGift(username,gift,coin);
+    window.addGift(username,gift,coin,d.avatar||d.profilePictureUrl||d.profilePicture||"");
     liveEventCount++;
     const hv=$("heroViewer"); if(hv) hv.textContent=liveEventCount;
   });

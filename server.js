@@ -21,7 +21,8 @@ app.use(express.static(__dirname));
 | Package:
 |   tiktok-live-connector 2.4.4
 |
-| Karena project memakai CommonJS, kita menggunakan dynamic import.
+| Project menggunakan CommonJS.
+| Dynamic import digunakan agar kompatibel dengan package v2.
 |--------------------------------------------------------------------------
 */
 
@@ -277,18 +278,6 @@ function getUserData(event) {
 |--------------------------------------------------------------------------
 | GIFT DATA
 |--------------------------------------------------------------------------
-|
-| v2.4.4:
-|
-| event.giftId
-| event.giftName
-| event.diamondCount
-| event.repeatCount
-| event.repeatEnd
-| event.giftType
-|
-| Kita juga menyediakan fallback untuk beberapa struktur lama.
-|--------------------------------------------------------------------------
 */
 
 function getGiftData(event) {
@@ -325,9 +314,6 @@ function getGiftData(event) {
 
   /*
    * Diamond / Coin per gift
-   *
-   * Prioritas utama:
-   * event.diamondCount
    */
   const diamondCount = toPositiveNumber(
     event.diamondCount,
@@ -396,14 +382,10 @@ function getGiftData(event) {
     repeatEndValue === "true";
 
   /*
-   * ==========================================================
-   * STREAK GIFT
-   * ==========================================================
+   * Streak gift
    *
-   * giftType 1 = gift dapat melakukan streak.
-   *
-   * Event yang masih berjalan jangan dihitung.
-   * Kita tunggu repeatEnd=true.
+   * Gift type 1 dapat melakukan streak.
+   * Event yang belum selesai jangan dihitung.
    */
   if (giftType === 1 && !repeatEnd) {
     console.log(
@@ -414,8 +396,7 @@ function getGiftData(event) {
   }
 
   /*
-   * Kalau harga diamond tidak terbaca,
-   * jangan mengarang nilai.
+   * Jangan mengarang nilai coin jika tidak tersedia.
    */
   if (!giftId || diamondCount <= 0) {
     console.warn(
@@ -435,6 +416,7 @@ function getGiftData(event) {
     io.emit("live:gift-debug", {
       message:
         `Gift "${giftName}" diterima tetapi nilai coin/diamond tidak terbaca.`,
+
       debug: {
         giftId,
         giftName,
@@ -451,13 +433,7 @@ function getGiftData(event) {
   }
 
   /*
-   * Nilai total coin
-   *
-   * Contoh:
-   * Rose = 1 diamond
-   * repeatCount = 5
-   *
-   * total = 1 x 5 = 5
+   * Total coin
    */
   const coinValue =
     diamondCount * repeatCount;
@@ -470,11 +446,8 @@ function getGiftData(event) {
   }
 
   /*
-   * ==========================================================
-   * DEDUPLICATION
-   * ==========================================================
+   * Deduplication
    */
-
   const eventKey =
     String(
       event.msgId ||
@@ -507,7 +480,7 @@ function getGiftData(event) {
   );
 
   /*
-   * LOG
+   * LOG GIFT VALID
    */
   console.log(
     `[GIFT] VALID | @${user.uniqueId} | ${giftName} | ` +
@@ -515,7 +488,7 @@ function getGiftData(event) {
   );
 
   /*
-   * Data yang dikirim ke frontend
+   * Data untuk frontend
    */
   return {
     username: user.uniqueId,
@@ -577,7 +550,7 @@ async function connectToLive(rawUsername) {
   activeUsername = username;
 
   /*
-   * Cek API key
+   * API key signing
    */
   const signApiKey =
     process.env.TIKTOK_SIGN_API_KEY ||
@@ -594,12 +567,12 @@ async function connectToLive(rawUsername) {
 
   console.log(
     `[TikTok] Signing API key: ${
-      signApiKey ? "TERSEDIA" : "TIDAK ADA"
+      signApiKey ? "TERSEDIA" : "4bfe46a08908826d5271b060411475473f773117ab6bb74e535294a9bf406bd1"
     }`
   );
 
   console.log(
-    `[TikTok] Package: tiktok-live-connector 2.4.4`
+    "[TikTok] Package: tiktok-live-connector 2.4.4"
   );
 
   console.log(
@@ -611,56 +584,33 @@ async function connectToLive(rawUsername) {
   );
 
   /*
-   * Opsi connector
+   * Connector options
    */
   const options = {
-    /*
-     * Kalau ENV tersedia,
-     * gunakan API key Euler.
-     *
-     * Kalau tidak tersedia,
-     * connector tetap mencoba signing provider default.
-     */
     ...(signApiKey
       ? { signApiKey }
       : {}),
 
-    /*
-     * Tidak perlu memproses initial data
-     * yang terlalu besar.
-     */
     processInitialData: false,
 
-    /*
-     * Ambil room info ketika connect.
-     */
     fetchRoomInfoOnConnect: true,
 
-    /*
-     * PENTING:
-     * true supaya informasi gift tersedia.
-     */
     enableExtendedGiftInfo: true,
 
-    /*
-     * Timeout HTTP.
-     *
-     * v2 memakai konfigurasi HTTP berbasis got.
-     */
     webClientOptions: {
       timeout: {
         request: 15000
       }
     },
 
-    /*
-     * WebSocket timeout.
-     */
     wsClientOptions: {
       handshakeTimeout: 15000
     }
   };
 
+  /*
+   * Buat koneksi
+   */
   const conn =
     new Connector(
       username,
@@ -670,9 +620,9 @@ async function connectToLive(rawUsername) {
   liveConnection = conn;
 
   /*
-   * ==========================================================
-   * GIFT
-   * ==========================================================
+   |--------------------------------------------------------------------------
+   | GIFT
+   |--------------------------------------------------------------------------
    */
 
   conn.on("gift", (event) => {
@@ -680,17 +630,23 @@ async function connectToLive(rawUsername) {
       "[TikTok] Gift event diterima:",
       {
         active: auctionActive,
+
         username:
           event?.user?.uniqueId ||
           event?.uniqueId,
+
         giftId:
           event?.giftId,
+
         giftName:
           event?.giftName,
+
         diamondCount:
           event?.diamondCount,
+
         repeatCount:
           event?.repeatCount,
+
         repeatEnd:
           event?.repeatEnd
       }
@@ -716,7 +672,7 @@ async function connectToLive(rawUsername) {
     }
 
     /*
-     * Kirim ke frontend
+     * Kirim gift ke frontend
      */
     io.emit(
       "live:gift",
@@ -725,9 +681,9 @@ async function connectToLive(rawUsername) {
   });
 
   /*
-   * ==========================================================
-   * CHAT
-   * ==========================================================
+   |--------------------------------------------------------------------------
+   | CHAT
+   |--------------------------------------------------------------------------
    */
 
   conn.on("chat", (event) => {
@@ -735,6 +691,7 @@ async function connectToLive(rawUsername) {
       "live:event",
       {
         type: "chat",
+
         username:
           event?.user?.uniqueId ||
           event?.uniqueId ||
@@ -744,9 +701,9 @@ async function connectToLive(rawUsername) {
   });
 
   /*
-   * ==========================================================
-   * CONNECTED
-   * ==========================================================
+   |--------------------------------------------------------------------------
+   | CONNECTED
+   |--------------------------------------------------------------------------
    */
 
   conn.on("connected", (state) => {
@@ -757,9 +714,9 @@ async function connectToLive(rawUsername) {
   });
 
   /*
-   * ==========================================================
-   * DISCONNECTED
-   * ==========================================================
+   |--------------------------------------------------------------------------
+   | DISCONNECTED
+   |--------------------------------------------------------------------------
    */
 
   conn.on("disconnected", () => {
@@ -775,336 +732,4 @@ async function connectToLive(rawUsername) {
       return;
     }
 
-    emitStatus(
-      `Koneksi @${activeUsername} terputus. Mencoba ulang...`
-    );
-
-    clearTimeout(
-      reconnectTimer
-    );
-
-    reconnectTimer =
-      setTimeout(() => {
-        if (
-          !manualDisconnect &&
-          activeUsername
-        ) {
-          connectToLive(
-            activeUsername
-          ).catch((err) => {
-            emitStatus(
-              `Reconnect gagal: ${formatTikTokError(err)}`
-            );
-          });
-        }
-      }, 5000);
-  });
-
-  /*
-   * ==========================================================
-   * ERROR
-   * ==========================================================
-   */
-
-  conn.on("error", (err) => {
-    console.error(
-      "[TikTok] Error:",
-      err
-    );
-
-    emitStatus(
-      `Error TikTok: ${formatTikTokError(err)}`
-    );
-  });
-
-  /*
-   * ==========================================================
-   * CONNECT
-   * ==========================================================
-   */
-
-  try {
-    const state =
-      await conn.connect();
-
-    /*
-     * Pastikan koneksi yang aktif
-     * masih connection yang sama.
-     */
-    if (liveConnection !== conn) {
-      try {
-        await conn.disconnect();
-      } catch (_) {}
-
-      throw new Error(
-        "Koneksi TikTok digantikan oleh koneksi lain."
-      );
-    }
-
-    const roomId =
-      state?.roomId ||
-      conn.roomId ||
-      "aktif";
-
-    emitStatus(
-      `Terhubung ke LIVE @${username} • Room ${roomId}`,
-      true
-    );
-
-    console.log(
-      `[TikTok] BERHASIL TERHUBUNG @${username}`
-    );
-
-    return state;
-
-  } catch (err) {
-    if (
-      liveConnection === conn
-    ) {
-      liveConnection = null;
-    }
-
-    const friendly =
-      formatTikTokError(err);
-
-    console.error(
-      "[TikTok] Gagal connect:",
-      err
-    );
-
-    emitStatus(
-      `Gagal terhubung @${username}: ${friendly}`
-    );
-
-    throw new Error(
-      friendly
-    );
-  }
-}
-
-/*
-|--------------------------------------------------------------------------
-| SOCKET.IO
-|--------------------------------------------------------------------------
-*/
-
-io.on("connection", (socket) => {
-  console.log(
-    `[Socket] Client terhubung: ${socket.id}`
-  );
-
-  /*
-   * Kirim status saat frontend pertama kali membuka halaman.
-   */
-  socket.emit(
-    "live:status",
-    {
-      ok:
-        Boolean(
-          liveConnection?.isConnected ||
-          liveConnection?.state?.isConnected
-        ),
-
-      message:
-        (
-          liveConnection?.isConnected ||
-          liveConnection?.state?.isConnected
-        )
-          ? `Terhubung ke @${activeUsername}`
-          : "Belum terhubung ke TikTok LIVE"
-    }
-  );
-
-  /*
-   * ==========================================================
-   * CONNECT
-   * ==========================================================
-   */
-
-  socket.on(
-    "live:connect",
-    async (data = {}) => {
-      try {
-        const username =
-          data.username;
-
-        console.log(
-          `[Socket] Request connect: @${username}`
-        );
-
-        await connectToLive(
-          username
-        );
-
-      } catch (err) {
-        console.error(
-          "[Socket] live:connect error:",
-          err
-        );
-
-        socket.emit(
-          "live:error",
-          {
-            message:
-              err?.message ||
-              "Gagal menghubungkan TikTok LIVE."
-          }
-        );
-      }
-    }
-  );
-
-  /*
-   * ==========================================================
-   * AUCTION STATE
-   * ==========================================================
-   */
-
-  socket.on(
-    "auction:state",
-    (data = {}) => {
-      auctionActive =
-        Boolean(data.active);
-
-      console.log(
-        `[Auction] ${
-          auctionActive
-            ? "ACTIVE"
-            : "INACTIVE"
-        }`
-      );
-    }
-  );
-
-  /*
-   * ==========================================================
-   * DISCONNECT TIKTOK
-   * ==========================================================
-   */
-
-  socket.on(
-    "live:disconnect",
-    async () => {
-      console.log(
-        "[Socket] Request disconnect TikTok."
-      );
-
-      auctionActive = false;
-
-      await stopConnection();
-
-      activeUsername = null;
-
-      emitStatus(
-        "Koneksi TikTok LIVE diputus."
-      );
-    }
-  );
-
-  /*
-   * ==========================================================
-   * SOCKET DISCONNECT
-   * ==========================================================
-   */
-
-  socket.on(
-    "disconnect",
-    () => {
-      console.log(
-        `[Socket] Client terputus: ${socket.id}`
-      );
-    }
-  );
-});
-
-/*
-|--------------------------------------------------------------------------
-| HEALTH CHECK
-|--------------------------------------------------------------------------
-*/
-
-app.get(
-  "/health",
-  (req, res) => {
-    res.json({
-      ok: true,
-
-      service:
-        "TikTok LIVE Coin Auction",
-
-      tiktok: {
-        connected:
-          Boolean(
-            liveConnection?.isConnected ||
-            liveConnection?.state?.isConnected
-          ),
-
-        username:
-          activeUsername,
-
-        auctionActive
-      },
-
-      signing: {
-        apiKeyConfigured:
-          Boolean(
-            process.env.TIKTOK_SIGN_API_KEY ||
-            process.env.EULER_API_KEY
-          )
-      },
-
-     
-/*
-|--------------------------------------------------------------------------
-| HEALTH CHECK
-|--------------------------------------------------------------------------
-*/
-
-app.get("/health", (req, res) => {
-  res.status(200).json({
-    ok: true,
-    service: "tiktok-live-coin-auction",
-    connected: Boolean(liveConnection),
-    username: activeUsername,
-    auctionActive
-  });
-});
-
-/*
-|--------------------------------------------------------------------------
-| FRONTEND
-|--------------------------------------------------------------------------
-*/
-
-app.get("/", (req, res) => {
-  res.sendFile(__dirname + "/index.html");
-});
-
-/*
-|--------------------------------------------------------------------------
-| SERVER
-|--------------------------------------------------------------------------
-*/
-
-const PORT = process.env.PORT || 3000;
-
-server.listen(PORT, "0.0.0.0", () => {
-  console.log("==============================================");
-  console.log(`Server berjalan di port ${PORT}`);
-  console.log("TikTok Live Coin Auction siap.");
-  console.log("==============================================");
-});
-
-/*
-|--------------------------------------------------------------------------
-| PROCESS ERROR HANDLERS
-|--------------------------------------------------------------------------
-*/
-
-process.on("unhandledRejection", (reason) => {
-  console.error("[PROCESS] Unhandled Promise Rejection:", reason);
-});
-
-process.on("uncaughtException", (error) => {
-  console.error("[PROCESS] Uncaught Exception:", error);
-});
+    emit

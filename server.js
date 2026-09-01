@@ -2,6 +2,10 @@ const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
 
+/* =========================================================
+   SERVER
+   ========================================================= */
+
 const app = express();
 const server = http.createServer(app);
 
@@ -16,43 +20,52 @@ app.use(express.json());
 app.use(express.static(__dirname));
 
 /* =========================================================
-   TIKTOK LIVE
+   GLOBAL STATE
    ========================================================= */
 
 let TikTokLiveConnection = null;
+
 let liveConnection = null;
-
 let activeUsername = null;
+
 let reconnectTimer = null;
-
 let manualDisconnect = false;
+
 let auctionActive = false;
-let connectionGeneration = 0;
 
 /*
- * API KEY SENGAJA TIDAK DIWAJIBKAN.
+ * ========================================================
+ * SIGNING MODE
+ * ========================================================
  *
- * Livestream publik dapat dibaca tanpa API key.
+ * DEFAULT:
+ * PUBLIC
  *
- * Kalau nanti kamu memiliki Euler Stream API key
- * yang benar, bisa ditambahkan lagi.
+ * Artinya server TIDAK membutuhkan SIGN_API_KEY.
+ *
+ * Kalau suatu saat ingin memakai API key:
+ *
+ * USE_SIGN_API_KEY=true
+ *
+ * lalu isi:
+ *
+ * SIGN_API_KEY=xxxxx
+ *
+ * ========================================================
  */
-const SIGN_API_KEY = String(
-  process.env.SIGN_API_KEY || ""
-).trim();
 
-/*
- * Default:
- * JANGAN gunakan API key.
- *
- * Ini penting karena API key sebelumnya menghasilkan:
- *
- * reason: 'Empty Payload'
- */
+const SIGN_API_KEY =
+  String(process.env.SIGN_API_KEY || "").trim();
+
 const USE_SIGN_API_KEY =
-  String(
-    process.env.USE_SIGN_API_KEY || "false"
-  ).toLowerCase() === "true";
+  String(process.env.USE_SIGN_API_KEY || "")
+    .trim()
+    .toLowerCase() === "true";
+
+const signingMode =
+  USE_SIGN_API_KEY && SIGN_API_KEY
+    ? "api-key"
+    : "public";
 
 /* =========================================================
    GIFT DUPLICATE PROTECTION
@@ -60,10 +73,11 @@ const USE_SIGN_API_KEY =
 
 const processedGiftEvents = new Map();
 
-const GIFT_TTL = 60 * 1000;
+const GIFT_TTL =
+  60 * 1000;
 
 /* =========================================================
-   LOAD TIKTOK CONNECTOR
+   CONNECTOR LOADER
    ========================================================= */
 
 async function loadTikTokConnector() {
@@ -71,77 +85,80 @@ async function loadTikTokConnector() {
     return TikTokLiveConnection;
   }
 
+  let mod;
+
   try {
-    const mod = await import(
+    mod = await import(
       "tiktok-live-connector"
     );
-
-    TikTokLiveConnection =
-      mod.TikTokLiveConnection ||
-      mod.default?.TikTokLiveConnection ||
-      mod.default;
-
-    /*
-     * Beberapa versi lama menyediakan
-     * WebcastPushConnection.
-     */
-    if (
-      typeof TikTokLiveConnection !==
-      "function"
-    ) {
-      TikTokLiveConnection =
-        mod.WebcastPushConnection ||
-        mod.default?.WebcastPushConnection;
-    }
-
-    if (
-      typeof TikTokLiveConnection !==
-      "function"
-    ) {
-      throw new Error(
-        "TikTokLiveConnection tidak ditemukan."
-      );
-    }
-
-    console.log(
-      "[TikTok] Connector berhasil dimuat."
-    );
-
-    return TikTokLiveConnection;
   } catch (err) {
     console.error(
-      "[TikTok] Gagal memuat connector:",
+      "[TikTok] Gagal load tiktok-live-connector:",
       err
     );
 
     throw new Error(
-      "Package tiktok-live-connector tidak dapat dimuat. Pastikan package sudah terinstall."
+      "Package tiktok-live-connector tidak ditemukan."
     );
   }
+
+  TikTokLiveConnection =
+    mod.TikTokLiveConnection ||
+    mod.default?.TikTokLiveConnection ||
+    mod.default;
+
+  if (
+    typeof TikTokLiveConnection !==
+    "function"
+  ) {
+    throw new Error(
+      "TikTokLiveConnection tidak ditemukan di package tiktok-live-connector."
+    );
+  }
+
+  return TikTokLiveConnection;
 }
 
 /* =========================================================
-   CLEAN USERNAME
+   USERNAME CLEANER
    ========================================================= */
 
 function cleanUsername(value) {
-  let username = String(
-    value || ""
-  ).trim();
+  let username =
+    String(value || "").trim();
 
-  username = username
-    .replace(
+  username =
+    username.replace(
       /^https?:\/\/(www\.)?tiktok\.com\/@/i,
       ""
-    )
-    .replace(
+    );
+
+  username =
+    username.replace(
       /^https?:\/\/(www\.)?tiktok\.com\//i,
       ""
-    )
-    .replace(/^@/, "")
-    .replace(/\/live.*$/i, "")
-    .replace(/[/?#].*$/g, "")
-    .replace(/\s+/g, "");
+    );
+
+  username =
+    username.replace(/^@/, "");
+
+  username =
+    username.replace(
+      /\/live.*$/i,
+      ""
+    );
+
+  username =
+    username.replace(
+      /[/?#].*$/g,
+      ""
+    );
+
+  username =
+    username.replace(
+      /\s+/g,
+      ""
+    );
 
   return username;
 }
@@ -161,8 +178,12 @@ function emitStatus(
   io.emit(
     "live:status",
     {
+      ok,
       message,
-      ok
+      username:
+        activeUsername || null,
+      connected:
+        Boolean(liveConnection)
     }
   );
 }
@@ -172,88 +193,108 @@ function emitStatus(
    ========================================================= */
 
 function formatError(err) {
-  const raw =
+  if (!err) {
+    return "Unknown error.";
+  }
+
+  const message =
     err?.message ||
-    err?.reason ||
-    String(err) ||
-    "Gagal terhubung ke TikTok LIVE.";
+    String(err);
 
-  const msg =
-    typeof raw === "string"
-      ? raw
-      : JSON.stringify(raw);
+  const lower =
+    message.toLowerCase();
 
-  const s =
-    msg.toLowerCase();
+  /*
+   * EMPTY PAYLOAD
+   */
 
   if (
-    s.includes("useroffline") ||
-    s.includes("offline") ||
-    s.includes("not live")
+    lower.includes(
+      "empty payload"
+    )
+  ) {
+    return (
+      "TikTok signing server mengembalikan Empty Payload. " +
+      "Server akan mencoba ulang otomatis."
+    );
+  }
+
+  /*
+   * OFFLINE
+   */
+
+  if (
+    lower.includes("offline") ||
+    lower.includes("not live") ||
+    lower.includes("useroffline")
   ) {
     return (
       "Akun TikTok tidak sedang LIVE atau username tidak benar."
     );
   }
 
+  /*
+   * TIMEOUT
+   */
+
   if (
-    s.includes("empty payload")
+    lower.includes("timeout") ||
+    lower.includes("timed out")
   ) {
     return (
-      "Signing provider mengembalikan Empty Payload. Server sekarang dibuat tanpa SIGN_API_KEY. Pastikan USE_SIGN_API_KEY=false."
+      "Koneksi ke TikTok timeout. Coba lagi beberapa detik kemudian."
     );
   }
 
+  /*
+   * RATE LIMIT
+   */
+
   if (
-    s.includes("api key") ||
-    s.includes("apikey") ||
-    s.includes("signature") ||
-    s.includes("signing") ||
-    s.includes("euler") ||
-    s.includes("401") ||
-    s.includes("403")
+    lower.includes("rate limit") ||
+    lower.includes("429")
   ) {
     return (
-      "Signing provider menolak request. Server ini tidak mewajibkan API key."
+      "TikTok/signing server sedang membatasi request. Tunggu beberapa saat."
     );
   }
 
+  /*
+   * API KEY
+   */
+
   if (
-    s.includes("timeout") ||
-    s.includes("timed out")
+    lower.includes("api key") ||
+    lower.includes("apikey") ||
+    lower.includes("euler") ||
+    lower.includes("401") ||
+    lower.includes("403")
   ) {
     return (
-      "Koneksi ke TikTok timeout. Coba lagi beberapa detik."
+      "Signing provider menolak request."
     );
   }
 
+  /*
+   * 404
+   */
+
   if (
-    s.includes("captcha") ||
-    s.includes("verify")
+    lower.includes("404")
   ) {
     return (
-      "TikTok meminta verifikasi jaringan. Coba beberapa saat lagi."
+      "Endpoint TikTok/signing tidak ditemukan. Kemungkinan package connector perlu diperbarui."
     );
   }
 
-  if (
-    s.includes("room id")
-  ) {
-    return (
-      "Room LIVE TikTok tidak ditemukan. Pastikan akun benar-benar sedang LIVE."
-    );
-  }
-
-  return msg;
+  return message;
 }
 
 /* =========================================================
-   NUMBER HELPER
+   NUMBER
    ========================================================= */
 
-function numberPositive(
-  ...values
-) {
+function numberPositive(...values) {
   for (
     const value of values
   ) {
@@ -265,13 +306,14 @@ function numberPositive(
       continue;
     }
 
-    const n = Number(value);
+    const number =
+      Number(value);
 
     if (
-      Number.isFinite(n) &&
-      n > 0
+      Number.isFinite(number) &&
+      number > 0
     ) {
-      return n;
+      return number;
     }
   }
 
@@ -282,7 +324,7 @@ function numberPositive(
    USER DATA
    ========================================================= */
 
-function userData(event) {
+function getUserData(event) {
   const user =
     event?.user || {};
 
@@ -321,23 +363,24 @@ function userData(event) {
    GIFT DATA
    ========================================================= */
 
-function giftData(event) {
+function parseGift(event) {
   if (!event) {
     return null;
   }
 
   const user =
-    userData(event);
+    getUserData(event);
 
-  const giftId = String(
-    event.giftId ??
-    event.gift_id ??
-    event.gift?.giftId ??
-    event.gift?.gift_id ??
-    event.giftDetails?.giftId ??
-    event.giftDetails?.gift_id ??
-    ""
-  );
+  const giftId =
+    String(
+      event.giftId ??
+      event.gift_id ??
+      event.gift?.giftId ??
+      event.gift?.gift_id ??
+      event.giftDetails?.giftId ??
+      event.giftDetails?.gift_id ??
+      ""
+    );
 
   const giftName =
     event.giftName ||
@@ -411,8 +454,9 @@ function giftData(event) {
     repeatValue === "true";
 
   /*
-   * Gift streak.
+   * Gift streak belum selesai.
    */
+
   if (
     giftType === 1 &&
     !repeatEnd
@@ -420,37 +464,40 @@ function giftData(event) {
     return null;
   }
 
-  if (
-    !giftId ||
-    diamondCount <= 0
-  ) {
+  /*
+   * Kalau connector tidak memberikan diamondCount,
+   * tetap kirim gift supaya frontend dapat memprosesnya.
+   */
+
+  if (!giftId) {
     return null;
   }
 
   const coinValue =
-    diamondCount *
-    repeatCount;
+    diamondCount > 0
+      ? diamondCount * repeatCount
+      : 0;
 
-  if (
-    !Number.isFinite(coinValue) ||
-    coinValue <= 0
-  ) {
-    return null;
-  }
+  /*
+   * Event ID
+   */
 
-  const eventKey = String(
-    event.msgId ||
-    event.transactionId ||
-    event.transaction_id ||
-    `${event.groupId || ""}|${user.userId}|${giftId}|${repeatCount}|${event.createTime || event.timestamp || ""}|${repeatEnd}`
-  );
+  const eventKey =
+    String(
+      event.msgId ||
+      event.transactionId ||
+      event.transaction_id ||
+      event.messageId ||
+      `${event.groupId || ""}|${user.userId}|${giftId}|${repeatCount}|${event.createTime || event.timestamp || ""}|${repeatEnd}`
+    );
 
   const now =
     Date.now();
 
   /*
-   * Bersihkan event lama.
+   * Hapus event lama.
    */
+
   for (
     const [
       key,
@@ -468,8 +515,9 @@ function giftData(event) {
   }
 
   /*
-   * Cegah duplikat.
+   * Duplicate
    */
+
   if (
     processedGiftEvents.has(
       eventKey
@@ -484,7 +532,7 @@ function giftData(event) {
   );
 
   console.log(
-    `[GIFT] @${user.uniqueId} | ${giftName} | ${diamondCount} x ${repeatCount} = ${coinValue}`
+    `[GIFT] @${user.uniqueId} | ${giftName} | diamonds=${diamondCount} | repeat=${repeatCount} | coins=${coinValue}`
   );
 
   return {
@@ -493,6 +541,9 @@ function giftData(event) {
 
     nickname:
       user.nickname,
+
+    userId:
+      user.userId,
 
     giftName,
 
@@ -532,106 +583,99 @@ function giftData(event) {
    ========================================================= */
 
 async function stopConnection() {
-  clearTimeout(
-    reconnectTimer
-  );
+  if (reconnectTimer) {
+    clearTimeout(
+      reconnectTimer
+    );
 
-  reconnectTimer = null;
+    reconnectTimer =
+      null;
+  }
 
-  manualDisconnect = true;
+  manualDisconnect =
+    true;
 
-  connectionGeneration++;
-
-  const conn =
+  const connection =
     liveConnection;
 
-  liveConnection = null;
+  liveConnection =
+    null;
 
-  if (conn) {
-    try {
-      await conn.disconnect();
-    } catch (err) {
-      console.warn(
-        "[TikTok] disconnect:",
-        err?.message ||
-          err
-      );
-    }
+  if (!connection) {
+    return;
+  }
+
+  try {
+    await connection.disconnect();
+  } catch (err) {
+    console.warn(
+      "[TikTok] disconnect:",
+      err?.message ||
+      err
+    );
   }
 }
 
 /* =========================================================
-   BUILD CONNECTOR OPTIONS
+   RECONNECT
    ========================================================= */
 
-function buildConnectorOptions() {
-  const options = {
-    /*
-     * Jangan proses chat lama.
-     */
-    processInitialData:
-      false,
-
-    /*
-     * Pastikan room info diambil.
-     */
-    fetchRoomInfoOnConnect:
-      true,
-
-    /*
-     * Dapatkan informasi gift
-     * jika connector mendukungnya.
-     */
-    enableExtendedGiftInfo:
-      true,
-
-    /*
-     * HTTP timeout.
-     *
-     * Connector versi baru menggunakan got.
-     */
-    webClientOptions: {
-      timeout: {
-        request: 15000
-      }
-    },
-
-    /*
-     * WebSocket timeout.
-     */
-    wsClientOptions: {
-      handshakeTimeout:
-        15000
-    }
-  };
-
-  /*
-   * API key HANYA digunakan jika
-   * USE_SIGN_API_KEY=true.
-   *
-   * Default = false.
-   */
+function scheduleReconnect() {
   if (
-    USE_SIGN_API_KEY &&
-    SIGN_API_KEY
+    manualDisconnect ||
+    !activeUsername
   ) {
-    options.signApiKey =
-      SIGN_API_KEY;
-
-    console.log(
-      "[TikTok] SIGN_API_KEY: AKTIF"
-    );
-  } else {
-    console.log(
-      "[TikTok] SIGN_API_KEY: TIDAK DIGUNAKAN"
-    );
+    return;
   }
 
-  return options;
+  if (reconnectTimer) {
+    return;
+  }
+
+  console.log(
+    "[TikTok] Reconnect dijadwalkan dalam 8 detik..."
+  );
+
+  emitStatus(
+    `Koneksi @${activeUsername} terputus. Mencoba ulang dalam 8 detik...`
+  );
+
+  reconnectTimer =
+    setTimeout(
+      async () => {
+        reconnectTimer =
+          null;
+
+        if (
+          manualDisconnect ||
+          !activeUsername
+        ) {
+          return;
+        }
+
+        const username =
+          activeUsername;
+
+        try {
+          await connectToLive(
+            username
+          );
+        } catch (err) {
+          console.error(
+            "[TikTok] Reconnect gagal:",
+            err?.message ||
+            err
+          );
+
+          scheduleReconnect();
+        }
+      },
+      8000
+    );
 }
 
 /* =========================================================
-   CONNECT TIKTOK
+   CONNECT TO TIKTOK LIVE
    ========================================================= */
 
 async function connectToLive(
@@ -652,22 +696,10 @@ async function connectToLive(
   }
 
   /*
-   * Buat ID koneksi baru.
-   */
-  const generation =
-    ++connectionGeneration;
-
-  /*
    * Putus koneksi lama.
    */
-  await stopConnection();
 
-  /*
-   * stopConnection() menaikkan
-   * generation lagi.
-   */
-  const myGeneration =
-    connectionGeneration;
+  await stopConnection();
 
   manualDisconnect =
     false;
@@ -684,17 +716,21 @@ async function connectToLive(
   );
 
   console.log(
-    `[TikTok] Connection generation: ${myGeneration}`
+    `[TikTok] Signing mode: ${signingMode}`
   );
 
-  console.log(
-    `[TikTok] API KEY mode: ${
-      USE_SIGN_API_KEY &&
-      SIGN_API_KEY
-        ? "AKTIF"
-        : "NONAKTIF"
-    }`
-  );
+  if (
+    signingMode ===
+    "api-key"
+  ) {
+    console.log(
+      "[TikTok] SIGN_API_KEY digunakan."
+    );
+  } else {
+    console.log(
+      "[TikTok] Public signing digunakan. Tidak membutuhkan API key."
+    );
+  }
 
   console.log(
     "================================================"
@@ -705,153 +741,331 @@ async function connectToLive(
   );
 
   /*
-   * Buat koneksi.
+   * ======================================================
+   * OPTIONS
+   * ======================================================
+   *
+   * PENTING:
+   *
+   * fetchRoomInfoOnConnect = false
+   *
+   * Ini sengaja dimatikan agar connector tidak melakukan
+   * request room-info tambahan saat proses connect.
+   *
+   * Ini membantu menghindari error:
+   *
+   * "Empty Payload"
+   *
+   * yang terlihat pada log Railway sebelumnya.
    */
-  const options =
-    buildConnectorOptions();
 
-  const conn =
-    new Connector(
-      username,
-      options
-    );
+  const options = {
+    processInitialData: false,
+
+    fetchRoomInfoOnConnect: false,
+
+    enableExtendedGiftInfo: false,
+
+    webClientOptions: {
+      timeout: {
+        request: 20000
+      }
+    },
+
+    wsClientOptions: {
+      handshakeTimeout: 20000
+    }
+  };
 
   /*
-   * Jangan biarkan koneksi lama
-   * mengambil alih koneksi baru.
+   * API KEY HANYA DIPAKAI JIKA:
+   *
+   * USE_SIGN_API_KEY=true
+   *
    */
+
+  if (
+    signingMode ===
+    "api-key"
+  ) {
+    options.signApiKey =
+      SIGN_API_KEY;
+  }
+
+  /*
+   * Buat connection.
+   */
+
+  let connection;
+
+  try {
+    connection =
+      new Connector(
+        username,
+        options
+      );
+  } catch (err) {
+    console.error(
+      "[TikTok] Constructor error:",
+      err
+    );
+
+    throw err;
+  }
+
   liveConnection =
-    conn;
+    connection;
 
-  /* =======================================================
+  /* =====================================================
      GIFT
-     ======================================================= */
+     ===================================================== */
 
-  conn.on(
+  connection.on(
     "gift",
     (event) => {
-      try {
-        if (!auctionActive) {
-          return;
-        }
-
-        /*
-         * Pastikan event berasal dari
-         * koneksi aktif.
-         */
-        if (
-          liveConnection !==
-          conn
-        ) {
-          return;
-        }
-
-        const gift =
-          giftData(event);
-
-        if (gift) {
-          io.emit(
-            "live:gift",
-            gift
-          );
-        }
-      } catch (err) {
-        console.error(
-          "[TikTok] Gift handler error:",
-          err
-        );
-      }
-    }
-  );
-
-  /* =======================================================
-     CHAT
-     ======================================================= */
-
-  conn.on(
-    "chat",
-    (event) => {
-      try {
-        if (
-          liveConnection !==
-          conn
-        ) {
-          return;
-        }
-
-        const user =
-          userData(event);
-
-        io.emit(
-          "live:event",
-          {
-            type: "chat",
-
-            username:
-              user.uniqueId,
-
-            nickname:
-              user.nickname,
-
-            avatar:
-              user.avatar,
-
-            message:
-              event?.comment ||
-              event?.message ||
-              ""
-          }
-        );
-      } catch (err) {
-        console.error(
-          "[TikTok] Chat handler error:",
-          err
-        );
-      }
-    }
-  );
-
-  /* =======================================================
-     CONNECTED
-     ======================================================= */
-
-  conn.on(
-    "connected",
-    (state) => {
       console.log(
-        "[TikTok] connected:",
-        state
-      );
-    }
-  );
-
-  /* =======================================================
-     ERROR
-     ======================================================= */
-
-  conn.on(
-    "error",
-    (err) => {
-      console.error(
-        "[TikTok] ERROR:",
-        err
+        "[TikTok] Gift event diterima."
       );
 
       /*
-       * Jangan langsung memutuskan koneksi
-       * hanya karena event error.
+       * Gift hanya dihitung kalau
+       * lelang sedang aktif.
        */
+
+      if (
+        !auctionActive
+      ) {
+        console.log(
+          "[Gift] Diabaikan karena auction belum aktif."
+        );
+
+        return;
+      }
+
+      const gift =
+        parseGift(event);
+
+      if (!gift) {
+        return;
+      }
+
+      io.emit(
+        "live:gift",
+        gift
+      );
+
+      /*
+       * Event umum.
+       */
+
+      io.emit(
+        "live:event",
+        {
+          type: "gift",
+          data: gift
+        }
+      );
+    }
+  );
+
+  /* =====================================================
+     CHAT
+     ===================================================== */
+
+  connection.on(
+    "chat",
+    (event) => {
+      const user =
+        getUserData(event);
+
+      io.emit(
+        "live:event",
+        {
+          type: "chat",
+
+          username:
+            user.uniqueId,
+
+          nickname:
+            user.nickname,
+
+          userId:
+            user.userId
+        }
+      );
+    }
+  );
+
+  /* =====================================================
+     MEMBER
+     ===================================================== */
+
+  connection.on(
+    "member",
+    (event) => {
+      const user =
+        getUserData(event);
+
+      io.emit(
+        "live:event",
+        {
+          type: "member",
+
+          username:
+            user.uniqueId,
+
+          nickname:
+            user.nickname,
+
+          userId:
+            user.userId
+        }
+      );
+    }
+  );
+
+  /* =====================================================
+     LIKE
+     ===================================================== */
+
+  connection.on(
+    "like",
+    (event) => {
+      const user =
+        getUserData(event);
+
+      io.emit(
+        "live:event",
+        {
+          type: "like",
+
+          username:
+            user.uniqueId,
+
+          nickname:
+            user.nickname,
+
+          userId:
+            user.userId,
+
+          likeCount:
+            numberPositive(
+              event?.likeCount,
+              event?.like_count
+            )
+        }
+      );
+    }
+  );
+
+  /* =====================================================
+     SHARE
+     ===================================================== */
+
+  connection.on(
+    "social",
+    (event) => {
+      const user =
+        getUserData(event);
+
+      io.emit(
+        "live:event",
+        {
+          type: "social",
+
+          username:
+            user.uniqueId,
+
+          nickname:
+            user.nickname,
+
+          userId:
+            user.userId
+        }
+      );
+    }
+  );
+
+  /* =====================================================
+     CONNECTED
+     ===================================================== */
+
+  connection.on(
+    "connected",
+    (state) => {
+      console.log(
+        "[TikTok] CONNECTED EVENT"
+      );
+
+      console.log(
+        "[TikTok] Room ID:",
+        state?.roomId ||
+        connection?.roomId ||
+        "unknown"
+      );
+    }
+  );
+
+  /* =====================================================
+     ERROR
+     ===================================================== */
+
+  connection.on(
+    "error",
+    (err) => {
+      console.error(
+        "================================================"
+      );
+
+      console.error(
+        "[TikTok] CONNECTOR ERROR"
+      );
+
+      console.error(
+        "Message:",
+        err?.message
+      );
+
+      console.error(
+        "Name:",
+        err?.name
+      );
+
+      console.error(
+        "Reason:",
+        err?.reason
+      );
+
+      console.error(
+        "Request ID:",
+        err?.requestId
+      );
+
+      console.error(
+        "Agent ID:",
+        err?.agentId
+      );
+
+      console.error(
+        "Full error:",
+        err
+      );
+
+      console.error(
+        "================================================"
+      );
+
       emitStatus(
         `Error TikTok: ${formatError(err)}`
       );
     }
   );
 
-  /* =======================================================
+  /* =====================================================
      DISCONNECTED
-     ======================================================= */
+     ===================================================== */
 
-  conn.on(
+  connection.on(
     "disconnected",
     () => {
       console.warn(
@@ -859,78 +1073,47 @@ async function connectToLive(
       );
 
       /*
-       * Jangan reconnect koneksi lama.
+       * Jangan reconnect kalau:
+       *
+       * - user sengaja disconnect
+       * - koneksi sudah diganti
+       * - username kosong
        */
+
       if (
         manualDisconnect ||
-        liveConnection !== conn ||
+        liveConnection !== connection ||
         !activeUsername
       ) {
         return;
       }
 
-      emitStatus(
-        `Koneksi @${activeUsername} terputus. Mencoba ulang...`
-      );
-
-      clearTimeout(
-        reconnectTimer
-      );
-
-      reconnectTimer =
-        setTimeout(
-          () => {
-            if (
-              manualDisconnect ||
-              !activeUsername ||
-              liveConnection !==
-                conn
-            ) {
-              return;
-            }
-
-            connectToLive(
-              activeUsername
-            ).catch(
-              (err) => {
-                console.error(
-                  "[TikTok] Reconnect gagal:",
-                  err
-                );
-
-                emitStatus(
-                  `Reconnect gagal: ${formatError(err)}`
-                );
-              }
-            );
-          },
-          5000
-        );
+      scheduleReconnect();
     }
   );
 
-  /* =======================================================
+  /* =====================================================
      CONNECT
-     ======================================================= */
+     ===================================================== */
 
   try {
-    /*
-     * Coba koneksi.
-     */
+    console.log(
+      `[TikTok] Menjalankan connect() @${username}...`
+    );
+
     const state =
-      await conn.connect();
+      await connection.connect();
 
     /*
-     * Kalau selama proses connect
-     * koneksi sudah diganti,
-     * buang koneksi ini.
+     * Pastikan koneksi ini masih aktif.
      */
+
     if (
       liveConnection !==
-      conn
+      connection
     ) {
       try {
-        await conn.disconnect();
+        await connection.disconnect();
       } catch (_) {}
 
       throw new Error(
@@ -940,14 +1123,8 @@ async function connectToLive(
 
     const roomId =
       state?.roomId ||
-      conn.roomId ||
-      conn.state?.roomId ||
-      "aktif";
-
-    emitStatus(
-      `Terhubung ke LIVE @${username} • Room ${roomId}`,
-      true
-    );
+      connection?.roomId ||
+      "";
 
     console.log(
       "================================================"
@@ -958,18 +1135,42 @@ async function connectToLive(
     );
 
     console.log(
-      `[TikTok] ROOM ID: ${roomId}`
+      `[TikTok] Room ID: ${roomId || "unknown"}`
     );
 
     console.log(
       "================================================"
     );
 
+    emitStatus(
+      `Terhubung ke LIVE @${username}`,
+      true
+    );
+
+    /*
+     * Kirim event connected ke browser.
+     */
+
+    io.emit(
+      "live:connected",
+      {
+        username,
+        roomId:
+          roomId || null
+      }
+    );
+
     return state;
+
   } catch (err) {
+    /*
+     * Kalau koneksi ini masih koneksi aktif,
+     * kosongkan reference.
+     */
+
     if (
       liveConnection ===
-      conn
+      connection
     ) {
       liveConnection =
         null;
@@ -983,17 +1184,37 @@ async function connectToLive(
     );
 
     console.error(
-      "[TikTok] GAGAL CONNECT"
+      `[TikTok] GAGAL CONNECT @${username}`
     );
 
     console.error(
-      "[TikTok] Raw error:",
+      "Friendly:",
+      friendly
+    );
+
+    console.error(
+      "Original:",
       err
     );
 
     console.error(
-      "[TikTok] Friendly:",
-      friendly
+      "Message:",
+      err?.message
+    );
+
+    console.error(
+      "Reason:",
+      err?.reason
+    );
+
+    console.error(
+      "Request ID:",
+      err?.requestId
+    );
+
+    console.error(
+      "Agent ID:",
+      err?.agentId
     );
 
     console.error(
@@ -1004,9 +1225,7 @@ async function connectToLive(
       `Gagal terhubung @${username}: ${friendly}`
     );
 
-    throw new Error(
-      friendly
-    );
+    throw err;
   }
 }
 
@@ -1021,16 +1240,26 @@ io.on(
       `[Socket] Client terhubung: ${socket.id}`
     );
 
+    /*
+     * Kirim status saat client pertama masuk.
+     */
+
     const connected =
       Boolean(
-        liveConnection?.isConnected
+        liveConnection?.isConnected ||
+        liveConnection?.state?.isConnected
       );
 
     socket.emit(
       "live:status",
       {
-        ok:
-          connected,
+        ok: connected,
+
+        connected,
+
+        username:
+          activeUsername ||
+          null,
 
         message:
           connected
@@ -1040,51 +1269,41 @@ io.on(
     );
 
     /* =====================================================
-       CONNECT
+       LIVE CONNECT
        ===================================================== */
 
     socket.on(
       "live:connect",
       async (data = {}) => {
+        const username =
+          cleanUsername(
+            data.username
+          );
+
+        if (!username) {
+          socket.emit(
+            "live:error",
+            {
+              message:
+                "Masukkan username TikTok terlebih dahulu."
+            }
+          );
+
+          return;
+        }
+
         try {
-          const username =
-            cleanUsername(
-              data.username
-            );
-
-          if (!username) {
-            throw new Error(
-              "Masukkan username TikTok terlebih dahulu."
-            );
-          }
-
-          /*
-           * Kalau username sama dan
-           * masih terkoneksi, tidak perlu
-           * membuat koneksi baru.
-           */
-          if (
-            liveConnection &&
-            liveConnection.isConnected &&
-            activeUsername ===
-              username
-          ) {
-            socket.emit(
-              "live:status",
-              {
-                ok: true,
-
-                message:
-                  `Sudah terhubung ke @${username}`
-              }
-            );
-
-            return;
-          }
-
           await connectToLive(
             username
           );
+
+          socket.emit(
+            "live:connected",
+            {
+              username
+            }
+          );
+
         } catch (err) {
           console.error(
             "[Socket] live:connect:",
@@ -1095,8 +1314,11 @@ io.on(
             "live:error",
             {
               message:
+                formatError(err),
+
+              raw:
                 err?.message ||
-                "Gagal menghubungkan TikTok LIVE."
+                String(err)
             }
           );
         }
@@ -1141,7 +1363,7 @@ io.on(
       "live:disconnect",
       async () => {
         console.log(
-          "[Socket] Disconnect TikTok."
+          "[Socket] User meminta disconnect TikTok."
         );
 
         auctionActive =
@@ -1152,6 +1374,13 @@ io.on(
         activeUsername =
           null;
 
+        io.emit(
+          "auction:state",
+          {
+            active: false
+          }
+        );
+
         emitStatus(
           "Koneksi TikTok LIVE diputus."
         );
@@ -1159,7 +1388,7 @@ io.on(
     );
 
     /* =====================================================
-       SOCKET DISCONNECTED
+       SOCKET DISCONNECT
        ===================================================== */
 
     socket.on(
@@ -1182,7 +1411,8 @@ app.get(
   (req, res) => {
     const connected =
       Boolean(
-        liveConnection?.isConnected
+        liveConnection?.isConnected ||
+        liveConnection?.state?.isConnected
       );
 
     res.status(200).json({
@@ -1199,23 +1429,17 @@ app.get(
       auctionActive,
 
       /*
-       * Informasi mode saja.
-       * Tidak pernah mengirim API key.
+       * API key sengaja bukan syarat.
        */
+
       apiKeyConfigured:
         Boolean(SIGN_API_KEY),
 
       apiKeyUsed:
-        Boolean(
-          USE_SIGN_API_KEY &&
-          SIGN_API_KEY
-        ),
+        signingMode ===
+        "api-key",
 
-      signingMode:
-        USE_SIGN_API_KEY &&
-        SIGN_API_KEY
-          ? "api-key"
-          : "public"
+      signingMode
     });
   }
 );
@@ -1229,7 +1453,7 @@ app.get(
   (req, res) => {
     res.sendFile(
       __dirname +
-        "/index.html"
+      "/index.html"
     );
   }
 );
@@ -1260,6 +1484,10 @@ server.listen(
     );
 
     console.log(
+      `Signing mode: ${signingMode}`
+    );
+
+    console.log(
       `SIGN_API_KEY tersedia: ${
         SIGN_API_KEY
           ? "YA"
@@ -1269,15 +1497,10 @@ server.listen(
 
     console.log(
       `SIGN_API_KEY digunakan: ${
-        USE_SIGN_API_KEY &&
-        SIGN_API_KEY
+        signingMode === "api-key"
           ? "YA"
           : "TIDAK"
       }`
-    );
-
-    console.log(
-      "Mode TikTok: PUBLIC LIVESTREAM"
     );
 
     console.log(
@@ -1321,9 +1544,20 @@ async function shutdown(
     `[PROCESS] ${signal} diterima. Shutdown...`
   );
 
+  manualDisconnect =
+    true;
+
   try {
-    await stopConnection();
-  } catch (_) {}
+    if (liveConnection) {
+      await liveConnection.disconnect();
+    }
+  } catch (err) {
+    console.warn(
+      "[PROCESS] Disconnect error:",
+      err?.message ||
+      err
+    );
+  }
 
   server.close(
     () => {
@@ -1335,20 +1569,28 @@ async function shutdown(
     }
   );
 
+  /*
+   * Safety timeout.
+   */
+
   setTimeout(
     () => {
       process.exit(0);
     },
     5000
-  );
+  ).unref();
 }
 
 process.on(
   "SIGTERM",
-  () => shutdown("SIGTERM")
+  () => {
+    shutdown("SIGTERM");
+  }
 );
 
 process.on(
   "SIGINT",
-  () => shutdown("SIGINT")
+  () => {
+    shutdown("SIGINT");
+  }
 );

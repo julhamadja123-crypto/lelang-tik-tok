@@ -1,20 +1,9 @@
 const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
-// Connector TikTok LIVE v1.x memakai CommonJS. Beberapa build mengemas export
-// di dalam `default`, jadi ambil kedua bentuk agar tidak muncul
-// "WebcastPushConnection is not a constructor".
-const TikTokConnectorModule = require("tiktok-live-connector");
-const WebcastPushConnection =
-  TikTokConnectorModule?.WebcastPushConnection ||
-  TikTokConnectorModule?.default?.WebcastPushConnection ||
-  TikTokConnectorModule?.default;
-
-if (typeof WebcastPushConnection !== "function") {
-  throw new Error(
-    "TikTok connector yang terpasang tidak kompatibel. Gunakan tiktok-live-connector versi 1.2.0 sesuai package.json."
-  );
-}
+// TikTok LIVE Connector v1.x menggunakan CommonJS dan mengekspos
+// WebcastPushConnection sebagai named export.
+const { WebcastPushConnection } = require("tiktok-live-connector");
 
 const app = express();
 const server = http.createServer(app);
@@ -173,6 +162,10 @@ function getGiftData(event) {
 }
 
 async function connectToLive(rawUsername) {
+  if (typeof WebcastPushConnection !== "function") {
+    throw new Error("TikTok connector tidak berhasil dimuat. Railway perlu memasang ulang dependency tiktok-live-connector.");
+  }
+
   const username = cleanUsername(rawUsername);
   if (!username) throw new Error("Username TikTok kosong.");
 
@@ -184,7 +177,7 @@ async function connectToLive(rawUsername) {
   // Penting: extended gift info dimatikan saat koneksi.
   // Pada beberapa koneksi TikTok, fetch gift list dapat menghasilkan 403 dan membuat connect gagal.
   const conn = new WebcastPushConnection(username, {
-    // Menggunakan connector v1.2.0 dengan API legacy WebcastPushConnection.
+    // Menggunakan connector v1.2.x dengan API legacy WebcastPushConnection.
     // Versi ini cocok dengan kode CommonJS di server ini.
     processInitialData: false,
     fetchRoomInfoOnConnect: true,
@@ -234,7 +227,7 @@ async function connectToLive(rawUsername) {
     if (liveConnection === conn) liveConnection = null;
     const message = err?.message || String(err) || "Gagal terhubung ke TikTok LIVE";
     const friendlyMessage = /Business plan|fetchWebcastSignatureFromEulerRoute/i.test(message)
-      ? "Server memasang versi connector yang tidak sesuai. Hapus cache deployment lalu install ulang tiktok-live-connector 1.2.0 sesuai package.json."
+      ? "Server memasang versi connector yang tidak sesuai. Hapus cache deployment lalu install ulang dependency TikTok Live Connector sesuai package.json."
       : message;
     emitStatus(`Gagal terhubung @${username}: ${friendlyMessage}`);
     throw err;

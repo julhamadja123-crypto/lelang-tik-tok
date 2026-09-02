@@ -1042,7 +1042,9 @@
             num(b.coins) -
             num(a.coins);
 
-          if (coinDiff !== 0) {
+          if (
+            coinDiff !== 0
+          ) {
             return coinDiff;
           }
 
@@ -1053,6 +1055,7 @@
         });
 
       if (el.participantCount) {
+
         el.participantCount.textContent =
           `${list.length} peserta`;
       }
@@ -1062,185 +1065,90 @@
       }
 
       if (!list.length) {
+
         el.rankingList.innerHTML = `
           <div class="empty-participants">
             Menunggu peserta
           </div>
         `;
+
         return;
       }
 
       const visible =
-        list.slice(0, state.top);
+        list.slice(
+          0,
+          state.top
+        );
 
       el.rankingList.innerHTML =
-        visible.map((p, index) => {
+        visible.map(
+          (p, index) => {
 
-          const nickname =
-            escapeHtml(
-              p.nickname ||
-              p.username ||
-              "Viewer"
-            );
+            const nickname =
+              escapeHtml(
+                p.nickname ||
+                p.username ||
+                "Viewer"
+              );
 
-          const coins =
-            num(p.coins, 0);
+            const username =
+              escapeHtml(
+                p.username ||
+                "viewer"
+              );
 
-          /*
-           * TOP 1-3 memakai medal seperti desain
-           * yang diminta. Tidak ada @username dan
-           * tidak ada avatar agar tampilan HP ringan.
-           */
-          const rankLabel =
-            index === 0 ? "🥇" :
-            index === 1 ? "🥈" :
-            index === 2 ? "🥉" :
-            String(index + 1);
+            const coins =
+              num(
+                p.coins,
+                0
+              );
 
-          const rankClass =
-            index < 3
-              ? `top-${index + 1}`
-              : "";
-
-          return `
-            <div
-              class="participant-row rank-card rank-box mobile-participant-row ${rankClass}"
-              data-user-id="${escapeAttr(
-                participantKey(p)
-              )}"
-            >
+            return `
               <div
-                class="participant-rank rank-number rank-no mobile-rank"
-                aria-label="Peringkat ${index + 1}"
+                class="participant-row rank-card rank-box"
+                data-user-id="${escapeAttr(
+                  participantKey(p)
+                )}"
               >
-                ${rankLabel}
-              </div>
 
-              <div
-                class="participant-info rank-info mobile-participant-info"
-              >
                 <div
-                  class="participant-name mobile-participant-name"
+                  class="participant-rank rank-number rank-no"
                 >
-                  ${nickname}
+                  ${index + 1}
                 </div>
+
+                ${avatarHtml(p)}
+
+                <div
+                  class="participant-info rank-info"
+                >
+
+                  <div
+                    class="participant-name"
+                  >
+                    ${nickname}
+                  </div>
+
+                  <div
+                    class="participant-username"
+                  >
+                    @${username}
+                  </div>
+
+                </div>
+
+                <div
+                  class="participant-coins coin"
+                >
+                  <span class="coin-icon">🪙</span>
+                  <strong>${coins}</strong>
+                </div>
+
               </div>
-
-              <div
-                class="participant-coins coin mobile-participant-coins"
-              >
-                <span class="coin-icon">🪙</span>
-                <strong>${coins}</strong>
-              </div>
-            </div>
-          `;
-        }).join("");
-    }
-
-    /* =======================================================
-       MOBILE PARTICIPANT STYLE
-       ======================================================= */
-
-    function applyMobileParticipantStyle() {
-      if (document.getElementById("mobileParticipantStyle")) {
-        return;
-      }
-
-      const style = document.createElement("style");
-      style.id = "mobileParticipantStyle";
-      style.textContent = `
-        .mobile-participant-row {
-          display: grid !important;
-          grid-template-columns: 58px minmax(0, 1fr) auto !important;
-          align-items: center !important;
-          gap: 8px !important;
-          min-height: 50px !important;
-          padding: 7px 10px !important;
-          box-sizing: border-box !important;
-        }
-
-        .mobile-rank {
-          width: 58px !important;
-          min-width: 58px !important;
-          text-align: center !important;
-          font-size: 25px !important;
-          line-height: 1 !important;
-          margin: 0 !important;
-        }
-
-        .mobile-participant-info {
-          min-width: 0 !important;
-          width: 100% !important;
-          margin: 0 !important;
-        }
-
-        .mobile-participant-name {
-          display: block !important;
-          width: 100% !important;
-          overflow: hidden !important;
-          text-overflow: ellipsis !important;
-          white-space: nowrap !important;
-          font-size: 16px !important;
-          line-height: 1.2 !important;
-          font-weight: 600 !important;
-        }
-
-        .mobile-participant-coins {
-          display: flex !important;
-          align-items: center !important;
-          justify-content: flex-end !important;
-          gap: 3px !important;
-          min-width: 48px !important;
-          margin: 0 !important;
-          white-space: nowrap !important;
-          font-size: 15px !important;
-        }
-
-        .mobile-participant-coins .coin-icon {
-          font-size: 15px !important;
-        }
-
-        .mobile-participant-row .participant-username,
-        .mobile-participant-row .participant-avatar {
-          display: none !important;
-        }
-
-        @media (max-width: 600px) {
-          .mobile-participant-row {
-            grid-template-columns: 54px minmax(0, 1fr) auto !important;
-            min-height: 48px !important;
-            padding: 6px 9px !important;
+            `;
           }
-
-          .mobile-rank {
-            width: 54px !important;
-            min-width: 54px !important;
-            font-size: 24px !important;
-          }
-
-          .mobile-participant-name {
-            font-size: 16px !important;
-          }
-        }
-      `;
-
-      document.head.appendChild(style);
-    }
-
-    function simplifyParticipantHeading() {
-      const elements =
-        document.querySelectorAll("h1,h2,h3,h4,h5,h6,.section-title,.card-title");
-
-      elements.forEach(element => {
-        const text =
-          String(element.textContent || "")
-            .replace(/\s+/g, " ")
-            .trim();
-
-        if (/^peserta lelang$/i.test(text)) {
-          element.textContent = "PESERTA";
-        }
-      });
+        ).join("");
     }
 
     /* =======================================================
@@ -1591,9 +1499,7 @@
           );
 
         const ok =
-          data?.ok !== undefined
-            ? !!data.ok
-            : !!data?.connected;
+          !!data?.ok;
 
         state.connected =
           ok;
@@ -1797,13 +1703,11 @@
         state.participants.clear();
 
         const participants =
-          Array.isArray(data)
-            ? data
-            : Array.isArray(
-                data?.participants
-              )
-              ? data.participants
-              : [];
+          Array.isArray(
+            data?.participants
+          )
+            ? data.participants
+            : [];
 
         for (
           const participant
@@ -1830,45 +1734,14 @@
       "live:gift",
       gift => {
 
-        if (!gift) {
+        if (
+          !gift?.participant
+        ) {
           return;
         }
 
         const participant =
-          gift.participant || {
-            userId:
-              gift.userId ||
-              gift.uniqueId ||
-              gift.username ||
-              gift.nickname ||
-              "unknown",
-
-            uniqueId:
-              gift.uniqueId ||
-              gift.username ||
-              "",
-
-            username:
-              gift.username ||
-              gift.uniqueId ||
-              "",
-
-            nickname:
-              gift.nickname ||
-              gift.username ||
-              gift.uniqueId ||
-              "Viewer",
-
-            avatar:
-              gift.avatar ||
-              "",
-
-            coins:
-              Number(gift.coinValue) || 0,
-
-            gifts:
-              Number(gift.repeatCount) || 1
-          };
+          gift.participant;
 
         state.participants.set(
           participantKey(
@@ -2096,9 +1969,6 @@
        ======================================================= */
 
     loadSettings();
-
-    applyMobileParticipantStyle();
-    simplifyParticipantHeading();
 
     state.initialTimer =
       getMainTime();

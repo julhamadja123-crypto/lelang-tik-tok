@@ -1,45 +1,710 @@
 <!DOCTYPE html>
 <html lang="id">
 <head>
-<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Coin Auction Dashboard V3</title><link rel="stylesheet" href="style.css">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Coin Auction Dashboard V5</title>
+<link rel="stylesheet" href="style.css">
+
+<style>
+/* =========================================================
+   TAMBAHAN TAMPILAN
+   ========================================================= */
+
+.auction-title-card {
+  display: none !important;
+}
+
+/* Judul PESERTA dibuat lebih kecil */
+.ranking-section .section-title h2 {
+  font-size: 18px !important;
+  line-height: 22px !important;
+  margin: 0 !important;
+}
+
+.ranking-section .section-title {
+  margin-bottom: 8px !important;
+}
+
+/* =========================================================
+   EXTRA TIME
+   ========================================================= */
+
+.extra-time-box {
+  margin-top: 12px;
+  padding: 12px;
+  border-radius: 12px;
+  background: rgba(255,255,255,.05);
+  border: 1px solid rgba(255,255,255,.08);
+}
+
+.extra-time-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.extra-time-label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.extra-time-label strong {
+  font-size: 14px;
+}
+
+.extra-time-label small {
+  font-size: 11px;
+  opacity: .65;
+}
+
+.extra-time-input {
+  width: 90px !important;
+  min-width: 90px;
+  text-align: center;
+}
+
+.extra-time-status {
+  margin-top: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  min-height: 17px;
+}
+
+.extra-time-status.active {
+  color: #ff3030 !important;
+}
+
+/* =========================================================
+   TIMER
+   ========================================================= */
+
+#timer {
+  color: #fff !important;
+  transition: color .2s ease;
+}
+
+#timer.extra-active {
+  color: #ff3030 !important;
+}
+
+#timer.draw-time-active {
+  color: #ffd43b !important;
+}
+
+/* =========================================================
+   PESERTA COMPACT
+   ========================================================= */
+
+#rankingList {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 6px !important;
+}
+
+#rankingList .rank-card,
+#rankingList .rank-box {
+  min-height: 0 !important;
+  height: auto !important;
+  padding: 7px 9px !important;
+  margin: 0 !important;
+  border-radius: 11px !important;
+
+  display: grid !important;
+  grid-template-columns: 27px 34px minmax(0,1fr) auto !important;
+  align-items: center !important;
+  column-gap: 6px !important;
+}
+
+#rankingList .box-top {
+  display: contents !important;
+}
+
+#rankingList .rank-no {
+  grid-column: 1 !important;
+  width: 25px !important;
+  height: 25px !important;
+
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+
+  font-size: 13px !important;
+}
+
+#rankingList .box-rank {
+  display: none !important;
+}
+
+#rankingList .user-avatar {
+  grid-column: 2 !important;
+
+  width: 34px !important;
+  height: 34px !important;
+  min-width: 34px !important;
+  min-height: 34px !important;
+
+  border-radius: 50% !important;
+  overflow: hidden !important;
+
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+
+  background: #25252b !important;
+  border: 1px solid rgba(255,255,255,.14) !important;
+}
+
+#rankingList .user-avatar img {
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: cover !important;
+}
+
+#rankingList .rank-info {
+  grid-column: 3 !important;
+  min-width: 0 !important;
+}
+
+#rankingList .rank-info strong {
+  display: block !important;
+  font-size: 12px !important;
+  line-height: 16px !important;
+
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+
+#rankingList .rank-info span {
+  display: none !important;
+}
+
+#rankingList .coin {
+  grid-column: 4 !important;
+
+  display: flex !important;
+  align-items: center !important;
+  justify-content: flex-end !important;
+
+  gap: 3px !important;
+  white-space: nowrap !important;
+}
+
+#rankingList .coin-icon {
+  font-size: 12px !important;
+}
+
+#rankingList .coin strong {
+  font-size: 13px !important;
+  line-height: 16px !important;
+}
+
+#rankingList .empty-box {
+  display: block !important;
+  padding: 10px !important;
+}
+
+/* =========================================================
+   MOBILE
+   ========================================================= */
+
+@media (max-width:480px) {
+
+  .ranking-section .section-title h2 {
+    font-size: 16px !important;
+  }
+
+  #rankingList {
+    gap: 4px !important;
+  }
+
+  #rankingList .rank-card,
+  #rankingList .rank-box {
+    padding: 5px 7px !important;
+    grid-template-columns:
+      25px 31px minmax(0,1fr) auto !important;
+    column-gap: 5px !important;
+  }
+
+  #rankingList .rank-no {
+    width: 24px !important;
+    height: 24px !important;
+    font-size: 12px !important;
+  }
+
+  #rankingList .user-avatar {
+    width: 31px !important;
+    height: 31px !important;
+    min-width: 31px !important;
+    min-height: 31px !important;
+  }
+
+  #rankingList .rank-info strong {
+    font-size: 11px !important;
+  }
+
+  #rankingList .coin strong {
+    font-size: 12px !important;
+  }
+}
+</style>
 </head>
+
 <body>
+
 <div class="app-shell">
-<header class="topbar"><div><p class="eyebrow"><span class="live-dot"></span> LIVE SYSTEM</p><h1>COIN AUCTION</h1></div><button id="soundBtn" class="icon-btn">🔊</button></header>
-<main><section class="hero-banner"><div class="hero-glow"></div><div><span class="hero-chip">⚡ AUCTION CONTROL</span><h2>Kontrol LIVE<br><b>lebih interaktif.</b></h2><p>Coin Gift masuk otomatis ke ranking lelang.</p></div><div class="hero-stat"><strong id="heroViewer">0</strong><span>EVENT LIVE</span></div></section>
-<section class="status-card"><div class="status-row"><div class="avatar">TT</div><div class="status-info"><span class="label">TIKTOK LIVE</span><strong id="liveName">@Belum Terhubung</strong></div><span class="status-badge offline" id="statusBadge">OFFLINE</span></div><div class="connect-panel">
-      <label class="username-label">USERNAME TIKTOK YANG SEDANG LIVE
-        <div class="username-row"><span>@</span><input id="tiktokUsername" maxlength="80" placeholder="username_tiktok"></div>
-      </label>
-      <p class="connect-help">Masukkan username host yang sedang LIVE, lalu hubungkan server event TikTok.</p>
-      <button class="connect-btn" id="connectBtn">Hubungkan TikTok LIVE</button>
-      <button class="disconnect-btn" id="disconnectBtn">Putuskan Koneksi</button>
-      <div class="connection-log" id="connectionLog">Status: belum terhubung</div>
-    </div></section>
 
-<section class="controls"><button class="control start" id="startBtn">▶ Mulai</button><button class="control pause" id="pauseBtn">Ⅱ Pause</button><button class="control reset" id="resetBtn">↻ Reset</button><button class="control finish" id="finishBtn">■ Selesai</button></section>
-<div class="auction-board-dashboard"><section class="auction-title-card"><p class="label">JUDUL LELANG</p><h2 id="auctionTitleDisplay">LIVE COIN AUCTION</h2><p class="title-note">Judul ini akan tampil di overlay LIVE</p></section>
+<header class="topbar">
+  <div>
+    <p class="eyebrow">
+      <span class="live-dot"></span>
+      LIVE SYSTEM
+    </p>
 
-<section class="timer-card"><p class="label">WAKTU LELANG</p><div class="timer" id="timer">05:00</div><div class="progress"><span id="progressBar"></span></div><p class="timer-note" id="timerNote">Siap untuk memulai lelang</p></section>
+    <h1>COIN AUCTION</h1>
+  </div>
 
-<section class="ranking-section"><div class="section-title"><div><p class="label">REALTIME</p><h2>Peserta Lelang</h2></div><span class="count" id="participantCount">0 peserta</span></div><div id="rankingList" class="ranking-list"></div></section>
+  <button id="soundBtn" class="icon-btn">🔊</button>
+</header>
 
+<main>
 
+<section class="hero-banner">
+  <div class="hero-glow"></div>
 
-</div><section class="settings-card">
-<div class="section-title compact"><div><p class="label">PENGATURAN</p><h2>Judul, Waktu & Peserta</h2></div></div>
-<div class="settings-grid one"><label>Judul Lelang<textarea id="titleInput" maxlength="140" placeholder="Contoh: LELANG SPESIAL MALAM INI - KIRIM GIFT UNTUK MENAMBAH COIN">LIVE COIN AUCTION</textarea></label></div>
-<div class="settings-grid">
-<label>Menit<input id="minuteInput" type="number" min="0" max="120" value="5"></label>
-<label>Detik<input id="secondInput" type="number" min="0" max="59" value="0"></label>
-</div>
-<div class="settings-grid single-select"><label>Tampilkan Ranking<select id="topInput"><option value="3">Top 3</option><option value="5" selected>Top 5</option><option value="10">Top 10</option></select></label></div>
-<div class="draw-info"><span>⚡ DRAW TIME</span><strong>20 DETIK</strong><small>Otomatis aktif jika Coin peserta peringkat 1 dan 2 sama saat waktu habis.</small></div><button class="save-settings" id="saveSettings">Simpan Pengaturan</button>
+  <div>
+    <span class="hero-chip">⚡ AUCTION CONTROL</span>
+
+    <h2>
+      Kontrol LIVE<br>
+      <b>lebih interaktif.</b>
+    </h2>
+
+    <p>
+      Coin Gift masuk otomatis ke ranking.
+    </p>
+  </div>
+
+  <div class="hero-stat">
+    <strong id="heroViewer">0</strong>
+    <span>EVENT LIVE</span>
+  </div>
 </section>
 
-<section class="activity-card"><div class="section-title compact"><div><p class="label">LIVE EVENT</p><h2>Gift Terakhir</h2></div></div><div id="activityList" class="activity-list"><p class="empty">Belum ada gift masuk.</p></div></section>
+
+<section class="status-card">
+
+  <div class="status-row">
+
+    <div class="avatar">TT</div>
+
+    <div class="status-info">
+
+      <span class="label">
+        TIKTOK LIVE
+      </span>
+
+      <strong id="liveName">
+        @Belum Terhubung
+      </strong>
+
+    </div>
+
+    <span
+      class="status-badge offline"
+      id="statusBadge"
+    >
+      OFFLINE
+    </span>
+
+  </div>
+
+
+  <div class="connect-panel">
+
+    <label class="username-label">
+      USERNAME TIKTOK YANG SEDANG LIVE
+
+      <div class="username-row">
+        <span>@</span>
+
+        <input
+          id="tiktokUsername"
+          maxlength="80"
+          placeholder="username_tiktok"
+        >
+      </div>
+    </label>
+
+
+    <p class="connect-help">
+      Masukkan username host yang sedang LIVE,
+      lalu hubungkan server event TikTok.
+    </p>
+
+
+    <button
+      class="connect-btn"
+      id="connectBtn"
+    >
+      Hubungkan TikTok LIVE
+    </button>
+
+
+    <button
+      class="disconnect-btn"
+      id="disconnectBtn"
+    >
+      Putuskan Koneksi
+    </button>
+
+
+    <div
+      class="connection-log"
+      id="connectionLog"
+    >
+      Status: belum terhubung
+    </div>
+
+  </div>
+
+</section>
+
+
+<section class="controls">
+
+  <button
+    class="control start"
+    id="startBtn"
+  >
+    ▶ Mulai
+  </button>
+
+  <button
+    class="control pause"
+    id="pauseBtn"
+  >
+    Ⅱ Pause
+  </button>
+
+  <button
+    class="control reset"
+    id="resetBtn"
+  >
+    ↻ Reset
+  </button>
+
+  <button
+    class="control finish"
+    id="finishBtn"
+  >
+    ■ Selesai
+  </button>
+
+</section>
+
+
+<div class="auction-board-dashboard">
+
+
+<section class="timer-card">
+
+  <p class="label">
+    WAKTU
+  </p>
+
+  <div
+    class="timer"
+    id="timer"
+  >
+    05:00
+  </div>
+
+  <div class="progress">
+    <span id="progressBar"></span>
+  </div>
+
+  <p
+    class="timer-note"
+    id="timerNote"
+  >
+    Siap untuk memulai
+  </p>
+
+  <!-- EXTRA TIME STATUS -->
+  <div
+    class="extra-time-status"
+    id="extraTimeStatus"
+  ></div>
+
+</section>
+
+
+<section class="ranking-section">
+
+  <div class="section-title">
+
+    <div>
+
+      <p class="label">
+        REALTIME
+      </p>
+
+      <h2>
+        Peserta
+      </h2>
+
+    </div>
+
+    <span
+      class="count"
+      id="participantCount"
+    >
+      0 peserta
+    </span>
+
+  </div>
+
+
+  <div
+    id="rankingList"
+    class="ranking-list"
+  ></div>
+
+</section>
+
+
+</div>
+
+
+<section class="settings-card">
+
+  <div class="section-title compact">
+
+    <div>
+
+      <p class="label">
+        PENGATURAN
+      </p>
+
+      <h2>
+        Waktu & Peserta
+      </h2>
+
+    </div>
+
+  </div>
+
+
+  <div class="settings-grid one">
+
+    <label>
+      Judul
+
+      <textarea
+        id="titleInput"
+        maxlength="140"
+        placeholder="Contoh: LIVE SPESIAL MALAM INI"
+      >LIVE COIN AUCTION</textarea>
+
+    </label>
+
+  </div>
+
+
+  <div class="settings-grid">
+
+    <label>
+      Menit
+
+      <input
+        id="minuteInput"
+        type="number"
+        min="0"
+        max="120"
+        value="5"
+      >
+
+    </label>
+
+
+    <label>
+      Detik
+
+      <input
+        id="secondInput"
+        type="number"
+        min="0"
+        max="59"
+        value="0"
+      >
+
+    </label>
+
+  </div>
+
+
+  <!-- EXTRA TIME -->
+  <div class="extra-time-box">
+
+    <div class="extra-time-row">
+
+      <div class="extra-time-label">
+
+        <strong>
+          ➕ Extra Time
+        </strong>
+
+        <small>
+          Aktif otomatis setelah waktu utama habis
+        </small>
+
+      </div>
+
+      <input
+        class="extra-time-input"
+        id="extraTimeInput"
+        type="number"
+        min="0"
+        max="3600"
+        value="30"
+      >
+
+    </div>
+
+  </div>
+
+
+  <div class="settings-grid single-select">
+
+    <label>
+      Tampilkan Ranking
+
+      <select id="topInput">
+
+        <option value="3">
+          Top 3
+        </option>
+
+        <option
+          value="5"
+          selected
+        >
+          Top 5
+        </option>
+
+        <option value="10">
+          Top 10
+        </option>
+
+      </select>
+
+    </label>
+
+  </div>
+
+
+  <div class="draw-info">
+
+    <span>
+      ⚡ DRAW TIME
+    </span>
+
+    <strong>
+      20 DETIK
+    </strong>
+
+    <small>
+      Otomatis aktif jika Coin peserta
+      peringkat 1 dan 2 sama saat waktu habis.
+    </small>
+
+  </div>
+
+
+  <button
+    class="save-settings"
+    id="saveSettings"
+  >
+    Simpan Pengaturan
+  </button>
+
+</section>
+
+
+<section class="activity-card">
+
+  <div class="section-title compact">
+
+    <div>
+
+      <p class="label">
+        LIVE EVENT
+      </p>
+
+      <h2>
+        Gift Terakhir
+      </h2>
+
+    </div>
+
+  </div>
+
+
+  <div
+    id="activityList"
+    class="activity-list"
+  >
+
+    <p class="empty">
+      Belum ada gift masuk.
+    </p>
+
+  </div>
+
+</section>
+
 </main>
-<nav class="bottom-nav"><button class="nav-item active">⌂<span>Dashboard</span></button><button class="nav-item">♜<span>Ranking</span></button><button class="nav-item">▣<span>Overlay</span></button><button class="nav-item">⚙<span>Settings</span></button></nav>
-</div><div class="toast" id="toast"></div><script src="/socket.io/socket.io.js"></script>
-<script src="app.js"></script></body></html>
+
+
+<nav class="bottom-nav">
+
+  <button class="nav-item active">
+    ⌂
+    <span>Dashboard</span>
+  </button>
+
+  <button class="nav-item">
+    ♜
+    <span>Ranking</span>
+  </button>
+
+  <button class="nav-item">
+    ▣
+    <span>Overlay</span>
+  </button>
+
+  <button class="nav-item">
+    ⚙
+    <span>Settings</span>
+  </button>
+
+</nav>
+
+</div>
+
+
+<div
+  class="toast"
+  id="toast"
+></div>
+
+
+<script src="/socket.io/socket.io.js"></script>
+<script src="app.js"></script>
+
+</body>
+</html>

@@ -2,31 +2,66 @@ const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
 
+/* =========================================================
+   SERVER
+   ========================================================= */
+
 const app = express();
 const server = http.createServer(app);
+
 const io = new Server(server, {
-  cors: { origin: "*", methods: ["GET", "POST"] }
+  cors: {
+    origin: "*",
+    methods: ["GET", "POST"]
+  }
 });
 
 app.use(express.json());
 app.use(express.static(__dirname));
 
+/* =========================================================
+   TIKTOK
+   ========================================================= */
+
 let TikTokLiveConnection = null;
 let liveConnection = null;
 let activeUsername = null;
+
 let reconnectTimer = null;
 let manualDisconnect = false;
 
-// Server is authoritative for gift acceptance.
-let auctionState = "idle"; // idle | running | paused | finished
+/* =========================================================
+   AUCTION STATE
+   idle     = belum mulai
+   running  = menerima gift
+   paused   = berhenti sementara
+   finished = selesai, data peserta tetap
+   ========================================================= */
+
+let auctionState = "idle";
 let auctionVersion = 0;
 
+/* =========================================================
+   PARTICIPANTS
+   ========================================================= */
+
 const participants = new Map();
+
+/* =========================================================
+   DUPLICATE GIFT PROTECTION
+   ========================================================= */
+
 const processedGiftEvents = new Map();
 const GIFT_TTL = 60 * 1000;
 
+/* =========================================================
+   LOAD TIKTOK CONNECTOR
+   ========================================================= */
+
 async function loadTikTokConnector() {
-  if (TikTokLiveConnection) return TikTokLiveConnection;
+  if (TikTokLiveConnection) {
+    return TikTokLiveConnection;
+  }
 
   const mod = await import("tiktok-live-connector");
 
@@ -44,6 +79,10 @@ async function loadTikTokConnector() {
   return TikTokLiveConnection;
 }
 
+/* =========================================================
+   USERNAME CLEANER
+   ========================================================= */
+
 function cleanUsername(value) {
   return String(value || "")
     .trim()
@@ -55,10 +94,22 @@ function cleanUsername(value) {
     .replace(/\s+/g, "");
 }
 
+/* =========================================================
+   STATUS
+   ========================================================= */
+
 function emitStatus(message, ok = false) {
   console.log(`[STATUS] ${message}`);
-  io.emit("live:status", { message, ok });
+
+  io.emit("live:status", {
+    message,
+    ok
+  });
 }
+
+/* =========================================================
+   ERROR FORMAT
+   ========================================================= */
 
 function formatError(err) {
   const msg =
@@ -96,15 +147,21 @@ function formatError(err) {
   return msg;
 }
 
-function firstNumber(...values) {
-  for (const v of values) {
-    if (
-      v === null ||
-      v === undefined ||
-      v === ""
-    ) continue;
+/* =========================================================
+   NUMBER
+   ========================================================= */
 
-    const n = Number(v);
+function numberPositive(...values) {
+  for (const value of values) {
+    if (
+      value === null ||
+      value === undefined ||
+      value === ""
+    ) {
+      continue;
+    }
+
+    const n = Number(value);
 
     if (
       Number.isFinite(n) &&
@@ -117,64 +174,53 @@ function firstNumber(...values) {
   return 0;
 }
 
+/* =========================================================
+   USER DATA
+   ========================================================= */
+
 function userData(event) {
-  const user =
-    event?.user ||
-    event?.userInfo ||
-    event?.userDetails ||
-    {};
-
-  const userId = String(
-    user.userId ||
-    user.user_id ||
-    user.id ||
-    event?.userId ||
-    event?.user_id ||
-    event?.uid ||
-    "unknown"
-  );
-
-  const uniqueId = String(
-    user.uniqueId ||
-    user.unique_id ||
-    event?.uniqueId ||
-    event?.unique_id ||
-    event?.nickname ||
-    user.nickname ||
-    "Viewer"
-  );
-
-  const nickname = String(
-    user.nickname ||
-    user.displayName ||
-    event?.nickname ||
-    event?.displayName ||
-    uniqueId ||
-    "Viewer"
-  );
-
-  const avatar =
-    user.profilePictureUrl ||
-    user.profilePicture?.url ||
-    user.profilePicture?.urls?.[0] ||
-    user.avatarLarger ||
-    user.avatarMedium ||
-    user.avatarThumb ||
-    event?.profilePictureUrl ||
-    event?.profilePicture ||
-    event?.avatar ||
-    null;
+  const user = event?.user || {};
 
   return {
-    userId,
-    uniqueId,
-    nickname,
-    avatar
+    userId:
+      user.userId ||
+      user.id ||
+      event?.userId ||
+      event?.user_id ||
+      event?.uniqueId ||
+      "unknown",
+
+    uniqueId:
+      user.uniqueId ||
+      event?.uniqueId ||
+      event?.nickname ||
+      "Viewer",
+
+    nickname:
+      user.nickname ||
+      event?.nickname ||
+      user.uniqueId ||
+      event?.uniqueId ||
+      "Viewer",
+
+    avatar:
+      user.profilePictureUrl ||
+      user.profilePicture?.url ||
+      user.profilePicture?.urls?.[0] ||
+      event?.profilePictureUrl ||
+      event?.profilePicture ||
+      null
   };
 }
 
+/* =========================================================
+   GIFT DATA
+   ========================================================= */
+
 function giftData(event) {
-  if (!event) return null;
+  if (!event) {
+    return null;
+  }
 
   const user = userData(event);
 
@@ -183,13 +229,8 @@ function giftData(event) {
     event.gift_id ??
     event.gift?.giftId ??
     event.gift?.gift_id ??
-    event.gift?.id ??
     event.giftDetails?.giftId ??
     event.giftDetails?.gift_id ??
-    event.giftDetails?.id ??
-    event.extendedGiftInfo?.giftId ??
-    event.extendedGiftInfo?.gift_id ??
-    event.extendedGiftInfo?.id ??
     ""
   );
 
@@ -197,32 +238,24 @@ function giftData(event) {
     event.giftName ||
     event.gift_name ||
     event.gift?.giftName ||
-    event.gift?.gift_name ||
     event.gift?.name ||
     event.giftDetails?.giftName ||
-    event.giftDetails?.gift_name ||
     event.giftDetails?.name ||
-    (giftId
-      ? `Gift #${giftId}`
-      : "Gift");
+    (giftId ? `Gift #${giftId}` : "Gift");
 
-  const diamondCount = firstNumber(
+  const diamondCount = numberPositive(
     event.diamondCount,
     event.diamond_count,
-    event.diamondCost,
-    event.diamond_cost,
 
     event.gift?.diamondCount,
     event.gift?.diamond_count,
     event.gift?.diamondCost,
     event.gift?.diamond_cost,
-    event.gift?.diamond,
 
     event.giftDetails?.diamondCount,
     event.giftDetails?.diamond_count,
     event.giftDetails?.diamondCost,
     event.giftDetails?.diamond_cost,
-    event.giftDetails?.diamond,
 
     event.extendedGiftInfo?.diamondCount,
     event.extendedGiftInfo?.diamond_count,
@@ -233,51 +266,42 @@ function giftData(event) {
   const repeatCount = Math.max(
     1,
     Math.floor(
-      firstNumber(
+      numberPositive(
         event.repeatCount,
         event.repeat_count,
         event.gift?.repeatCount,
         event.gift?.repeat_count,
-        event.giftDetails?.repeatCount,
-        event.giftDetails?.repeat_count,
-        event.extendedGiftInfo?.repeatCount,
-        event.extendedGiftInfo?.repeat_count,
         1
       )
     )
   );
 
-  const giftType =
-    Number(
-      event.giftType ??
-      event.gift_type ??
-      event.gift?.giftType ??
-      event.gift?.gift_type ??
-      event.giftDetails?.giftType ??
-      event.giftDetails?.gift_type ??
-      0
-    ) || 0;
+  const giftType = Number(
+    event.giftType ??
+    event.gift_type ??
+    event.gift?.giftType ??
+    event.gift?.gift_type ??
+    event.giftDetails?.giftType ??
+    event.giftDetails?.gift_type ??
+    0
+  );
 
   const repeatValue =
     event.repeatEnd ??
     event.repeat_end ??
     event.gift?.repeatEnd ??
-    event.gift?.repeat_end ??
-    event.giftDetails?.repeatEnd ??
-    event.giftDetails?.repeat_end;
+    event.gift?.repeat_end;
 
   const repeatEnd =
-    repeatValue === undefined ||
-    repeatValue === null
-      ? true
-      : (
-          repeatValue === true ||
-          repeatValue === 1 ||
-          repeatValue === "1" ||
-          repeatValue === "true"
-        );
+    repeatValue === true ||
+    repeatValue === 1 ||
+    repeatValue === "1" ||
+    repeatValue === "true";
 
-  // Streak: only count the final event.
+  /*
+   * TikTok streak gift:
+   * hanya proses event terakhir.
+   */
   if (
     giftType === 1 &&
     !repeatEnd
@@ -285,70 +309,15 @@ function giftData(event) {
     return null;
   }
 
-  if (diamondCount <= 0) {
-    console.warn(
-      "[GIFT] Diamond value tidak ditemukan:",
-      JSON.stringify(event)
-    );
-
-    return null;
-  }
-
-  const directId =
-    event.msgId ||
-    event.msg_id ||
-    event.messageId ||
-    event.message_id ||
-    event.transactionId ||
-    event.transaction_id ||
-    event.eventId ||
-    event.event_id;
-
-  const eventKey = String(
-    directId ||
-    [
-      event.groupId ||
-      event.group_id ||
-      "",
-      user.userId,
-      giftId || giftName,
-      repeatCount,
-      event.createTime ||
-        event.create_time ||
-        event.timestamp ||
-        "",
-      repeatEnd
-    ].join("|")
-  );
-
-  const now = Date.now();
-
-  for (
-    const [key, time]
-    of processedGiftEvents
-  ) {
-    if (
-      now - time >
-      GIFT_TTL
-    ) {
-      processedGiftEvents.delete(key);
-    }
-  }
-
   if (
-    processedGiftEvents.has(eventKey)
+    !giftId ||
+    diamondCount <= 0
   ) {
     return null;
   }
-
-  processedGiftEvents.set(
-    eventKey,
-    now
-  );
 
   const coinValue =
-    diamondCount *
-    repeatCount;
+    diamondCount * repeatCount;
 
   if (
     !Number.isFinite(coinValue) ||
@@ -357,11 +326,67 @@ function giftData(event) {
     return null;
   }
 
+  /* =======================================================
+     DUPLICATE KEY
+     ======================================================= */
+
+  const eventKey = String(
+    event.msgId ||
+    event.messageId ||
+    event.transactionId ||
+    event.transaction_id ||
+    event.id ||
+    (
+      `${event.groupId || ""}|` +
+      `${user.userId}|` +
+      `${giftId}|` +
+      `${repeatCount}|` +
+      `${event.createTime || event.timestamp || ""}|` +
+      `${repeatEnd}`
+    )
+  );
+
+  const now = Date.now();
+
+  /* Bersihkan cache lama */
+  for (const [
+    key,
+    time
+  ] of processedGiftEvents) {
+    if (
+      now - time >
+      GIFT_TTL
+    ) {
+      processedGiftEvents.delete(key);
+    }
+  }
+
+  /* Gift sudah pernah diproses */
+  if (
+    processedGiftEvents.has(eventKey)
+  ) {
+    console.log(
+      `[GIFT] DUPLIKAT diabaikan: ${eventKey}`
+    );
+
+    return null;
+  }
+
+  processedGiftEvents.set(
+    eventKey,
+    now
+  );
+
+  console.log(
+    `[GIFT] @${user.uniqueId} | ` +
+    `${giftName} | ` +
+    `${diamondCount} x ${repeatCount} = ${coinValue}`
+  );
+
   return {
     username: user.uniqueId,
     nickname: user.nickname,
     userId: user.userId,
-    avatar: user.avatar,
 
     giftName,
     giftId,
@@ -375,7 +400,7 @@ function giftData(event) {
 
     msgId:
       event.msgId ||
-      event.msg_id ||
+      event.messageId ||
       null,
 
     transactionId:
@@ -386,38 +411,38 @@ function giftData(event) {
     groupId:
       event.groupId ||
       event.group_id ||
-      null
+      null,
+
+    avatar: user.avatar
   };
 }
 
-function participantSnapshot() {
-  return Array
-    .from(participants.values())
-    .sort(
-      (a, b) =>
-        b.coins - a.coins ||
-        a.joinedAt - b.joinedAt
-    );
-}
+/* =========================================================
+   PARTICIPANT SNAPSHOT
+   ========================================================= */
 
-function emitAuctionState() {
-  io.emit(
-    "auction:state",
-    {
-      state: auctionState,
-      active:
-        auctionState === "running",
-      version: auctionVersion
-    }
+function getParticipants() {
+  return Array.from(
+    participants.values()
+  ).sort(
+    (a, b) =>
+      Number(b.coins || 0) -
+        Number(a.coins || 0) ||
+      Number(a.joinedAt || 0) -
+        Number(b.joinedAt || 0)
   );
 }
+
+/* =========================================================
+   BROADCAST PARTICIPANTS
+   ========================================================= */
 
 function broadcastParticipants() {
   io.emit(
     "auction:participants",
     {
       participants:
-        participantSnapshot(),
+        getParticipants(),
 
       count:
         participants.size,
@@ -428,87 +453,240 @@ function broadcastParticipants() {
   );
 }
 
-function resetParticipants() {
-  participants.clear();
-  broadcastParticipants();
-}
+/* =========================================================
+   APPLY GIFT
+   ========================================================= */
 
 function applyGift(gift) {
-  const key =
-    gift.userId ||
-    gift.username;
 
-  let p =
+  /*
+   * PENGAMAN UTAMA
+   *
+   * HANYA state running yang boleh
+   * menambahkan koin.
+   */
+  if (
+    auctionState !== "running"
+  ) {
+    console.log(
+      `[GIFT] Diabaikan karena auction state = ${auctionState}`
+    );
+
+    return;
+  }
+
+  const key =
+    String(
+      gift.userId ||
+      gift.username ||
+      "unknown"
+    );
+
+  let participant =
     participants.get(key);
 
-  if (!p) {
-    p = {
-      userId: key,
-      username: gift.username,
-      nickname: gift.nickname,
+  if (!participant) {
+
+    participant = {
+      userId:
+        gift.userId ||
+        key,
+
+      username:
+        gift.username ||
+        "viewer",
+
+      nickname:
+        gift.nickname ||
+        gift.username ||
+        "Viewer",
+
       avatar:
         gift.avatar ||
         null,
 
       coins: 0,
+
       gifts: 0,
 
       joinedAt:
         Date.now()
     };
-
-    participants.set(
-      key,
-      p
-    );
   }
 
-  p.username =
+  /*
+   * 1 gift = nilai diamond.
+   * 3 coin = +3.
+   */
+  participant.coins =
+    Number(participant.coins || 0) +
+    Number(gift.coinValue || 0);
+
+  participant.gifts =
+    Number(participant.gifts || 0) +
+    1;
+
+  participant.username =
     gift.username ||
-    p.username;
+    participant.username;
 
-  p.nickname =
+  participant.nickname =
     gift.nickname ||
-    p.nickname;
+    participant.nickname;
 
-  p.avatar =
-    gift.avatar ||
-    p.avatar;
+  if (gift.avatar) {
+    participant.avatar =
+      gift.avatar;
+  }
 
-  p.coins +=
-    gift.coinValue;
+  participants.set(
+    key,
+    participant
+  );
 
-  p.gifts +=
-    gift.repeatCount;
+  console.log(
+    `[AUCTION] +${gift.coinValue} coin -> ` +
+    `@${participant.username} | ` +
+    `Total: ${participant.coins}`
+  );
 
-  const snapshot = {
-    ...p
-  };
-
+  /*
+   * Update daftar peserta.
+   */
   broadcastParticipants();
 
+  /*
+   * live:gift hanya sebagai informasi internal
+   * ke frontend.
+   *
+   * Frontend tidak boleh menambahkan coin lagi
+   * dari event ini. Snapshot participants adalah
+   * sumber data utama.
+   */
   io.emit(
     "live:gift",
     {
       ...gift,
-
-      participant:
-        snapshot,
-
-      auctionState,
-      version:
-        auctionVersion
+      participant
     }
   );
 }
 
+/* =========================================================
+   AUCTION STATE BROADCAST
+   ========================================================= */
+
+function broadcastAuctionState() {
+  io.emit(
+    "auction:state",
+    {
+      state:
+        auctionState,
+
+      active:
+        auctionState === "running",
+
+      version:
+        auctionVersion,
+
+      participants:
+        getParticipants(),
+
+      count:
+        participants.size
+    }
+  );
+}
+
+/* =========================================================
+   SET AUCTION STATE
+   ========================================================= */
+
+function setAuctionState(nextState) {
+
+  const allowed = [
+    "idle",
+    "running",
+    "paused",
+    "finished"
+  ];
+
+  if (
+    !allowed.includes(nextState)
+  ) {
+    return false;
+  }
+
+  auctionState =
+    nextState;
+
+  auctionVersion++;
+
+  console.log(
+    `[Auction] STATE = ${auctionState}`
+  );
+
+  /*
+   * PENTING:
+   *
+   * finished TIDAK menghapus peserta.
+   *
+   * paused TIDAK menghapus peserta.
+   *
+   * idle juga tidak otomatis menghapus.
+   *
+   * Penghapusan hanya dilakukan oleh
+   * auction:reset.
+   */
+
+  broadcastAuctionState();
+
+  return true;
+}
+
+/* =========================================================
+   RESET AUCTION
+   ========================================================= */
+
+function resetAuction() {
+
+  /*
+   * RESET = HAPUS SEMUA
+   */
+  participants.clear();
+
+  auctionState =
+    "idle";
+
+  auctionVersion++;
+
+  console.log(
+    "[Auction] RESET -> peserta dikosongkan."
+  );
+
+  io.emit(
+    "auction:participants",
+    {
+      participants: [],
+      count: 0,
+      version: auctionVersion
+    }
+  );
+
+  broadcastAuctionState();
+}
+
+/* =========================================================
+   STOP TIKTOK CONNECTION
+   ========================================================= */
+
 async function stopConnection() {
+
   clearTimeout(
     reconnectTimer
   );
 
-  reconnectTimer =
-    null;
+  reconnectTimer = null;
 
   manualDisconnect =
     true;
@@ -525,16 +703,20 @@ async function stopConnection() {
     } catch (err) {
       console.warn(
         "[TikTok] disconnect:",
-        err?.message ||
-        err
+        err?.message || err
       );
     }
   }
 }
 
+/* =========================================================
+   CONNECT TIKTOK LIVE
+   ========================================================= */
+
 async function connectToLive(
   rawUsername
 ) {
+
   const Connector =
     await loadTikTokConnector();
 
@@ -556,6 +738,22 @@ async function connectToLive(
 
   activeUsername =
     username;
+
+  console.log(
+    "================================================"
+  );
+
+  console.log(
+    `[TikTok] Mencoba koneksi @${username}`
+  );
+
+  console.log(
+    "[TikTok] MODE TANPA API KEY"
+  );
+
+  console.log(
+    "================================================"
+  );
 
   emitStatus(
     `Mencari LIVE @${username}...`
@@ -590,24 +788,30 @@ async function connectToLive(
   liveConnection =
     conn;
 
+  /* =======================================================
+     GIFT EVENT
+     ======================================================= */
+
   conn.on(
     "gift",
     (event) => {
-      console.log(
-        `[TikTok] Gift event @${activeUsername} | auction=${auctionState}`
-      );
 
       /*
-       * Gift hanya boleh masuk ketika
-       * tombol MULAI sudah ditekan
-       * dan timer sedang berjalan.
+       * HANYA RUNNING YANG BOLEH
+       * MENERIMA GIFT.
+       *
+       * Idle     -> stop
+       * Paused   -> stop
+       * Finished -> stop
+       * Running  -> lanjut
        */
+
       if (
         auctionState !==
         "running"
       ) {
         console.log(
-          "[GIFT] Diabaikan: lelang tidak sedang berjalan."
+          `[GIFT] Ditolak. Auction = ${auctionState}`
         );
 
         return;
@@ -616,45 +820,63 @@ async function connectToLive(
       const gift =
         giftData(event);
 
-      if (gift) {
-        console.log(
-          `[GIFT] @${gift.username} | ${gift.giftName} | ${gift.diamondCount} x ${gift.repeatCount} = ${gift.coinValue}`
-        );
-
-        applyGift(gift);
+      if (!gift) {
+        return;
       }
+
+      applyGift(gift);
     }
   );
 
+  /* =======================================================
+     CHAT
+     ======================================================= */
+
   conn.on(
     "chat",
-    (event) =>
+    (event) => {
+
+      /*
+       * Tidak ditampilkan sebagai
+       * notifikasi gift.
+       */
+
       io.emit(
         "live:event",
         {
           type: "chat",
 
           username:
-            event?.user
-              ?.uniqueId ||
+            event?.user?.uniqueId ||
             event?.uniqueId ||
             "Viewer"
         }
-      )
+      );
+    }
   );
+
+  /* =======================================================
+     CONNECTED
+     ======================================================= */
 
   conn.on(
     "connected",
-    (state) =>
+    (state) => {
       console.log(
         "[TikTok] connected:",
         state
-      )
+      );
+    }
   );
+
+  /* =======================================================
+     ERROR
+     ======================================================= */
 
   conn.on(
     "error",
     (err) => {
+
       console.error(
         "[TikTok] error:",
         err
@@ -666,9 +888,14 @@ async function connectToLive(
     }
   );
 
+  /* =======================================================
+     DISCONNECTED
+     ======================================================= */
+
   conn.on(
     "disconnected",
     () => {
+
       console.warn(
         `[TikTok] @${activeUsername} terputus.`
       );
@@ -692,32 +919,43 @@ async function connectToLive(
       reconnectTimer =
         setTimeout(
           () => {
+
             if (
               !manualDisconnect &&
               activeUsername
             ) {
+
               connectToLive(
                 activeUsername
               ).catch(
-                err =>
+                (err) => {
+
                   emitStatus(
                     `Reconnect gagal: ${formatError(err)}`
-                  )
+                  );
+                }
               );
             }
+
           },
           5000
         );
     }
   );
 
+  /* =======================================================
+     CONNECT
+     ======================================================= */
+
   try {
+
     const state =
       await conn.connect();
 
     if (
       liveConnection !== conn
     ) {
+
       try {
         await conn.disconnect();
       } catch (_) {}
@@ -744,6 +982,7 @@ async function connectToLive(
     return state;
 
   } catch (err) {
+
     if (
       liveConnection === conn
     ) {
@@ -753,6 +992,11 @@ async function connectToLive(
 
     const friendly =
       formatError(err);
+
+    console.error(
+      "[TikTok] gagal connect:",
+      err
+    );
 
     emitStatus(
       `Gagal terhubung @${username}: ${friendly}`
@@ -764,15 +1008,26 @@ async function connectToLive(
   }
 }
 
+/* =========================================================
+   SOCKET.IO
+   ========================================================= */
+
 io.on(
   "connection",
   (socket) => {
 
+    console.log(
+      `[Socket] Client terhubung: ${socket.id}`
+    );
+
+    /* =====================================================
+       KIRIM STATUS SAAT CLIENT MASUK
+       ===================================================== */
+
     const connected =
       Boolean(
         liveConnection?.isConnected ||
-        liveConnection?.state
-          ?.isConnected
+        liveConnection?.state?.isConnected
       );
 
     socket.emit(
@@ -787,6 +1042,10 @@ io.on(
       }
     );
 
+    /* =====================================================
+       KIRIM AUCTION STATE
+       ===================================================== */
+
     socket.emit(
       "auction:state",
       {
@@ -794,19 +1053,28 @@ io.on(
           auctionState,
 
         active:
-          auctionState ===
-          "running",
+          auctionState === "running",
 
         version:
-          auctionVersion
+          auctionVersion,
+
+        participants:
+          getParticipants(),
+
+        count:
+          participants.size
       }
     );
+
+    /* =====================================================
+       KIRIM PARTICIPANTS
+       ===================================================== */
 
     socket.emit(
       "auction:participants",
       {
         participants:
-          participantSnapshot(),
+          getParticipants(),
 
         count:
           participants.size,
@@ -816,10 +1084,16 @@ io.on(
       }
     );
 
+    /* =====================================================
+       CONNECT TIKTOK
+       ===================================================== */
+
     socket.on(
       "live:connect",
       async (data = {}) => {
+
         try {
+
           if (!data.username) {
             throw new Error(
               "Masukkan username TikTok terlebih dahulu."
@@ -831,6 +1105,12 @@ io.on(
           );
 
         } catch (err) {
+
+          console.error(
+            "[Socket] live:connect:",
+            err
+          );
+
           socket.emit(
             "live:error",
             {
@@ -843,88 +1123,81 @@ io.on(
       }
     );
 
+    /* =====================================================
+       AUCTION STATE
+       ===================================================== */
+
     socket.on(
       "auction:state",
       (data = {}) => {
-        let next =
-          data.state;
 
-        if (!next) {
-          next =
-            data.active
-              ? "running"
-              : "idle";
-        }
+        /*
+         * Versi baru:
+         * { state: "running" }
+         */
 
         if (
-          ![
-            "running",
-            "paused",
-            "idle",
-            "finished"
-          ].includes(next)
+          typeof data.state ===
+          "string"
         ) {
+
+          setAuctionState(
+            data.state
+          );
+
           return;
         }
 
-        const changed =
-          next !==
-          auctionState;
-
-        auctionState =
-          next;
+        /*
+         * Kompatibilitas versi lama:
+         * { active: true/false }
+         */
 
         if (
-          changed &&
-          (
-            next === "running" ||
-            next === "idle" ||
-            next === "finished"
-          )
+          typeof data.active ===
+          "boolean"
         ) {
-          auctionVersion++;
+
+          setAuctionState(
+            data.active
+              ? "running"
+              : "paused"
+          );
         }
-
-        if (
-          next === "idle" ||
-          next === "finished"
-        ) {
-          resetParticipants();
-        }
-
-        emitAuctionState();
-
-        console.log(
-          `[Auction] ${auctionState.toUpperCase()}`
-        );
       }
     );
+
+    /* =====================================================
+       RESET
+       ===================================================== */
 
     socket.on(
       "auction:reset",
       () => {
-        auctionState =
-          "idle";
 
-        auctionVersion++;
-
-        resetParticipants();
-
-        emitAuctionState();
+        resetAuction();
       }
     );
+
+    /* =====================================================
+       DISCONNECT TIKTOK
+       ===================================================== */
 
     socket.on(
       "live:disconnect",
       async () => {
+
+        console.log(
+          "[Socket] Disconnect TikTok."
+        );
+
+        /*
+         * Hentikan penerimaan gift.
+         */
         auctionState =
           "idle";
 
         auctionVersion++;
-
-        resetParticipants();
-
-        emitAuctionState();
 
         await stopConnection();
 
@@ -934,47 +1207,82 @@ io.on(
         emitStatus(
           "Koneksi TikTok LIVE diputus."
         );
+
+        broadcastAuctionState();
+      }
+    );
+
+    /* =====================================================
+       CLIENT DISCONNECT
+       ===================================================== */
+
+    socket.on(
+      "disconnect",
+      () => {
+
+        console.log(
+          `[Socket] Client terputus: ${socket.id}`
+        );
       }
     );
   }
 );
 
+/* =========================================================
+   HEALTH
+   ========================================================= */
+
 app.get(
   "/health",
-  (req, res) =>
-    res.json({
-      ok: true,
+  (req, res) => {
 
-      connected:
-        Boolean(
-          liveConnection
-        ),
+    res.status(200).json(
+      {
+        ok: true,
 
-      username:
-        activeUsername,
+        service:
+          "tiktok-live-coin-auction",
 
-      auctionState,
+        connected:
+          Boolean(liveConnection),
 
-      auctionActive:
-        auctionState ===
-        "running",
+        username:
+          activeUsername,
 
-      participants:
-        participants.size,
+        auctionState:
+          auctionState,
 
-      apiKeyRequired:
-        false
-    })
+        auctionActive:
+          auctionState === "running",
+
+        participantCount:
+          participants.size,
+
+        apiKeyRequired:
+          false
+      }
+    );
+  }
 );
+
+/* =========================================================
+   ROOT
+   ========================================================= */
 
 app.get(
   "/",
-  (req, res) =>
+  (req, res) => {
+
     res.sendFile(
       __dirname +
       "/index.html"
-    )
+    );
+  }
 );
+
+/* =========================================================
+   SERVER START
+   ========================================================= */
 
 const PORT =
   process.env.PORT || 3000;
@@ -983,6 +1291,7 @@ server.listen(
   PORT,
   "0.0.0.0",
   () => {
+
     console.log(
       "================================================"
     );
@@ -996,7 +1305,7 @@ server.listen(
     );
 
     console.log(
-      "Gift hanya diterima saat auctionState = running."
+      "MODE: TANPA API KEY"
     );
 
     console.log(
@@ -1005,20 +1314,28 @@ server.listen(
   }
 );
 
+/* =========================================================
+   PROCESS ERROR
+   ========================================================= */
+
 process.on(
   "unhandledRejection",
-  reason =>
+  (reason) => {
+
     console.error(
       "[PROCESS] Unhandled Promise Rejection:",
       reason
-    )
+    );
+  }
 );
 
 process.on(
   "uncaughtException",
-  error =>
+  (error) => {
+
     console.error(
       "[PROCESS] Uncaught Exception:",
       error
-    )
+    );
+  }
 );

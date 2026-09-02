@@ -1,713 +1,1079 @@
 /* =========================================================
-   COIN AUCTION - CLIENT / APP.JS
-   Sinkron dengan server.js final
+   LIVE COIN AUCTION
+   APP.JS FINAL
    ========================================================= */
 
 (() => {
   "use strict";
 
-  const socket =
-    window.io();
+  /* =======================================================
+     INIT
+     ======================================================= */
 
-  const state = {
-    auction: "idle",
-    participants: new Map(),
+  function initCoinAuction() {
 
-    timer: 0,
-    initialTimer: 0,
+    console.log(
+      "[Auction] APP.JS dimulai."
+    );
 
-    timerInterval:
-      null,
+    /* =====================================================
+       SOCKET
+       ===================================================== */
 
-    extraTime: 0,
-    extraUsed: 0,
+    if (
+      typeof window.io !== "function"
+    ) {
 
-    version: 0
-  };
+      console.error(
+        "[Auction] Socket.IO tidak ditemukan."
+      );
 
-  const $ =
-    (selectors) => {
+      return;
+    }
+
+    const socket =
+      window.io({
+        transports: [
+          "websocket",
+          "polling"
+        ]
+      });
+
+    /* =====================================================
+       STATE
+       ===================================================== */
+
+    const state = {
+
+      auction:
+        "idle",
+
+      participants:
+        new Map(),
+
+      timer:
+        0,
+
+      initialTimer:
+        300,
+
+      timerInterval:
+        null,
+
+      extraTime:
+        0,
+
+      extraUsed:
+        0,
+
+      version:
+        0
+    };
+
+    /* =====================================================
+       SELECTOR
+       ===================================================== */
+
+    function findElement(
+      selectors
+    ) {
+
       for (
-        const selector
-        of selectors
+        const selector of selectors
       ) {
+
         const el =
           document.querySelector(
             selector
           );
 
-        if (el) return el;
-      }
-
-      return null;
-    };
-
-  const $$ =
-    (selectors) => {
-      for (
-        const selector
-        of selectors
-      ) {
-        const els =
-          document.querySelectorAll(
-            selector
-          );
-
-        if (els.length) {
-          return Array.from(
-            els
-          );
+        if (el) {
+          return el;
         }
       }
 
-      return [];
-    };
+      return null;
+    }
 
-  const usernameInput =
-    $([
-      "#username",
-      "#tiktokUsername",
-      "#tiktok-username",
-      "input[name='username']",
-      "input[placeholder*='username' i]"
-    ]);
+    function findButtonByText(
+      words
+    ) {
 
-  const connectButton =
-    $([
-      "#connectTikTok",
-      "#connectBtn",
-      "#btnConnect",
-      "button[data-action='connect']"
-    ]);
+      const buttons =
+        Array.from(
+          document.querySelectorAll(
+            "button, [role='button'], input[type='button'], input[type='submit']"
+          )
+        );
 
-  const startButton =
-    $([
-      "#startAuction",
-      "#startBtn",
-      "#btnStart",
-      "button[data-action='start']"
-    ]);
+      for (
+        const button of buttons
+      ) {
 
-  const pauseButton =
-    $([
-      "#pauseAuction",
-      "#pauseBtn",
-      "#btnPause",
-      "button[data-action='pause']"
-    ]);
+        const text =
+          String(
+            button.textContent ||
+            button.value ||
+            ""
+          )
+            .trim()
+            .toLowerCase();
 
-  const resetButton =
-    $([
-      "#resetAuction",
-      "#resetBtn",
-      "#btnReset",
-      "button[data-action='reset']"
-    ]);
+        for (
+          const word of words
+        ) {
 
-  const finishButton =
-    $([
-      "#finishAuction",
-      "#finishBtn",
-      "#btnFinish",
-      "button[data-action='finish']"
-    ]);
+          if (
+            text.includes(
+              word.toLowerCase()
+            )
+          ) {
 
-  const timerEl =
-    $([
-      "#timer",
-      "#auctionTimer",
-      "#countdown",
-      "[data-role='timer']"
-    ]);
+            return button;
+          }
+        }
+      }
 
-  const participantCountEl =
-    $([
-      "#participantCount",
-      "#participantsCount",
-      "[data-role='participant-count']"
-    ]);
+      return null;
+    }
 
-  const participantList =
-    $([
-      "#participants",
-      "#participantList",
-      "#participantsList",
-      ".participants-list",
-      "[data-role='participants']"
-    ]);
+    /* =====================================================
+       INPUTS
+       ===================================================== */
 
-  const extraTimeEl =
-    $([
-      "#extraTime",
-      "#extraTimeAvailable",
-      "[data-role='extra-time']"
-    ]);
+    const usernameInput =
+      findElement([
+        "#username",
+        "#tiktokUsername",
+        "#tiktok-username",
+        "input[name='username']",
+        "input[name='tiktokUsername']",
+        "input[placeholder*='username' i]"
+      ]);
 
-  const titleInput =
-    $([
-      "#auctionTitle",
-      "#titleAuction",
-      "#judulLelang",
-      "input[name='auctionTitle']",
-      "input[name='title']"
-    ]);
+    /* =====================================================
+       BUTTONS
+       ===================================================== */
 
-  const minutesInput =
-    $([
-      "#minutes",
-      "#auctionMinutes",
-      "#menit",
-      "input[name='minutes']"
-    ]);
+    const btnConnect =
+      findElement([
+        "#connectTikTok",
+        "#connectBtn",
+        "#btnConnect",
+        "#hubungkanTikTok",
+        "#btnHubungkan",
+        "[data-action='connect']"
+      ]) ||
+      findButtonByText([
+        "hubungkan tiktok",
+        "hubungkan"
+      ]);
 
-  const secondsInput =
-    $([
-      "#seconds",
-      "#auctionSeconds",
-      "#detik",
-      "input[name='seconds']"
-    ]);
+    const btnStart =
+      findElement([
+        "#startAuction",
+        "#startBtn",
+        "#btnStart",
+        "#mulaiAuction",
+        "#btnMulai",
+        "[data-action='start']"
+      ]) ||
+      findButtonByText([
+        "mulai"
+      ]);
 
-  const extraInput =
-    $([
-      "#extraSeconds",
-      "#extraTimeSeconds",
-      "#extraTimeInput",
-      "input[name='extraTime']"
-    ]);
+    const btnPause =
+      findElement([
+        "#pauseAuction",
+        "#pauseBtn",
+        "#btnPause",
+        "#btnJeda",
+        "[data-action='pause']"
+      ]) ||
+      findButtonByText([
+        "pause",
+        "jeda"
+      ]);
 
-  function textButton(
-    label
-  ) {
-    const wanted =
-      label.toLowerCase();
+    const btnReset =
+      findElement([
+        "#resetAuction",
+        "#resetBtn",
+        "#btnReset",
+        "[data-action='reset']"
+      ]) ||
+      findButtonByText([
+        "reset"
+      ]);
 
-    return $([
-      "button",
-      "[role='button']"
-    ]).find(
-      el =>
-        (
-          el.textContent ||
-          ""
-        )
-          .trim()
-          .toLowerCase()
-          .includes(wanted)
+    const btnFinish =
+      findElement([
+        "#finishAuction",
+        "#finishBtn",
+        "#btnFinish",
+        "#btnSelesai",
+        "[data-action='finish']"
+      ]) ||
+      findButtonByText([
+        "selesai",
+        "finish"
+      ]);
+
+    /* =====================================================
+       DISPLAY
+       ===================================================== */
+
+    const timerEl =
+      findElement([
+        "#timer",
+        "#auctionTimer",
+        "#countdown",
+        "[data-role='timer']"
+      ]);
+
+    const participantCountEl =
+      findElement([
+        "#participantCount",
+        "#participantsCount",
+        "#participant-count",
+        "[data-role='participant-count']"
+      ]);
+
+    const participantList =
+      findElement([
+        "#participants",
+        "#participantList",
+        "#participantsList",
+        ".participants-list",
+        "[data-role='participants']"
+      ]);
+
+    const statusEl =
+      findElement([
+        "#connectionStatus",
+        "#liveStatus",
+        "#status",
+        "#tiktokStatus",
+        "[data-role='live-status']"
+      ]);
+
+    /* =====================================================
+       TIME INPUT
+       ===================================================== */
+
+    const minutesInput =
+      findElement([
+        "#minutes",
+        "#auctionMinutes",
+        "#menit",
+        "input[name='minutes']"
+      ]);
+
+    const secondsInput =
+      findElement([
+        "#seconds",
+        "#auctionSeconds",
+        "#detik",
+        "input[name='seconds']"
+      ]);
+
+    const extraInput =
+      findElement([
+        "#extraSeconds",
+        "#extraTimeSeconds",
+        "#extraTimeInput",
+        "input[name='extraTime']"
+      ]);
+
+    const extraTimeEl =
+      findElement([
+        "#extraTime",
+        "#extraTimeAvailable",
+        "[data-role='extra-time']"
+      ]);
+
+    /* =====================================================
+       DEBUG
+       ===================================================== */
+
+    console.log(
+      "[Auction] Tombol ditemukan:",
+      {
+        connect:
+          Boolean(btnConnect),
+
+        start:
+          Boolean(btnStart),
+
+        pause:
+          Boolean(btnPause),
+
+        reset:
+          Boolean(btnReset),
+
+        finish:
+          Boolean(btnFinish)
+      }
     );
-  }
 
-  const btnStart =
-    startButton ||
-    textButton("mulai");
+    /* =====================================================
+       NUMBER
+       ===================================================== */
 
-  const btnPause =
-    pauseButton ||
-    textButton("pause");
+    function num(
+      value,
+      fallback = 0
+    ) {
 
-  const btnReset =
-    resetButton ||
-    textButton("reset");
+      const n =
+        Number(value);
 
-  const btnFinish =
-    finishButton ||
-    textButton("selesai");
-
-  const btnConnect =
-    connectButton ||
-    textButton(
-      "hubungkan tiktok"
-    );
-
-  function num(
-    v,
-    fallback = 0
-  ) {
-    const n =
-      Number(v);
-
-    return Number.isFinite(n)
-      ? n
-      : fallback;
-  }
-
-  function readInitialTimer() {
-    const m =
-      num(
-        minutesInput?.value,
-        0
-      );
-
-    const s =
-      num(
-        secondsInput?.value,
-        0
-      );
-
-    const total =
-      Math.max(
-        0,
-        Math.floor(
-          m * 60 + s
-        )
-      );
-
-    if (total > 0) {
-      return total;
+      return Number.isFinite(n)
+        ? n
+        : fallback;
     }
 
-    const current =
-      parseTimerText(
-        timerEl?.textContent ||
-        ""
-      );
+    /* =====================================================
+       TIMER PARSER
+       ===================================================== */
 
-    return current > 0
-      ? current
-      : 300;
-  }
+    function parseTimerText(
+      text
+    ) {
 
-  function readExtraTime() {
-    const v =
-      num(
-        extraInput?.value,
-        0
-      );
+      const match =
+        String(text)
+          .match(
+            /(\d+)\s*:\s*(\d+)/
+          );
 
-    if (v > 0) {
-      return Math.floor(v);
-    }
+      if (!match) {
+        return 0;
+      }
 
-    const text =
-      extraTimeEl
-        ?.textContent ||
-      "";
-
-    const match =
-      text.match(
-        /(\d+)\s*:?\s*(\d+)?/
-      );
-
-    if (!match) {
-      return 0;
-    }
-
-    if (match[2]) {
       return (
-        Number(match[1]) *
-          60 +
+        Number(match[1]) * 60 +
         Number(match[2])
       );
     }
 
-    return Number(
-      match[1]
-    );
-  }
+    /* =====================================================
+       READ INITIAL TIMER
+       ===================================================== */
 
-  function parseTimerText(
-    text
-  ) {
-    const match =
-      String(text).match(
-        /(\d+)\s*:\s*(\d+)/
-      );
+    function readInitialTimer() {
 
-    if (!match) {
-      return 0;
+      const minutes =
+        num(
+          minutesInput?.value,
+          0
+        );
+
+      const seconds =
+        num(
+          secondsInput?.value,
+          0
+        );
+
+      const total =
+        Math.max(
+          0,
+          Math.floor(
+            minutes * 60 +
+            seconds
+          )
+        );
+
+      if (total > 0) {
+        return total;
+      }
+
+      const screenTimer =
+        parseTimerText(
+          timerEl?.textContent ||
+          ""
+        );
+
+      if (
+        screenTimer > 0
+      ) {
+        return screenTimer;
+      }
+
+      return 300;
     }
 
-    return (
-      Number(match[1]) *
-        60 +
-      Number(match[2])
-    );
-  }
+    /* =====================================================
+       READ EXTRA TIME
+       ===================================================== */
 
-  function formatTime(
-    total
-  ) {
-    total =
-      Math.max(
-        0,
-        Math.floor(total)
-      );
+    function readExtraTime() {
 
-    const h =
-      Math.floor(
-        total / 3600
-      );
+      const inputValue =
+        num(
+          extraInput?.value,
+          0
+        );
 
-    const m =
-      Math.floor(
-        (total % 3600) /
-        60
-      );
+      if (
+        inputValue > 0
+      ) {
 
-    const s =
-      total % 60;
+        return Math.floor(
+          inputValue
+        );
+      }
 
-    if (h > 0) {
+      const text =
+        extraTimeEl?.textContent ||
+        "";
+
+      const match =
+        text.match(
+          /(\d+)\s*:?\s*(\d+)?/
+        );
+
+      if (!match) {
+        return 0;
+      }
+
+      if (match[2]) {
+
+        return (
+          Number(match[1]) * 60 +
+          Number(match[2])
+        );
+      }
+
+      return Number(match[1]);
+    }
+
+    /* =====================================================
+       FORMAT TIMER
+       ===================================================== */
+
+    function formatTime(
+      total
+    ) {
+
+      total =
+        Math.max(
+          0,
+          Math.floor(total)
+        );
+
+      const hours =
+        Math.floor(
+          total / 3600
+        );
+
+      const minutes =
+        Math.floor(
+          (total % 3600) / 60
+        );
+
+      const seconds =
+        total % 60;
+
+      if (
+        hours > 0
+      ) {
+
+        return (
+          String(hours)
+            .padStart(2, "0") +
+          ":" +
+          String(minutes)
+            .padStart(2, "0") +
+          ":" +
+          String(seconds)
+            .padStart(2, "0")
+        );
+      }
+
       return (
-        `${String(h).padStart(2, "0")}:` +
-        `${String(m).padStart(2, "0")}:` +
-        `${String(s).padStart(2, "0")}`
+        String(minutes)
+          .padStart(2, "0") +
+        ":" +
+        String(seconds)
+          .padStart(2, "0")
       );
     }
 
-    return (
-      `${String(m).padStart(2, "0")}:` +
-      `${String(s).padStart(2, "0")}`
-    );
-  }
+    /* =====================================================
+       RENDER TIMER
+       ===================================================== */
 
-  function renderTimer() {
-    if (timerEl) {
+    function renderTimer() {
+
+      if (!timerEl) {
+        return;
+      }
+
       timerEl.textContent =
         formatTime(
           state.timer
         );
     }
-  }
 
-  function clearTimer() {
-    if (
-      state.timerInterval
-    ) {
-      clearInterval(
+    /* =====================================================
+       CLEAR TIMER
+       ===================================================== */
+
+    function clearTimer() {
+
+      if (
         state.timerInterval
-      );
-    }
+      ) {
 
-    state.timerInterval =
-      null;
-  }
-
-  function setAuctionState(
-    next,
-    options = {}
-  ) {
-    state.auction =
-      next;
-
-    if (
-      typeof options.timer ===
-      "number"
-    ) {
-      state.timer =
-        Math.max(
-          0,
-          Math.floor(
-            options.timer
-          )
+        clearInterval(
+          state.timerInterval
         );
+      }
+
+      state.timerInterval =
+        null;
     }
 
-    renderTimer();
-    updateButtons();
-  }
+    /* =====================================================
+       AUCTION STATE
+       ===================================================== */
 
-  function startLocalTimer() {
-    clearTimer();
-
-    if (
-      state.auction !==
-      "running"
+    function setLocalAuctionState(
+      nextState
     ) {
-      return;
+
+      state.auction =
+        nextState;
+
+      updateButtons();
     }
 
-    state.timerInterval =
-      setInterval(
-        () => {
-          if (
-            state.auction !==
-            "running"
-          ) {
-            return;
-          }
+    /* =====================================================
+       LOCAL TIMER
+       ===================================================== */
 
-          if (
-            state.timer > 0
-          ) {
-            state.timer--;
+    function startLocalTimer() {
 
-            renderTimer();
+      clearTimer();
+
+      if (
+        state.auction !==
+        "running"
+      ) {
+        return;
+      }
+
+      state.timerInterval =
+        setInterval(
+          () => {
 
             if (
-              state.timer <=
-              0
+              state.auction !==
+              "running"
             ) {
-              if (
-                state.extraTime >
-                state.extraUsed
-              ) {
-                const available =
-                  state.extraTime -
-                  state.extraUsed;
 
-                state.timer =
-                  available;
-
-                state.extraUsed +=
-                  available;
-
-                renderTimer();
-
-              } else {
-                clearTimer();
-
-                setAuctionState(
-                  "finished"
-                );
-
-                socket.emit(
-                  "auction:state",
-                  {
-                    state:
-                      "finished"
-                  }
-                );
-              }
+              return;
             }
-          }
-        },
-        1000
+
+            if (
+              state.timer > 0
+            ) {
+
+              state.timer--;
+
+              renderTimer();
+
+              return;
+            }
+
+            /* =============================================
+               EXTRA TIME
+               ============================================= */
+
+            if (
+              state.extraTime >
+              state.extraUsed
+            ) {
+
+              const available =
+                state.extraTime -
+                state.extraUsed;
+
+              state.timer =
+                available;
+
+              state.extraUsed +=
+                available;
+
+              renderTimer();
+
+              return;
+            }
+
+            /* =============================================
+               FINISH OTOMATIS
+               ============================================= */
+
+            clearTimer();
+
+            state.auction =
+              "finished";
+
+            /*
+             * IMPORTANT:
+             * Jangan clear participants.
+             */
+
+            socket.emit(
+              "auction:state",
+              {
+                state:
+                  "finished"
+              }
+            );
+
+            updateButtons();
+
+          },
+          1000
+        );
+    }
+
+    /* =====================================================
+       SEND AUCTION STATE
+       ===================================================== */
+
+    function sendAuctionState(
+      nextState
+    ) {
+
+      socket.emit(
+        "auction:state",
+        {
+          state:
+            nextState
+        }
       );
-  }
-
-  function sendAuctionState(
-    next
-  ) {
-    socket.emit(
-      "auction:state",
-      {
-        state: next
-      }
-    );
-  }
-
-  function startAuction() {
-    if (
-      state.auction ===
-      "running"
-    ) {
-      return;
     }
 
-    state.initialTimer =
-      readInitialTimer();
+    /* =====================================================
+       MULAI
+       ===================================================== */
 
-    state.timer =
-      state.timer > 0 &&
-      state.auction ===
-        "paused"
-        ? state.timer
-        : state.initialTimer;
+    function startAuction() {
 
-    state.extraTime =
-      readExtraTime();
-
-    state.extraUsed =
-      0;
-
-    state.auction =
-      "running";
-
-    renderTimer();
-
-    startLocalTimer();
-
-    sendAuctionState(
-      "running"
-    );
-
-    updateButtons();
-  }
-
-  function pauseAuction() {
-    if (
-      state.auction !==
-      "running"
-    ) {
-      return;
-    }
-
-    clearTimer();
-
-    state.auction =
-      "paused";
-
-    sendAuctionState(
-      "paused"
-    );
-
-    updateButtons();
-  }
-
-  function resetAuction() {
-    clearTimer();
-
-    state.timer =
-      readInitialTimer();
-
-    state.initialTimer =
-      state.timer;
-
-    state.extraTime =
-      readExtraTime();
-
-    state.extraUsed =
-      0;
-
-    state.participants.clear();
-
-    renderTimer();
-
-    renderParticipants();
-
-    state.auction =
-      "idle";
-
-    socket.emit(
-      "auction:reset"
-    );
-
-    updateButtons();
-  }
-
-  function finishAuction() {
-    clearTimer();
-
-    state.auction =
-      "finished";
-
-    socket.emit(
-      "auction:state",
-      {
-        state:
-          "finished"
-      }
-    );
-
-    updateButtons();
-  }
-
-  function updateButtons() {
-    if (btnStart) {
-      btnStart.disabled =
+      if (
         state.auction ===
+        "running"
+      ) {
+
+        return;
+      }
+
+      /*
+       * Jika sebelumnya PAUSE,
+       * lanjutkan timer.
+       *
+       * Jika IDLE / FINISHED,
+       * mulai timer baru.
+       */
+
+      if (
+        state.auction ===
+        "paused" &&
+        state.timer > 0
+      ) {
+
+        /* lanjutkan */
+      } else {
+
+        state.initialTimer =
+          readInitialTimer();
+
+        state.timer =
+          state.initialTimer;
+
+        state.extraTime =
+          readExtraTime();
+
+        state.extraUsed =
+          0;
+      }
+
+      state.auction =
         "running";
+
+      renderTimer();
+
+      updateButtons();
+
+      /*
+       * SERVER menjadi aktif
+       * menerima gift.
+       */
+
+      sendAuctionState(
+        "running"
+      );
+
+      startLocalTimer();
+
+      console.log(
+        "[Auction] MULAI"
+      );
     }
 
-    if (btnPause) {
-      btnPause.disabled =
+    /* =====================================================
+       PAUSE
+       ===================================================== */
+
+    function pauseAuction() {
+
+      if (
         state.auction !==
-        "running";
+        "running"
+      ) {
+
+        return;
+      }
+
+      clearTimer();
+
+      state.auction =
+        "paused";
+
+      /*
+       * SERVER berhenti menerima gift.
+       */
+
+      sendAuctionState(
+        "paused"
+      );
+
+      updateButtons();
+
+      console.log(
+        "[Auction] PAUSE"
+      );
     }
 
-    if (btnReset) {
-      btnReset.disabled =
-        false;
+    /* =====================================================
+       RESET
+       ===================================================== */
+
+    function resetAuction() {
+
+      clearTimer();
+
+      /*
+       * RESET:
+       * peserta DIHAPUS.
+       */
+
+      state.participants.clear();
+
+      state.initialTimer =
+        readInitialTimer();
+
+      state.timer =
+        state.initialTimer;
+
+      state.extraTime =
+        readExtraTime();
+
+      state.extraUsed =
+        0;
+
+      state.auction =
+        "idle";
+
+      renderTimer();
+
+      renderParticipants();
+
+      /*
+       * Server juga menghapus
+       * daftar peserta.
+       */
+
+      socket.emit(
+        "auction:reset"
+      );
+
+      updateButtons();
+
+      console.log(
+        "[Auction] RESET"
+      );
     }
 
-    if (btnFinish) {
-      btnFinish.disabled =
-        state.auction ===
-          "idle" ||
-        state.auction ===
-          "finished";
+    /* =====================================================
+       SELESAI
+       ===================================================== */
+
+    function finishAuction() {
+
+      /*
+       * Hentikan timer.
+       */
+
+      clearTimer();
+
+      /*
+       * JANGAN:
+       * state.participants.clear()
+       *
+       * Karena peserta harus tetap tampil.
+       */
+
+      state.auction =
+        "finished";
+
+      /*
+       * SERVER berhenti menerima gift.
+       */
+
+      sendAuctionState(
+        "finished"
+      );
+
+      renderParticipants();
+
+      updateButtons();
+
+      console.log(
+        "[Auction] SELESAI - peserta tetap."
+      );
     }
-  }
 
-  function participantKey(
-    p
-  ) {
-    return String(
-      p.userId ||
-      p.username ||
-      p.nickname ||
-      "unknown"
-    );
-  }
+    /* =====================================================
+       BUTTON STATE
+       ===================================================== */
 
-  function renderParticipants() {
-    if (
-      participantCountEl
+    function updateButtons() {
+
+      /*
+       * Jangan memakai disabled
+       * terlalu agresif.
+       *
+       * Semua tombol tetap bisa
+       * ditekan sesuai fungsi.
+       */
+
+      if (btnConnect) {
+
+        btnConnect.disabled =
+          false;
+
+        btnConnect.style.pointerEvents =
+          "auto";
+      }
+
+      if (btnStart) {
+
+        btnStart.disabled =
+          state.auction ===
+          "running";
+
+        btnStart.style.pointerEvents =
+          "auto";
+      }
+
+      if (btnPause) {
+
+        btnPause.disabled =
+          state.auction !==
+          "running";
+
+        btnPause.style.pointerEvents =
+          "auto";
+      }
+
+      if (btnReset) {
+
+        btnReset.disabled =
+          false;
+
+        btnReset.style.pointerEvents =
+          "auto";
+      }
+
+      if (btnFinish) {
+
+        btnFinish.disabled =
+          !(
+            state.auction ===
+            "running" ||
+            state.auction ===
+            "paused"
+          );
+
+        btnFinish.style.pointerEvents =
+          "auto";
+      }
+    }
+
+    /* =====================================================
+       PARTICIPANT KEY
+       ===================================================== */
+
+    function participantKey(
+      participant
     ) {
-      participantCountEl.textContent =
-        `${state.participants.size} peserta`;
+
+      return String(
+        participant.userId ||
+        participant.username ||
+        participant.nickname ||
+        "unknown"
+      );
     }
 
-    if (
-      !participantList
+    /* =====================================================
+       ESCAPE HTML
+       ===================================================== */
+
+    function escapeHtml(
+      value
     ) {
-      return;
+
+      return String(
+        value ?? ""
+      ).replace(
+        /[&<>'"]/g,
+        character => {
+
+          const map = {
+            "&":
+              "&amp;",
+
+            "<":
+              "&lt;",
+
+            ">":
+              "&gt;",
+
+            "'":
+              "&#39;",
+
+            '"':
+              "&quot;"
+          };
+
+          return map[
+            character
+          ];
+        }
+      );
     }
 
-    const list =
-      Array
-        .from(
+    /* =====================================================
+       ESCAPE ATTRIBUTE
+       ===================================================== */
+
+    function escapeAttr(
+      value
+    ) {
+
+      return escapeHtml(
+        value
+      );
+    }
+
+    /* =====================================================
+       RENDER PARTICIPANTS
+       ===================================================== */
+
+    function renderParticipants() {
+
+      if (
+        participantCountEl
+      ) {
+
+        participantCountEl.textContent =
+          `${state.participants.size} peserta`;
+      }
+
+      if (
+        !participantList
+      ) {
+
+        return;
+      }
+
+      const list =
+        Array.from(
           state.participants.values()
-        )
-        .sort(
+        ).sort(
           (a, b) =>
-            b.coins -
-              a.coins ||
-            a.joinedAt -
-              b.joinedAt
+            Number(b.coins || 0) -
+              Number(a.coins || 0) ||
+            Number(a.joinedAt || 0) -
+              Number(b.joinedAt || 0)
         );
 
-    if (!list.length) {
+      if (
+        !list.length
+      ) {
+
+        participantList.innerHTML =
+          `<div class="empty-participants">
+             Menunggu peserta
+           </div>`;
+
+        return;
+      }
+
       participantList.innerHTML =
-        `<div class="empty-participants">Menunggu peserta</div>`;
+        list.map(
+          (p, index) => {
 
-      return;
-    }
-
-    participantList.innerHTML =
-      list
-        .map(
-          (
-            p,
-            index
-          ) => {
-            const name =
+            const nickname =
               escapeHtml(
                 p.nickname ||
                 p.username ||
                 "Viewer"
               );
 
-            const user =
+            const username =
               escapeHtml(
                 p.username ||
                 "viewer"
               );
 
-            const avatar =
+            let avatar;
+
+            if (
               p.avatar
-                ? `
-                  <img
-                    src="${escapeAttr(p.avatar)}"
-                    alt=""
-                    class="participant-avatar"
-                    loading="lazy"
-                  >
-                `
-                : `
-                  <div class="participant-avatar participant-initial">
-                    ${escapeHtml(
-                      (
-                        p.nickname ||
-                        p.username ||
-                        "V"
-                      )
-                        .charAt(0)
-                        .toUpperCase()
-                    )}
-                  </div>
-                `;
+            ) {
+
+              avatar =
+                `<img
+                  src="${escapeAttr(p.avatar)}"
+                  alt=""
+                  class="participant-avatar"
+                  loading="lazy"
+                >`;
+
+            } else {
+
+              const initial =
+                (
+                  p.nickname ||
+                  p.username ||
+                  "V"
+                )
+                  .charAt(0)
+                  .toUpperCase();
+
+              avatar =
+                `<div
+                  class="participant-avatar participant-initial"
+                >
+                  ${escapeHtml(initial)}
+                </div>`;
+            }
 
             return `
               <div
@@ -716,331 +1082,547 @@
                   participantKey(p)
                 )}"
               >
-                <div class="participant-rank">
+
+                <div
+                  class="participant-rank"
+                >
                   ${index + 1}
                 </div>
 
                 ${avatar}
 
-                <div class="participant-info">
-                  <div class="participant-name">
-                    ${name}
+                <div
+                  class="participant-info"
+                >
+
+                  <div
+                    class="participant-name"
+                  >
+                    ${nickname}
                   </div>
 
-                  <div class="participant-username">
-                    @${user}
+                  <div
+                    class="participant-username"
+                  >
+                    @${username}
                   </div>
+
                 </div>
 
-                <div class="participant-coins">
-                  🪙 ${num(
-                    p.coins,
-                    0
-                  )}
+                <div
+                  class="participant-coins"
+                >
+                  🪙 ${num(p.coins, 0)}
                 </div>
+
               </div>
             `;
           }
         )
         .join("");
-  }
+    }
 
-  function escapeHtml(v) {
-    return String(
-      v ?? ""
-    ).replace(
-      /[&<>'"]/g,
-      c =>
-        ({
-          "&":
-            "&amp;",
-          "<":
-            "&lt;",
-          ">":
-            "&gt;",
-          "'":
-            "&#39;",
-          '"':
-            "&quot;"
-        })[c]
-    );
-  }
+    /* =====================================================
+       CONNECT TIKTOK
+       ===================================================== */
 
-  function escapeAttr(v) {
-    return escapeHtml(v);
-  }
+    function connectTikTok() {
 
-  function connectTikTok() {
-    const username =
-      String(
-        usernameInput?.value ||
-        ""
-      )
-        .trim()
-        .replace(
-          /^@/,
+      if (
+        !usernameInput
+      ) {
+
+        console.error(
+          "[TikTok] Input username tidak ditemukan."
+        );
+
+        return;
+      }
+
+      const username =
+        String(
+          usernameInput.value ||
           ""
-        );
+        )
+          .trim()
+          .replace(
+            /^@/,
+            ""
+          );
 
-    if (!username) {
-      console.warn(
-        "Username TikTok kosong."
+      if (
+        !username
+      ) {
+
+        if (statusEl) {
+
+          statusEl.textContent =
+            "Masukkan username TikTok terlebih dahulu.";
+        }
+
+        return;
+      }
+
+      if (statusEl) {
+
+        statusEl.textContent =
+          `Menghubungkan ke @${username}...`;
+      }
+
+      console.log(
+        `[TikTok] CONNECT @${username}`
       );
 
-      return;
+      socket.emit(
+        "live:connect",
+        {
+          username
+        }
+      );
     }
 
-    socket.emit(
-      "live:connect",
-      {
-        username
+    /* =====================================================
+       SOCKET CONNECT
+       ===================================================== */
+
+    socket.on(
+      "connect",
+      () => {
+
+        console.log(
+          "[Socket] TERHUBUNG:",
+          socket.id
+        );
+
+        updateButtons();
       }
     );
-  }
 
-  socket.on(
-    "connect",
-    () => {
-      console.log(
-        "[Socket] terhubung",
-        socket.id
-      );
+    /* =====================================================
+       SOCKET DISCONNECT
+       ===================================================== */
 
-      updateButtons();
-    }
-  );
+    socket.on(
+      "disconnect",
+      () => {
 
-  socket.on(
-    "live:status",
-    data => {
-      console.log(
-        "[TikTok]",
-        data?.message ||
+        console.warn(
+          "[Socket] Terputus."
+        );
+      }
+    );
+
+    /* =====================================================
+       TIKTOK STATUS
+       ===================================================== */
+
+    socket.on(
+      "live:status",
+      data => {
+
+        console.log(
+          "[TikTok STATUS]",
           data
-      );
+        );
 
-      const statusEl =
-        $([
-          "#connectionStatus",
-          "#liveStatus",
-          "#status",
-          "[data-role='live-status']"
-        ]);
+        if (
+          statusEl &&
+          data?.message
+        ) {
 
-      if (
-        statusEl &&
-        data?.message
-      ) {
-        statusEl.textContent =
-          data.message;
+          statusEl.textContent =
+            data.message;
+        }
       }
-    }
-  );
+    );
 
-  socket.on(
-    "live:error",
-    data =>
-      console.error(
-        "[TikTok]",
-        data?.message ||
+    /* =====================================================
+       TIKTOK ERROR
+       ===================================================== */
+
+    socket.on(
+      "live:error",
+      data => {
+
+        console.error(
+          "[TikTok ERROR]",
           data
-      )
-  );
-
-  socket.on(
-    "auction:state",
-    data => {
-      const next =
-        data?.state ||
-        (
-          data?.active
-            ? "running"
-            : "idle"
         );
 
-      if (
-        data?.version !==
-          undefined &&
-        data.version <
-          state.version
-      ) {
-        return;
-      }
+        if (
+          statusEl &&
+          data?.message
+        ) {
 
-      state.version =
-        num(
-          data?.version,
-          state.version
+          statusEl.textContent =
+            data.message;
+        }
+      }
+    );
+
+    /* =====================================================
+       AUCTION STATE FROM SERVER
+       ===================================================== */
+
+    socket.on(
+      "auction:state",
+      data => {
+
+        const nextState =
+          data?.state ||
+          (
+            data?.active
+              ? "running"
+              : "idle"
+          );
+
+        if (
+          data?.version !==
+            undefined &&
+          Number(data.version) <
+            Number(state.version)
+        ) {
+
+          return;
+        }
+
+        if (
+          data?.version !==
+          undefined
+        ) {
+
+          state.version =
+            Number(data.version);
+        }
+
+        /*
+         * Jika server mengirim snapshot
+         * peserta, gunakan.
+         */
+
+        if (
+          Array.isArray(
+            data?.participants
+          )
+        ) {
+
+          state.participants.clear();
+
+          for (
+            const participant of
+            data.participants
+          ) {
+
+            state.participants.set(
+              participantKey(
+                participant
+              ),
+              participant
+            );
+          }
+
+          renderParticipants();
+        }
+
+        setLocalAuctionState(
+          nextState
         );
 
-      setAuctionState(
-        next
-      );
+        if (
+          nextState ===
+          "running"
+        ) {
 
-      if (
-        next ===
-        "running"
-      ) {
-        startLocalTimer();
-      } else {
-        clearTimer();
-      }
-    }
-  );
+          startLocalTimer();
 
-  socket.on(
-    "auction:participants",
-    data => {
-      if (
-        data?.version !==
-          undefined &&
-        data.version <
-          state.version
-      ) {
-        return;
-      }
+        } else {
 
-      if (
-        data?.version !==
-        undefined
-      ) {
-        state.version =
-          data.version;
-      }
+          clearTimer();
+        }
 
-      state.participants.clear();
+        updateButtons();
 
-      for (
-        const p of
-        data?.participants ||
-        []
-      ) {
-        state.participants.set(
-          participantKey(p),
-          p
+        console.log(
+          "[Auction STATE]",
+          nextState
         );
       }
+    );
 
-      renderParticipants();
-    }
-  );
+    /* =====================================================
+       PARTICIPANTS FROM SERVER
+       ===================================================== */
 
-  socket.on(
-    "live:gift",
-    gift => {
+    socket.on(
+      "auction:participants",
+      data => {
 
-      /*
-       * Server hanya mengirim gift
-       * yang sudah diterima ketika
-       * timer sedang berjalan.
-       */
-      if (
-        state.auction !==
-        "running"
-      ) {
-        return;
-      }
+        if (
+          data?.version !==
+            undefined &&
+          Number(data.version) <
+            Number(state.version)
+        ) {
 
-      if (
-        gift?.participant
-      ) {
-        state.participants.set(
-          participantKey(
-            gift.participant
-          ),
-          gift.participant
-        );
+          return;
+        }
+
+        if (
+          data?.version !==
+          undefined
+        ) {
+
+          state.version =
+            Number(data.version);
+        }
+
+        state.participants.clear();
+
+        for (
+          const participant of
+          data?.participants || []
+        ) {
+
+          state.participants.set(
+            participantKey(
+              participant
+            ),
+            participant
+          );
+        }
 
         renderParticipants();
       }
+    );
 
-      console.log(
-        `[GIFT] ${
-          gift?.username ||
-          "Viewer"
-        } +${
-          gift?.coinValue ||
-          0
-        } coin`
+    /* =====================================================
+       GIFT
+       ===================================================== */
+
+    socket.on(
+      "live:gift",
+      gift => {
+
+        /*
+         * PENTING:
+         *
+         * Jangan menambah coin di sini.
+         *
+         * Server sudah mengubah
+         * participant dan mengirim
+         * auction:participants.
+         *
+         * Kalau ditambah lagi di sini,
+         * coin bisa menjadi double.
+         */
+
+        if (
+          state.auction !==
+          "running"
+        ) {
+
+          return;
+        }
+
+        /*
+         * Update hanya jika server
+         * menyertakan participant.
+         */
+
+        if (
+          gift?.participant
+        ) {
+
+          state.participants.set(
+            participantKey(
+              gift.participant
+            ),
+            gift.participant
+          );
+
+          renderParticipants();
+        }
+
+        /*
+         * Hanya console.
+         * Tidak ada popup/notifikasi
+         * di layar.
+         */
+
+        console.log(
+          `[GIFT] ${gift?.username || "Viewer"} +${gift?.coinValue || 0}`
+        );
+      }
+    );
+
+    /* =====================================================
+       CLICK HANDLERS
+       ===================================================== */
+
+    if (
+      btnConnect
+    ) {
+
+      btnConnect.addEventListener(
+        "click",
+        event => {
+
+          event.preventDefault();
+          event.stopPropagation();
+
+          connectTikTok();
+        }
       );
     }
-  );
 
-  if (btnConnect) {
-    btnConnect.addEventListener(
-      "click",
-      connectTikTok
+    if (
+      btnStart
+    ) {
+
+      btnStart.addEventListener(
+        "click",
+        event => {
+
+          event.preventDefault();
+          event.stopPropagation();
+
+          startAuction();
+        }
+      );
+    }
+
+    if (
+      btnPause
+    ) {
+
+      btnPause.addEventListener(
+        "click",
+        event => {
+
+          event.preventDefault();
+          event.stopPropagation();
+
+          pauseAuction();
+        }
+      );
+    }
+
+    if (
+      btnReset
+    ) {
+
+      btnReset.addEventListener(
+        "click",
+        event => {
+
+          event.preventDefault();
+          event.stopPropagation();
+
+          resetAuction();
+        }
+      );
+    }
+
+    if (
+      btnFinish
+    ) {
+
+      btnFinish.addEventListener(
+        "click",
+        event => {
+
+          event.preventDefault();
+          event.stopPropagation();
+
+          finishAuction();
+        }
+      );
+    }
+
+    /* =====================================================
+       INITIAL STATE
+       ===================================================== */
+
+    state.initialTimer =
+      readInitialTimer();
+
+    state.timer =
+      state.initialTimer;
+
+    state.extraTime =
+      readExtraTime();
+
+    state.extraUsed =
+      0;
+
+    state.auction =
+      "idle";
+
+    renderTimer();
+
+    renderParticipants();
+
+    updateButtons();
+
+    /* =====================================================
+       COMPATIBILITY API
+       ===================================================== */
+
+    window.coinAuction = {
+
+      socket,
+
+      start:
+        startAuction,
+
+      pause:
+        pauseAuction,
+
+      reset:
+        resetAuction,
+
+      finish:
+        finishAuction,
+
+      connect:
+        connectTikTok,
+
+      getState:
+        () => ({
+          ...state,
+
+          participants:
+            Array.from(
+              state.participants.values()
+            )
+        })
+    };
+
+    console.log(
+      "[Auction] APP.JS siap."
     );
   }
 
-  if (btnStart) {
-    btnStart.addEventListener(
-      "click",
-      startAuction
+  /* =======================================================
+     DOM READY
+     ======================================================= */
+
+  if (
+    document.readyState ===
+    "loading"
+  ) {
+
+    document.addEventListener(
+      "DOMContentLoaded",
+      initCoinAuction,
+      {
+        once: true
+      }
     );
+
+  } else {
+
+    initCoinAuction();
   }
-
-  if (btnPause) {
-    btnPause.addEventListener(
-      "click",
-      pauseAuction
-    );
-  }
-
-  if (btnReset) {
-    btnReset.addEventListener(
-      "click",
-      resetAuction
-    );
-  }
-
-  if (btnFinish) {
-    btnFinish.addEventListener(
-      "click",
-      finishAuction
-    );
-  }
-
-  state.initialTimer =
-    readInitialTimer();
-
-  state.timer =
-    state.initialTimer;
-
-  state.extraTime =
-    readExtraTime();
-
-  renderTimer();
-  renderParticipants();
-  updateButtons();
-
-  window.coinAuction = {
-    socket,
-
-    start:
-      startAuction,
-
-    pause:
-      pauseAuction,
-
-    reset:
-      resetAuction,
-
-    finish:
-      finishAuction,
-
-    connect:
-      connectTikTok,
-
-    getState:
-      () => ({
-        ...state,
-
-        participants:
-          Array.from(
-            state.participants.values()
-          )
-      })
-  };
 
 })();

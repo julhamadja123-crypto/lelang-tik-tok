@@ -8,65 +8,27 @@
   document.addEventListener("DOMContentLoaded", init);
 
   function injectMobileAuctionUI() {
-    if (document.getElementById("coin-auction-target-ui")) return;
+    if (document.getElementById("coin-auction-mobile-ui")) return;
 
     const style = document.createElement("style");
-    style.id = "coin-auction-target-ui";
+    style.id = "coin-auction-mobile-ui";
     style.textContent = `
-      /* =====================================================
-         TARGET MOBILE UI
-         Referensi: dashboard TikTok LIVE Coin Auction
-         Tidak mengubah koneksi / gift / coin / timer logic.
-         ===================================================== */
-
-      /* Panel peserta */
-      #rankingList {
-        width: 100% !important;
-        box-sizing: border-box !important;
-      }
-
+      /* Tampilan peserta mobile: hanya ranking + nama + coin */
       #rankingList .participant-row {
         display: grid !important;
-        grid-template-columns: 52px minmax(0, 1fr) auto !important;
+        grid-template-columns: 58px minmax(0, 1fr) auto !important;
         align-items: center !important;
-        gap: 8px !important;
-        min-height: 54px !important;
-        margin: 4px 0 !important;
-        padding: 6px 12px !important;
-        border-radius: 10px !important;
-        border: 1px solid rgba(255,255,255,.08) !important;
-        background: rgba(0,0,0,.16) !important;
+        gap: 10px !important;
+        min-height: 52px !important;
+        padding: 8px 4px !important;
+        border: 0 !important;
+        background: transparent !important;
         box-shadow: none !important;
-        box-sizing: border-box !important;
-      }
-
-      #rankingList .participant-row:nth-child(1) {
-        border-color: rgba(255,176,0,.72) !important;
-        background: rgba(70,45,0,.28) !important;
-      }
-
-      #rankingList .participant-row:nth-child(2) {
-        border-color: rgba(0,132,255,.58) !important;
-        background: rgba(0,45,85,.20) !important;
-      }
-
-      #rankingList .participant-row:nth-child(3) {
-        border-color: rgba(255,119,35,.58) !important;
-        background: rgba(72,30,0,.20) !important;
       }
 
       #rankingList .participant-avatar,
       #rankingList .participant-username {
         display: none !important;
-      }
-
-      #rankingList .participant-rank {
-        width: 52px !important;
-        min-width: 52px !important;
-        text-align: center !important;
-        font-size: 28px !important;
-        line-height: 1 !important;
-        font-weight: 800 !important;
       }
 
       #rankingList .participant-info {
@@ -80,40 +42,33 @@
         white-space: nowrap !important;
         font-size: 17px !important;
         font-weight: 700 !important;
-        line-height: 1.25 !important;
+        line-height: 1.2 !important;
+      }
+
+      #rankingList .participant-rank {
+        width: 58px !important;
+        min-width: 58px !important;
+        text-align: left !important;
+        font-size: 23px !important;
+        font-weight: 800 !important;
       }
 
       #rankingList .participant-coins {
-        display: flex !important;
-        align-items: center !important;
-        justify-content: flex-end !important;
-        gap: 5px !important;
         white-space: nowrap !important;
         font-size: 16px !important;
         font-weight: 800 !important;
-        min-width: 46px !important;
       }
 
       #rankingList .coin-icon {
-        display: inline-block !important;
+        display: none !important;
       }
 
-      #rankingList .participant-coins::before {
-        content: "🪙" !important;
-        font-size: 16px !important;
-      }
-
-      #rankingList .empty-participants {
-        padding: 14px 0 !important;
-        font-size: 16px !important;
-      }
-
-      /* Hilangkan progress bar */
+      /* Jangan tampilkan progress bar yang berat/menyita ruang */
       #progressBar {
         display: none !important;
       }
 
-      /* Aktivitas tidak diperlukan pada mobile */
+      /* Sembunyikan panel aktivitas pada layar HP agar fokus ke peserta */
       @media (max-width: 700px) {
         #activityList,
         .activity-list,
@@ -121,101 +76,25 @@
           display: none !important;
         }
 
+        #rankingList {
+          width: 100% !important;
+        }
+
         #rankingList .participant-row {
-          grid-template-columns: 52px minmax(0, 1fr) auto !important;
-        }
-
-        #rankingList .participant-name {
-          font-size: 17px !important;
+          grid-template-columns: 58px minmax(0, 1fr) auto !important;
         }
       }
-
-      /* Kartu Draw Time */
-      .coin-target-draw-card {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 10px;
-        margin: 12px 0 16px;
-        padding: 12px 14px;
-        border: 1px solid rgba(180,70,255,.25);
-        border-radius: 10px;
-        background: rgba(45,10,65,.16);
-        box-sizing: border-box;
-      }
-
-      .coin-target-draw-left {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        min-width: 0;
-      }
-
-      .coin-target-draw-icon {
-        font-size: 27px;
-        line-height: 1;
-      }
-
-      .coin-target-draw-title {
-        font-weight: 800;
-        font-size: 17px;
-        line-height: 1.2;
-        color: #c05cff;
-      }
-
-      .coin-target-draw-sub {
-        margin-top: 4px;
-        color: #b9b4c0;
-        font-size: 13px;
-        line-height: 1.3;
-      }
-
-      .coin-target-draw-value {
-        flex: 0 0 auto;
-        padding: 7px 12px;
-        border-radius: 9px;
-        background: rgba(112,32,150,.28);
-        color: #e2a2ff;
-        font-weight: 800;
-        font-size: 16px;
-      }
-
     `;
     document.head.appendChild(style);
 
+    // Pastikan heading tidak kembali menjadi "PESERTA LELANG".
     document.querySelectorAll("h1,h2,h3,h4,.section-title,.panel-title,.card-title").forEach(node => {
-      const t = (node.textContent || "").trim().toUpperCase();
-      if (t === "PESERTA LELANG") node.textContent = "PESERTA";
+      if ((node.textContent || "").trim().toUpperCase() === "PESERTA LELANG") {
+        node.textContent = "PESERTA";
+      }
     });
   }
 
-  function injectTargetDrawAndSettingsUI() {
-    if (document.getElementById("coin-target-draw-card")) return;
-
-    /* Draw Time: panel visual saja. Logika lelang tetap milik server/app yang ada. */
-    const note = document.getElementById("timerNote");
-    if (!note) return;
-
-    const draw = document.createElement("div");
-    draw.id = "coin-target-draw-card";
-    draw.className = "coin-target-draw-card";
-    draw.innerHTML = `
-      <div class="coin-target-draw-left">
-        <div class="coin-target-draw-icon">⌛</div>
-        <div>
-          <div class="coin-target-draw-title">DRAW TIME</div>
-          <div class="coin-target-draw-sub">Jika hasil seri, Draw Time berlangsung 20 detik.</div>
-        </div>
-      </div>
-      <div class="coin-target-draw-value">20 detik</div>
-    `;
-    const ranking = document.getElementById("rankingList");
-    if (ranking) {
-      ranking.insertAdjacentElement("afterend", draw);
-    } else {
-      note.insertAdjacentElement("afterend", draw);
-    }
-  }
   function init() {
 
     /* =======================================================
@@ -223,7 +102,6 @@
        Tidak mengubah koneksi TikTok / gift / coin.
        ======================================================= */
     injectMobileAuctionUI();
-    injectTargetDrawAndSettingsUI();
 
     /* =======================================================
        SOCKET.IO
@@ -292,8 +170,6 @@
       version: 0,
 
       timerInterval: null,
-      timerDeadline: null,
-      lastTimerPaint: null,
 
       connected: false,
       connecting: false
@@ -543,8 +419,8 @@
         state.timer =
           state.initialTimer;
 
-        state.timerDeadline = null;
-        state.lastTimerPaint = null;
+        state.timerDeadline =
+          null;
 
         state.extraUsed =
           false;
@@ -650,20 +526,18 @@
 
       if (el.timer) {
 
-        // Selalu tampilkan 00:00 saat waktu benar-benar habis.
-        const displayTimer = Math.max(0, Number(state.timer) || 0);
-        el.timer.textContent = formatTime(displayTimer);
+        const isFinished =
+          state.auction === "finished";
 
-        // FINISHED harus berwarna hijau dan hanya muncul setelah
-        // auction benar-benar masuk status finished.
-        if (el.timerNote) {
-          if (state.auction === "finished" && displayTimer === 0) {
-            el.timerNote.textContent = "FINISHED";
-            el.timerNote.classList.add("finished-state");
-          } else {
-            el.timerNote.classList.remove("finished-state");
-          }
-        }
+        el.timer.textContent =
+          isFinished
+            ? "00:00"
+            : formatTime(state.timer);
+
+        el.timer.classList.toggle(
+          "finished-timer",
+          isFinished
+        );
 
         applyExtraTimeColor();
       }
@@ -696,29 +570,16 @@
         `${percent}%`;
     }
 
-    function syncTimerNow(forceRender = false) {
-
-      if (state.auction !== "running" || !state.timerDeadline) {
-        return state.timer;
-      }
-
-      const remainingMs = Math.max(0, state.timerDeadline - Date.now());
-      const remaining = Math.max(0, Math.ceil(remainingMs / 1000));
-
-      if (forceRender || remaining !== state.timer || state.lastTimerPaint !== remaining) {
-        state.timer = remaining;
-        state.lastTimerPaint = remaining;
-        renderTimer();
-      }
-
-      return remaining;
-    }
-
     function stopTimer() {
 
       if (state.timerInterval) {
-        clearInterval(state.timerInterval);
-        state.timerInterval = null;
+
+        clearInterval(
+          state.timerInterval
+        );
+
+        state.timerInterval =
+          null;
       }
     }
 
@@ -726,48 +587,87 @@
 
       stopTimer();
 
-      if (state.auction !== "running") {
+      if (
+        state.auction !==
+        "running"
+      ) {
         return;
       }
 
-      // Gunakan deadline absolut agar countdown tidak melambat/jeda
-      // ketika browser HP menunda callback JavaScript.
-      state.timerDeadline = Date.now() + Math.max(0, state.timer) * 1000;
-      state.lastTimerPaint = null;
-      syncTimerNow(true);
+      /*
+       * Gunakan deadline absolut, bukan timer-- setiap 1 detik.
+       * Ini membuat countdown tetap akurat walaupun browser/HP
+       * sempat menunda callback JavaScript.
+       */
+      if (
+        !Number.isFinite(state.timerDeadline) ||
+        state.timerDeadline <= 0
+      ) {
+        state.timerDeadline =
+          Date.now() +
+          Math.max(0, state.timer) * 1000;
+      }
+
       applyExtraTimeColor();
 
-      state.timerInterval = setInterval(() => {
-        if (state.auction !== "running") {
+      const tick = () => {
+
+        if (
+          state.auction !==
+          "running"
+        ) {
           return;
         }
 
-        const remaining = syncTimerNow(false);
+        const remainingMs =
+          state.timerDeadline -
+          Date.now();
 
-        if (remaining <= 0) {
-          // Pastikan layar selalu 00:00 SEBELUM status FINISHED.
-          state.timer = 0;
-          state.lastTimerPaint = 0;
+        const remaining =
+          Math.max(
+            0,
+            Math.ceil(
+              remainingMs / 1000
+            )
+          );
+
+        if (
+          remaining !==
+          state.timer
+        ) {
+          state.timer =
+            remaining;
+
           renderTimer();
+        }
+
+        if (
+          remaining <= 0
+        ) {
           stopTimer();
+
+          state.timer =
+            0;
+
+          renderTimer();
+
           timerFinished();
         }
-      }, 100);
-    }
+      };
 
-    /* =====================================================
-       MOBILE / BACKGROUND TIMER SYNC
-       Saat browser HP menunda JavaScript, jangan membuat
-       countdown kembali dari angka lama. Begitu halaman aktif
-       lagi, langsung hitung dari deadline absolut.
-       ===================================================== */
-    document.addEventListener("visibilitychange", () => {
-      if (document.visibilityState === "visible") {
-        if (state.auction === "running" && state.timerDeadline) {
-          syncTimerNow(true);
-        }
+      tick();
+
+      if (
+        state.auction ===
+        "running"
+      ) {
+        state.timerInterval =
+          setInterval(
+            tick,
+            100
+          );
       }
-    });
+    }
 
     function timerFinished() {
 
@@ -794,8 +694,8 @@
           state.extraTime;
 
         state.timerDeadline =
-          Date.now() + state.extraTime * 1000;
-        state.lastTimerPaint = null;
+          Date.now() +
+          Math.max(0, state.extraTime) * 1000;
 
         if (el.extraStatus) {
 
@@ -828,6 +728,10 @@
       /* =====================================================
          WAKTU BENAR-BENAR HABIS
          ===================================================== */
+
+      state.timer = 0;
+      state.timerDeadline = null;
+      renderTimer();
 
       finishAuction(true);
     }
@@ -888,9 +792,6 @@
         state.timer =
           state.initialTimer;
 
-        state.timerDeadline = null;
-        state.lastTimerPaint = null;
-
         state.extraUsed =
           false;
 
@@ -941,9 +842,27 @@
         return;
       }
 
-      syncTimerNow(true);
+      /*
+       * Simpan sisa waktu aktual sebelum pause.
+       */
+      if (
+        Number.isFinite(state.timerDeadline)
+      ) {
+        state.timer =
+          Math.max(
+            0,
+            Math.ceil(
+              (state.timerDeadline - Date.now()) / 1000
+            )
+          );
+      }
+
       stopTimer();
-      state.timerDeadline = null;
+
+      state.timerDeadline =
+        null;
+
+      renderTimer();
 
       state.auction =
         "paused";
@@ -989,8 +908,8 @@
       state.timer =
         state.initialTimer;
 
-      state.timerDeadline = null;
-      state.lastTimerPaint = null;
+      state.timerDeadline =
+        null;
 
       /*
        * HAPUS WARNA MERAH
@@ -1047,13 +966,9 @@
         return;
       }
 
-      if (fromTimer) {
-        state.timer = 0;
-        state.lastTimerPaint = 0;
-        renderTimer();
-      }
-
       stopTimer();
+
+      state.timer = 0;
       state.timerDeadline = null;
 
       state.auction =
@@ -1172,17 +1087,19 @@
           "Lelang dijeda",
 
         finished:
-          "FINISHED"
+          "Lelang selesai"
       };
 
       if (el.timerNote) {
 
         el.timerNote.textContent =
-          labels[next] || "";
+          next === "finished"
+            ? "FINISHED"
+            : (labels[next] || "");
 
         el.timerNote.classList.toggle(
-          "finished-state",
-          next === "finished" && Math.max(0, Number(state.timer) || 0) === 0
+          "finished-note",
+          next === "finished"
         );
       }
 
@@ -1192,23 +1109,6 @@
           next;
       }
     }
-
-    /* =======================================================
-       FINISHED STATUS - GREEN
-       ======================================================= */
-    (() => {
-      if (document.getElementById("finishedStateStyle")) return;
-      const style = document.createElement("style");
-      style.id = "finishedStateStyle";
-      style.textContent = `
-        #timerNote.finished-state {
-          color: #22c55e !important;
-          font-weight: 700 !important;
-          text-shadow: 0 0 10px rgba(34, 197, 94, 0.25);
-        }
-      `;
-      document.head.appendChild(style);
-    })();
 
     /* =======================================================
        TOAST
@@ -1419,7 +1319,6 @@
 
                 <div
                   class="participant-coins coin"
-                  aria-label="${coins} coin"
                 >
                   <strong>${coins}</strong>
                 </div>
@@ -1892,13 +1791,6 @@
         state.auction =
           next;
 
-        if (next === "finished") {
-          state.timer = 0;
-          state.lastTimerPaint = 0;
-          state.timerDeadline = null;
-          renderTimer();
-        }
-
         if (
           next === "running"
         ) {
@@ -1923,28 +1815,14 @@
             removeExtraTimeColor();
           }
 
-          /*
-           * PENTING: jangan restart deadline setiap kali
-           * server mengirim auction:state.
-           * Server biasanya mengirim update berkala dengan
-           * nilai remaining yang sudah dibulatkan. Jika deadline
-           * dibuat ulang pada setiap update, countdown di HP bisa
-           * terlihat macet/jeda. Deadline lokal hanya dibuat saat
-           * benar-benar masuk ke status running atau deadline belum ada.
-           */
-          if (
-            previous !== "running" ||
-            !state.timerDeadline
-          ) {
-            startTimer();
-          } else {
-            syncTimerNow(true);
-          }
+          startTimer();
 
         } else {
 
           stopTimer();
-          state.timerDeadline = null;
+
+          state.timerDeadline =
+            null;
 
           /*
            * FINISH / IDLE
@@ -2212,9 +2090,6 @@
               state.timer =
                 state.initialTimer;
 
-              state.timerDeadline = null;
-              state.lastTimerPaint = null;
-
               state.extraUsed =
                 false;
 
@@ -2281,9 +2156,6 @@
 
     state.timer =
       state.initialTimer;
-
-    state.timerDeadline = null;
-    state.lastTimerPaint = null;
 
     state.extraTime =
       getExtraTime();

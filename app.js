@@ -1,23 +1,25 @@
-"use strict";
-
 /* =========================================================
-   COIN AUCTION DASHBOARD
+   COIN AUCTION DASHBOARD V6
    =========================================================
-   COIN:
-   - 1 gift = nilai coin sebenarnya
+
+   FITUR:
+
+   - Coin gift 1:1
    - Tidak ada x2
-   - Streak dihitung dari total coin yang dikirim server
-
-   TIMER:
-   - Waktu utama = putih
-   - Extra Time = merah
-   - Draw Time = kuning
-
-   UI:
-   - Ranking compact
-   - Foto profil diprioritaskan
+   - Repeat gift dihitung sesuai repeatCount
    - Tidak menampilkan @viewer
+   - Foto profil TikTok diprioritaskan
+   - Peserta compact
+   - Extra Time benar-benar berjalan
+   - Timer utama PUTIH
+   - Extra Time MERAH saat aktif
+   - Draw Time KUNING saat aktif
+   - Menit + detik digunakan
+   - Socket.IO compatible
+   - Anti double gift event
    ========================================================= */
+
+"use strict";
 
 
 /* =========================================================
@@ -43,6 +45,7 @@ let auctionTitle = "LIVE COIN AUCTION";
 
 let drawDuration = 20;
 let drawRemaining = 20;
+
 let inDraw = false;
 
 let auctionFinished = false;
@@ -62,47 +65,69 @@ let extraActive = false;
 
 
 /* =========================================================
-   GIFT DUPLICATE PROTECTION
+   ANTI DOUBLE EVENT
    ========================================================= */
 
 const processedGiftEvents = new Map();
 
-const GIFT_DEDUPE_TIME = 30000;
+const GIFT_DEDUP_TIME = 60000;
 
 
 /* =========================================================
-   DOM
+   DOM HELPER
    ========================================================= */
 
-const $ = (id) => {
-  return document.getElementById(id);
-};
+const $ = (id) =>
+  document.getElementById(id);
+
+
+/* =========================================================
+   FORMAT NUMBER
+   ========================================================= */
+
+function formatNumber(value) {
+
+  const number =
+    Number(value || 0);
+
+  return Math.max(
+    0,
+    Math.floor(number)
+  ).toLocaleString(
+    "id-ID"
+  );
+
+}
 
 
 /* =========================================================
    FORMAT TIME
    ========================================================= */
 
-function formatTime(seconds) {
+function formatTime(sec) {
 
-  seconds = Math.max(
-    0,
-    Math.floor(
-      Number(seconds) || 0
-    )
-  );
+  sec =
+    Math.max(
+      0,
+      Math.floor(
+        Number(sec) || 0
+      )
+    );
+
 
   const minutes =
-    Math.floor(seconds / 60);
+    Math.floor(sec / 60);
 
-  const secs =
-    seconds % 60;
+  const seconds =
+    sec % 60;
+
 
   return (
     String(minutes).padStart(2, "0") +
     ":" +
-    String(secs).padStart(2, "0")
+    String(seconds).padStart(2, "0")
   );
+
 }
 
 
@@ -116,19 +141,13 @@ function esc(value) {
     value ?? ""
   ).replace(
     /[&<>"']/g,
-    (char) => {
-
-      const map = {
-        "&": "&amp;",
-        "<": "&lt;",
-        ">": "&gt;",
-        '"': "&quot;",
-        "'": "&#039;"
-      };
-
-      return map[char];
-
-    }
+    (m) => ({
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      '"': "&quot;",
+      "'": "&#039;"
+    }[m])
   );
 
 }
@@ -142,19 +161,25 @@ function getInitial(name) {
 
   const text =
     String(
-      name || "Viewer"
+      name ||
+      "Peserta"
     ).trim();
+
 
   if (!text) {
     return "?";
   }
 
-  return text.charAt(0).toUpperCase();
+
+  return text
+    .charAt(0)
+    .toUpperCase();
+
 }
 
 
 /* =========================================================
-   NORMALIZE ID
+   NORMALIZE USER ID
    ========================================================= */
 
 function normalizeUserId(value) {
@@ -163,12 +188,68 @@ function normalizeUserId(value) {
     value === undefined ||
     value === null
   ) {
+
     return "";
+
   }
+
 
   return String(value)
     .trim()
     .toLowerCase();
+
+}
+
+
+/* =========================================================
+   USER NAME
+   ========================================================= */
+
+function getUserName(data = {}) {
+
+  let name =
+    data.nickname ||
+    data.displayName ||
+    data.name ||
+    data.uniqueId ||
+    data.unique_id ||
+    data.username ||
+    "";
+
+
+  name =
+    String(name || "")
+      .trim();
+
+
+  /*
+   * Jangan tampilkan @viewer
+   */
+
+  if (
+    name.toLowerCase() === "@viewer" ||
+    name.toLowerCase() === "viewer"
+  ) {
+
+    return "Peserta";
+
+  }
+
+
+  if (
+    name.startsWith("@")
+  ) {
+
+    name =
+      name.substring(1);
+
+  }
+
+
+  return (
+    name ||
+    "Peserta"
+  );
 
 }
 
@@ -183,11 +264,15 @@ function getUserKey(data = {}) {
     normalizeUserId(
       data.userId ||
       data.user_id ||
-      data.uid
+      data.uid ||
+      data.id
     );
 
+
   if (id) {
+
     return "id:" + id;
+
   }
 
 
@@ -198,8 +283,11 @@ function getUserKey(data = {}) {
       data.unique_id
     );
 
+
   if (username) {
+
     return "username:" + username;
+
   }
 
 
@@ -210,8 +298,11 @@ function getUserKey(data = {}) {
       data.displayName
     );
 
+
   if (nickname) {
+
     return "name:" + nickname;
+
   }
 
 
@@ -221,43 +312,6 @@ function getUserKey(data = {}) {
     ":" +
     Math.random()
   );
-
-}
-
-
-/* =========================================================
-   DISPLAY NAME
-   ========================================================= */
-
-function getDisplayName(data = {}) {
-
-  let name =
-    data.nickname ||
-    data.name ||
-    data.displayName ||
-    data.username ||
-    data.uniqueId ||
-    "Viewer";
-
-  name =
-    String(name).trim();
-
-
-  /*
-   * Jangan tampilkan @viewer.
-   */
-
-  if (
-    name.toLowerCase() === "@viewer" ||
-    name.toLowerCase() === "viewer"
-  ) {
-
-    return "Peserta";
-
-  }
-
-
-  return name;
 
 }
 
@@ -293,7 +347,8 @@ function avatarHTML(
 ) {
 
   const name =
-    getDisplayName(user);
+    user?.name ||
+    "Peserta";
 
 
   const avatar =
@@ -304,25 +359,29 @@ function avatarHTML(
 
     return `
       <div class="${className}">
+
         <img
           src="${esc(avatar)}"
           alt=""
           referrerpolicy="no-referrer"
           loading="lazy"
+          onload="
+            this.style.display='block';
+            this.nextElementSibling.style.display='none';
+          "
           onerror="
             this.style.display='none';
-            if(this.nextElementSibling){
-              this.nextElementSibling.style.display='flex';
-            }
+            this.nextElementSibling.style.display='flex';
           "
         >
 
         <span
           class="avatar-fallback"
-          style="display:none"
+          style="display:none;"
         >
           ${esc(getInitial(name))}
         </span>
+
       </div>
     `;
 
@@ -331,9 +390,11 @@ function avatarHTML(
 
   return `
     <div class="${className}">
+
       <span class="avatar-fallback">
         ${esc(getInitial(name))}
       </span>
+
     </div>
   `;
 
@@ -356,7 +417,7 @@ function sortedUsers() {
         Number(b.coins || 0);
 
 
-      if (coinA !== coinB) {
+      if (coinB !== coinA) {
 
         return coinB - coinA;
 
@@ -386,8 +447,12 @@ function leadersAreTied() {
     sortedUsers();
 
 
-  if (sorted.length < 2) {
+  if (
+    sorted.length < 2
+  ) {
+
     return false;
+
   }
 
 
@@ -421,8 +486,12 @@ function hasClearLeader() {
     sortedUsers();
 
 
-  if (!sorted.length) {
+  if (
+    sorted.length < 1
+  ) {
+
     return false;
+
   }
 
 
@@ -433,12 +502,18 @@ function hasClearLeader() {
 
 
   if (first <= 0) {
+
     return false;
+
   }
 
 
-  if (sorted.length === 1) {
+  if (
+    sorted.length === 1
+  ) {
+
     return true;
+
   }
 
 
@@ -518,6 +593,10 @@ function updateTimerColor() {
   );
 
 
+  /*
+   * DRAW = KUNING
+   */
+
   if (inDraw) {
 
     timer.classList.add(
@@ -531,6 +610,10 @@ function updateTimerColor() {
 
   }
 
+
+  /*
+   * EXTRA = MERAH
+   */
 
   if (extraActive) {
 
@@ -546,6 +629,10 @@ function updateTimerColor() {
   }
 
 
+  /*
+   * TIMER UTAMA = PUTIH
+   */
+
   timer.style.color =
     "#ffffff";
 
@@ -553,7 +640,7 @@ function updateTimerColor() {
 
 
 /* =========================================================
-   READ MAIN TIME
+   MAIN DURATION
    ========================================================= */
 
 function readMainDuration() {
@@ -577,13 +664,21 @@ function readMainDuration() {
     );
 
 
-  if (!Number.isFinite(minutes)) {
+  if (
+    !Number.isFinite(minutes)
+  ) {
+
     minutes = 5;
+
   }
 
 
-  if (!Number.isFinite(seconds)) {
+  if (
+    !Number.isFinite(seconds)
+  ) {
+
     seconds = 0;
+
   }
 
 
@@ -612,14 +707,22 @@ function readMainDuration() {
     seconds;
 
 
-  if (duration <= 0) {
+  /*
+   * Minimal 1 detik
+   */
+
+  if (
+    duration <= 0
+  ) {
+
     duration = 1;
+
   }
 
 
   /*
-   * Kalau timer belum berjalan,
-   * langsung gunakan waktu baru.
+   * Hanya reset timer utama
+   * kalau belum berjalan.
    */
 
   if (
@@ -637,7 +740,7 @@ function readMainDuration() {
 
 
 /* =========================================================
-   READ EXTRA TIME
+   EXTRA TIME
    ========================================================= */
 
 function readExtraTime() {
@@ -657,8 +760,12 @@ function readExtraTime() {
     );
 
 
-  if (!Number.isFinite(value)) {
+  if (
+    !Number.isFinite(value)
+  ) {
+
     value = 30;
+
   }
 
 
@@ -674,6 +781,96 @@ function readExtraTime() {
 
   extraTime =
     value;
+
+
+  if (!extraActive) {
+
+    extraRemaining = 0;
+
+  }
+
+
+  updateExtraSettingDisplay();
+
+}
+
+
+/* =========================================================
+   EXTRA TIME DISPLAY
+   ========================================================= */
+
+function updateExtraSettingDisplay() {
+
+  const status =
+    $("extraTimeStatus");
+
+
+  if (!status) {
+    return;
+  }
+
+
+  /*
+   * Extra aktif
+   */
+
+  if (extraActive) {
+
+    status.textContent =
+      "🔴 EXTRA TIME AKTIF — " +
+      formatTime(extraRemaining);
+
+    status.classList.add(
+      "active"
+    );
+
+    return;
+
+  }
+
+
+  /*
+   * Draw aktif
+   */
+
+  if (inDraw) {
+
+    status.textContent =
+      "🟡 DRAW TIME AKTIF — " +
+      formatTime(drawRemaining);
+
+    status.classList.remove(
+      "active"
+    );
+
+    return;
+
+  }
+
+
+  /*
+   * Belum aktif
+   */
+
+  if (
+    extraTime > 0
+  ) {
+
+    status.textContent =
+      "Extra Time tersedia — " +
+      formatTime(extraTime);
+
+  } else {
+
+    status.textContent =
+      "Extra Time: OFF";
+
+  }
+
+
+  status.classList.remove(
+    "active"
+  );
 
 }
 
@@ -729,6 +926,8 @@ function readSettings() {
   }
 
 
+  updateTitleDisplay();
+
   render();
 
 }
@@ -740,298 +939,155 @@ function readSettings() {
 
 function saveSettings() {
 
-  const wasRunning =
-    running;
-
-
   readSettings();
 
 
-  /*
-   * Jika tidak sedang berjalan,
-   * reset timer utama ke pengaturan baru.
-   */
-
-  if (!wasRunning) {
-
-    remaining =
-      duration;
-
-    extraActive =
-      false;
-
-    extraRemaining =
-      0;
-
-    inDraw =
-      false;
-
-    drawRemaining =
-      drawDuration;
-
-    auctionFinished =
-      false;
-
-  }
-
-
-  syncAuctionState();
-
-  render();
-
-
   toast(
-    "⚙️ Pengaturan berhasil disimpan"
-  );
-
-}
-
-
-/* =========================================================
-   START EXTRA TIME
-   ========================================================= */
-
-function startExtraTime() {
-
-  readExtraTime();
-
-
-  if (extraTime <= 0) {
-
-    if (leadersAreTied()) {
-
-      startDrawTime();
-
-    } else {
-
-      finishAuction(
-        "Waktu habis"
-      );
-
-    }
-
-    return;
-
-  }
-
-
-  extraActive =
-    true;
-
-
-  extraRemaining =
-    extraTime;
-
-
-  auctionFinished =
-    false;
-
-
-  const note =
-    $("timerNote");
-
-
-  if (note) {
-
-    note.textContent =
-      "🔴 EXTRA TIME AKTIF";
-
-  }
-
-
-  toast(
-    `🔴 Extra Time ${formatTime(extraTime)}`
+    "✓ Pengaturan berhasil disimpan"
   );
 
 
   syncAuctionState();
 
-  render();
-
 }
 
 
 /* =========================================================
-   START DRAW
+   WRITE SETTINGS TO INPUT
    ========================================================= */
 
-function startDrawTime() {
+function writeSettingsToInputs() {
 
-  inDraw =
-    true;
-
-
-  drawRemaining =
-    drawDuration;
+  const titleInput =
+    $("titleInput");
 
 
-  extraActive =
-    false;
+  if (titleInput) {
 
-
-  extraRemaining =
-    0;
-
-
-  auctionFinished =
-    false;
-
-
-  const note =
-    $("timerNote");
-
-
-  if (note) {
-
-    note.textContent =
-      "⚡ DRAW TIME AKTIF";
+    titleInput.value =
+      auctionTitle;
 
   }
 
 
-  toast(
-    `⚡ DRAW TIME ${drawDuration} DETIK`
-  );
-
-
-  syncAuctionState();
-
-  render();
-
-}
-
-
-/* =========================================================
-   FINISH
-   ========================================================= */
-
-function finishAuction(
-  message = "Selesai"
-) {
-
-  running =
-    false;
-
-
-  clearInterval(
-    interval
-  );
-
-
-  interval =
-    null;
-
-
-  extraActive =
-    false;
-
-
-  extraRemaining =
-    0;
-
-
-  inDraw =
-    false;
-
-
-  auctionFinished =
-    true;
-
-
-  const note =
-    $("timerNote");
-
-
-  if (note) {
-
-    note.textContent =
-      message;
-
-  }
-
-
-  const extraStatus =
-    $("extraTimeStatus");
-
-
-  if (extraStatus) {
-
-    extraStatus.textContent =
-      "";
-
-    extraStatus.classList.remove(
-      "active"
+  const totalMinutes =
+    Math.floor(
+      duration / 60
     );
 
+
+  const totalSeconds =
+    duration % 60;
+
+
+  const minuteInput =
+    $("minuteInput");
+
+
+  const secondInput =
+    $("secondInput");
+
+
+  if (minuteInput) {
+
+    minuteInput.value =
+      totalMinutes;
+
   }
 
 
-  syncAuctionState();
+  if (secondInput) {
 
-  render();
+    secondInput.value =
+      totalSeconds;
+
+  }
 
 
-  toast(
-    "🏆 " + message
-  );
+  const topInput =
+    $("topInput");
+
+
+  if (topInput) {
+
+    topInput.value =
+      String(topLimit);
+
+  }
+
+
+  const extraInput =
+    $("extraTimeInput");
+
+
+  if (extraInput) {
+
+    extraInput.value =
+      extraTime;
+
+  }
 
 }
 
 
 /* =========================================================
-   HANDLE TIMER END
+   TITLE DISPLAY
    ========================================================= */
 
-function handleTimeEnd() {
+function updateTitleDisplay() {
 
-  /*
-   * DRAW TIME SELESAI
-   */
+  const el =
+    $("auctionTitleDisplay");
+
+
+  if (!el) {
+    return;
+  }
+
+
+  el.textContent =
+    auctionTitle ||
+    "LIVE COIN AUCTION";
+
+}
+
+
+/* =========================================================
+   TIMER NOTE
+   ========================================================= */
+
+function updateTimerNote() {
+
+  const note =
+    $("timerNote");
+
+
+  if (!note) {
+    return;
+  }
+
+
+  if (auctionFinished) {
+
+    note.textContent =
+      "Sesi selesai";
+
+    return;
+
+  }
+
 
   if (inDraw) {
 
-    if (hasClearLeader()) {
+    if (running) {
 
-      finishAuction(
-        "DRAW TIME selesai"
-      );
-
-    } else {
-
-      finishAuction(
-        "Hasil masih seri"
-      );
-
-    }
-
-    return;
-
-  }
-
-
-  /*
-   * EXTRA TIME SELESAI
-   */
-
-  if (extraActive) {
-
-    extraActive =
-      false;
-
-
-    extraRemaining =
-      0;
-
-
-    if (leadersAreTied()) {
-
-      startDrawTime();
+      note.textContent =
+        "🟡 DRAW TIME — Tentukan hasil";
 
     } else {
 
-      finishAuction(
-        "Extra Time selesai"
-      );
+      note.textContent =
+        "⏸ Draw Time dijeda";
 
     }
 
@@ -1039,242 +1095,575 @@ function handleTimeEnd() {
 
   }
 
-
-  /*
-   * WAKTU UTAMA SELESAI
-   *
-   * Extra Time dijalankan dahulu.
-   */
-
-  readExtraTime();
-
-
-  if (extraTime > 0) {
-
-    startExtraTime();
-
-    return;
-
-  }
-
-
-  /*
-   * Tidak ada Extra Time.
-   * Kalau seri -> Draw Time.
-   */
-
-  if (leadersAreTied()) {
-
-    startDrawTime();
-
-    return;
-
-  }
-
-
-  finishAuction(
-    "Waktu selesai"
-  );
-
-}
-
-
-/* =========================================================
-   TIMER TICK
-   ========================================================= */
-
-function tick() {
-
-  if (!running) {
-    return;
-  }
-
-
-  /*
-   * DRAW
-   */
-
-  if (inDraw) {
-
-    if (drawRemaining > 0) {
-
-      drawRemaining--;
-
-      render();
-
-      syncAuctionState();
-
-      return;
-
-    }
-
-
-    handleTimeEnd();
-
-    return;
-
-  }
-
-
-  /*
-   * EXTRA
-   */
 
   if (extraActive) {
 
-    if (extraRemaining > 0) {
+    if (running) {
 
-      extraRemaining--;
+      note.textContent =
+        "🔴 EXTRA TIME sedang berjalan";
 
-      render();
+    } else {
 
-      syncAuctionState();
-
-      return;
+      note.textContent =
+        "⏸ Extra Time dijeda";
 
     }
 
-
-    handleTimeEnd();
-
     return;
 
   }
-
-
-  /*
-   * MAIN
-   */
-
-  if (remaining > 0) {
-
-    remaining--;
-
-    render();
-
-    syncAuctionState();
-
-    return;
-
-  }
-
-
-  handleTimeEnd();
-
-}
-
-
-/* =========================================================
-   SET RUNNING
-   ========================================================= */
-
-function setRunning(value) {
-
-  running =
-    Boolean(value);
-
-
-  clearInterval(
-    interval
-  );
-
-
-  interval =
-    null;
 
 
   if (running) {
 
-    interval =
-      setInterval(
-        tick,
-        1000
-      );
+    note.textContent =
+      "⏱️ Waktu utama berjalan";
+
+    return;
 
   }
 
-
-  syncAuctionState();
-
-  render();
-
-}
-
-
-/* =========================================================
-   START AUCTION
-   ========================================================= */
-
-function startAuction() {
-
-  /*
-   * Kalau sebelumnya sudah selesai,
-   * mulai sesi baru.
-   */
-
-  if (auctionFinished) {
-
-    auctionFinished =
-      false;
-
-    remaining =
-      duration;
-
-    extraActive =
-      false;
-
-    extraRemaining =
-      0;
-
-    inDraw =
-      false;
-
-    drawRemaining =
-      drawDuration;
-
-  }
-
-
-  /*
-   * Jika timer utama sudah 0
-   * dan belum masuk fase lain,
-   * mulai dari durasi baru.
-   */
 
   if (
-    remaining <= 0 &&
-    !extraActive &&
-    !inDraw
+    remaining < duration
   ) {
 
-    remaining =
-      duration;
+    note.textContent =
+      "⏸ Dijeda";
+
+    return;
 
   }
 
 
-  setRunning(
-    true
-  );
-
-
-  toast(
-    "▶️ Dimulai"
-  );
+  note.textContent =
+    "Siap untuk dimulai";
 
 }
 
 
 /* =========================================================
-   PAUSE
+   PROGRESS
    ========================================================= */
 
-function pauseAuction() {
+function updateProgress() {
 
-  if (!running) {
+  const bar =
+    $("progressBar");
+
+
+  if (!bar) {
+    return;
+  }
+
+
+  let current = 0;
+  let total = 1;
+
+
+  if (inDraw) {
+
+    current =
+      drawRemaining;
+
+    total =
+      drawDuration;
+
+  } else if (extraActive) {
+
+    current =
+      extraRemaining;
+
+    total =
+      extraTime || 1;
+
+  } else {
+
+    current =
+      remaining;
+
+    total =
+      duration || 1;
+
+  }
+
+
+  let percent =
+    (
+      current /
+      total
+    ) * 100;
+
+
+  percent =
+    Math.max(
+      0,
+      Math.min(
+        100,
+        percent
+      )
+    );
+
+
+  bar.style.width =
+    percent + "%";
+
+}
+
+
+/* =========================================================
+   RENDER RANKING
+   ========================================================= */
+
+function renderRanking() {
+
+  const list =
+    $("rankingList");
+
+
+  if (!list) {
+    return;
+  }
+
+
+  const sorted =
+    sortedUsers();
+
+
+  const visible =
+    sorted.slice(
+      0,
+      topLimit
+    );
+
+
+  if (!visible.length) {
+
+    list.innerHTML = `
+      <div class="empty-box">
+        Menunggu peserta
+      </div>
+    `;
+
+    return;
+
+  }
+
+
+  list.innerHTML =
+    visible.map(
+      (user, index) => {
+
+        const rank =
+          index + 1;
+
+
+        const coin =
+          Number(
+            user.coins || 0
+          );
+
+
+        return `
+          <div
+            class="rank-card rank-box"
+          >
+
+            <div class="box-top">
+
+              <div class="rank-no">
+                ${rank}
+              </div>
+
+
+              ${avatarHTML(user)}
+
+
+              <div class="rank-info">
+
+                <strong>
+                  ${esc(user.name)}
+                </strong>
+
+                <span>
+                  @${esc(user.username || "")}
+                </span>
+
+              </div>
+
+
+              <div class="coin">
+
+                <span class="coin-icon">
+                  🪙
+                </span>
+
+                <strong>
+                  ${formatNumber(coin)}
+                </strong>
+
+              </div>
+
+            </div>
+
+          </div>
+        `;
+
+      }
+    ).join("");
+
+}
+
+
+/* =========================================================
+   RENDER ACTIVITY
+   ========================================================= */
+
+function renderActivities() {
+
+  const list =
+    $("activityList");
+
+
+  if (!list) {
+    return;
+  }
+
+
+  if (!activities.length) {
+
+    list.innerHTML = `
+      <p class="empty">
+        Belum ada gift masuk.
+      </p>
+    `;
+
+    return;
+
+  }
+
+
+  list.innerHTML =
+    activities
+      .slice(0, 20)
+      .map(
+        (item) => `
+
+          <div class="activity-item">
+
+            <div class="activity-avatar">
+
+              ${avatarHTML(
+                {
+                  name: item.name,
+                  avatar: item.avatar
+                },
+                "user-avatar"
+              )}
+
+            </div>
+
+
+            <div class="activity-info">
+
+              <strong>
+                ${esc(item.name)}
+              </strong>
+
+              <span>
+                ${esc(item.giftName)}
+                × ${formatNumber(item.repeatCount)}
+              </span>
+
+            </div>
+
+
+            <div class="activity-coins">
+
+              +${formatNumber(item.coins)}
+
+            </div>
+
+          </div>
+
+        `
+      )
+      .join("");
+
+}
+
+
+/* =========================================================
+   RENDER
+   ========================================================= */
+
+function render() {
+
+  const timer =
+    $("timer");
+
+
+  if (timer) {
+
+    if (inDraw) {
+
+      timer.textContent =
+        formatTime(drawRemaining);
+
+    } else if (extraActive) {
+
+      timer.textContent =
+        formatTime(extraRemaining);
+
+    } else {
+
+      timer.textContent =
+        formatTime(remaining);
+
+    }
+
+  }
+
+
+  updateTitleDisplay();
+
+  updateTimerNote();
+
+  updateProgress();
+
+  updateExtraSettingDisplay();
+
+  updateTimerColor();
+
+  renderRanking();
+
+  renderActivities();
+
+
+  const count =
+    $("participantCount");
+
+
+  if (count) {
+
+    count.textContent =
+      users.length +
+      " peserta";
+
+  }
+
+
+  const hero =
+    $("heroViewer");
+
+
+  if (hero) {
+
+    hero.textContent =
+      liveEventCount;
+
+  }
+
+
+  /*
+   * Tampilkan event count
+   */
+
+  const heroStat =
+    document.querySelector(
+      ".hero-stat span"
+    );
+
+
+  if (heroStat) {
+
+    heroStat.textContent =
+      "EVENT LIVE";
+
+  }
+
+}
+
+
+/* =========================================================
+   CONNECTION STATUS
+   ========================================================= */
+
+function updateConnectionUI(
+  connected,
+  username = "",
+  message = ""
+) {
+
+  liveConnected =
+    Boolean(connected);
+
+
+  if (username) {
+
+    connectedUsername =
+      String(username)
+        .replace(/^@/, "")
+        .trim();
+
+  }
+
+
+  const badge =
+    $("statusBadge");
+
+
+  const name =
+    $("liveName");
+
+
+  const log =
+    $("connectionLog");
+
+
+  const connectBtn =
+    $("connectBtn");
+
+
+  const disconnectBtn =
+    $("disconnectBtn");
+
+
+  if (liveConnected) {
+
+    if (badge) {
+
+      badge.textContent =
+        "ONLINE";
+
+      badge.classList.remove(
+        "offline"
+      );
+
+      badge.classList.add(
+        "online"
+      );
+
+    }
+
+
+    if (name) {
+
+      name.textContent =
+        "@" +
+        (
+          connectedUsername ||
+          "LIVE"
+        );
+
+    }
+
+
+    if (log) {
+
+      log.textContent =
+        message ||
+        "Status: TikTok LIVE terhubung.";
+
+    }
+
+
+    if (connectBtn) {
+
+      connectBtn.disabled =
+        false;
+
+    }
+
+
+  } else {
+
+    if (badge) {
+
+      badge.textContent =
+        "OFFLINE";
+
+      badge.classList.remove(
+        "online"
+      );
+
+      badge.classList.add(
+        "offline"
+      );
+
+    }
+
+
+    if (name) {
+
+      name.textContent =
+        "@Belum Terhubung";
+
+    }
+
+
+    if (log) {
+
+      log.textContent =
+        message ||
+        "Status: Belum terhubung ke TikTok LIVE.";
+
+    }
+
+  }
+
+
+  if (disconnectBtn) {
+
+    disconnectBtn.disabled =
+      !liveConnected;
+
+  }
+
+}
+
+
+/* =========================================================
+   CONNECT TIKTOK
+   ========================================================= */
+
+function connectTikTok() {
+
+  const input =
+    $("tiktokUsername");
+
+
+  if (!input) {
+    return;
+  }
+
+
+  let username =
+    String(
+      input.value || ""
+    )
+      .trim()
+      .replace(/^@/, "");
+
+
+  if (!username) {
 
     toast(
-      "⏸ Sudah dijeda"
+      "Masukkan username TikTok terlebih dahulu."
+    );
+
+    input.focus();
+
+    return;
+
+  }
+
+
+  if (!socket) {
+
+    toast(
+      "Socket belum siap."
     );
 
     return;
@@ -1282,116 +1671,202 @@ function pauseAuction() {
   }
 
 
-  setRunning(
-    false
-  );
+  connectedUsername =
+    username;
 
 
-  toast(
-    "⏸ Dijeda"
-  );
+  if ($("connectionLog")) {
 
-}
-
-
-/* =========================================================
-   RESET
-   ========================================================= */
-
-function resetAuction() {
-
-  clearInterval(
-    interval
-  );
-
-
-  interval =
-    null;
-
-
-  running =
-    false;
-
-
-  auctionFinished =
-    false;
-
-
-  inDraw =
-    false;
-
-
-  extraActive =
-    false;
-
-
-  remaining =
-    duration;
-
-
-  extraRemaining =
-    0;
-
-
-  drawRemaining =
-    drawDuration;
-
-
-  users = [];
-
-  activities = [];
-
-  liveEventCount =
-    0;
-
-
-  const note =
-    $("timerNote");
-
-
-  if (note) {
-
-    note.textContent =
-      "Siap untuk memulai";
+    $("connectionLog").textContent =
+      "Status: menghubungkan ke TikTok LIVE...";
 
   }
 
 
-  syncAuctionState();
+  if ($("statusBadge")) {
 
-  render();
+    $("statusBadge").textContent =
+      "CONNECTING";
+
+  }
+
+
+  /*
+   * Server event
+   */
+
+  socket.emit(
+    "live:connect",
+    {
+      username
+    }
+  );
 
 
   toast(
-    "↻ Di-reset"
+    "⏳ Menghubungkan @" +
+    username
   );
 
 }
 
 
 /* =========================================================
-   FINISH BUTTON
+   DISCONNECT TIKTOK
    ========================================================= */
 
-function finishButton() {
+function disconnectTikTok() {
 
-  finishAuction(
-    "Selesai"
+  if (!socket) {
+    return;
+  }
+
+
+  socket.emit(
+    "live:disconnect"
+  );
+
+
+  liveConnected =
+    false;
+
+
+  connectedUsername =
+    "";
+
+
+  updateConnectionUI(
+    false,
+    "",
+    "Status: koneksi TikTok LIVE diputuskan."
+  );
+
+
+  toast(
+    "✓ Koneksi diputuskan"
   );
 
 }
 
 
 /* =========================================================
-   NORMALIZE USER
+   FIND USER
    ========================================================= */
 
-function normalizeUser(data = {}) {
+function findUser(data) {
+
+  const key =
+    getUserKey(data);
+
 
   return {
+    key,
+    index:
+      users.findIndex(
+        (user) =>
+          user.key === key
+      )
+  };
 
-    key:
-      getUserKey(data),
+}
+
+
+/* =========================================================
+   UPSERT USER
+   ========================================================= */
+
+function upsertUser(
+  data = {},
+  coinsToAdd = 0
+) {
+
+  const {
+    key,
+    index
+  } =
+    findUser(data);
+
+
+  const name =
+    getUserName(data);
+
+
+  const username =
+    String(
+      data.username ||
+      data.uniqueId ||
+      data.unique_id ||
+      ""
+    )
+      .replace(/^@/, "")
+      .trim();
+
+
+  const avatar =
+    getAvatar(data);
+
+
+  const add =
+    Math.max(
+      0,
+      Math.floor(
+        Number(
+          coinsToAdd || 0
+        )
+      )
+    );
+
+
+  if (index >= 0) {
+
+    const user =
+      users[index];
+
+
+    if (
+      name &&
+      name !== "Peserta"
+    ) {
+
+      user.name =
+        name;
+
+    }
+
+
+    if (username) {
+
+      user.username =
+        username;
+
+    }
+
+
+    if (avatar) {
+
+      user.avatar =
+        avatar;
+
+    }
+
+
+    user.coins =
+      Math.max(
+        0,
+        Number(
+          user.coins || 0
+        )
+      ) + add;
+
+
+    return user;
+
+  }
+
+
+  const user = {
+
+    key,
 
     userId:
       data.userId ||
@@ -1399,135 +1874,134 @@ function normalizeUser(data = {}) {
       data.uid ||
       "",
 
-    username:
-      data.username ||
-      data.uniqueId ||
-      data.unique_id ||
-      "",
+    username,
 
-    name:
-      getDisplayName(data),
+    name,
+
+    nickname:
+      data.nickname ||
+      name,
+
+    avatar,
 
     coins:
-      Math.max(
-        0,
-        Number(
-          data.coins ??
-          data.coin ??
-          data.coinValue ??
-          data.diamonds ??
-          data.diamond ??
-          0
-        ) || 0
-      ),
-
-    avatar:
-      getAvatar(data)
+      add
 
   };
+
+
+  users.push(
+    user
+  );
+
+
+  return user;
 
 }
 
 
 /* =========================================================
-   UPDATE USER
+   UPDATE USER FROM SERVER
    ========================================================= */
 
-function updateUser(data = {}) {
+function updateUserFromServer(data) {
 
-  const normalized =
-    normalizeUser(data);
+  if (!data) {
+    return;
+  }
 
 
-  let existing =
-    users.find(
-      (user) => {
+  /*
+   * Kalau server mengirim array user
+   */
 
-        if (
-          normalized.userId &&
-          user.userId
-        ) {
+  if (
+    Array.isArray(data)
+  ) {
 
-          return (
-            String(
-              normalized.userId
-            ) ===
-            String(
-              user.userId
-            )
-          );
+    users =
+      data.map(
+        (item) => {
+
+          const user = {
+
+            key:
+              getUserKey(item),
+
+            userId:
+              item.userId ||
+              item.user_id ||
+              item.uid ||
+              "",
+
+            username:
+              String(
+                item.username ||
+                item.uniqueId ||
+                item.unique_id ||
+                ""
+              )
+                .replace(/^@/, ""),
+
+            name:
+              getUserName(item),
+
+            nickname:
+              item.nickname ||
+              getUserName(item),
+
+            avatar:
+              getAvatar(item),
+
+            coins:
+              Math.max(
+                0,
+                Number(
+                  item.coins ??
+                  item.coin ??
+                  item.coinValue ??
+                  0
+                )
+              )
+
+          };
+
+
+          return user;
 
         }
+      );
 
 
-        if (
-          normalized.username &&
-          user.username
-        ) {
+    render();
 
-          return (
-            normalizeUserId(
-              normalized.username
-            ) ===
-            normalizeUserId(
-              user.username
-            )
-          );
+    return;
 
-        }
+  }
 
 
-        return (
-          user.key ===
-          normalized.key
-        );
+  /*
+   * Satu user
+   */
 
-      }
+  const user =
+    upsertUser(
+      data,
+      0
     );
 
 
-  if (!existing) {
+  if (
+    data.coins !== undefined
+  ) {
 
-    users.push(
-      normalized
-    );
-
-  } else {
-
-    if (normalized.name) {
-
-      existing.name =
-        normalized.name;
-
-    }
-
-
-    if (normalized.username) {
-
-      existing.username =
-        normalized.username;
-
-    }
-
-
-    if (normalized.avatar) {
-
-      existing.avatar =
-        normalized.avatar;
-
-    }
-
-
-    if (
-      Number.isFinite(
-        normalized.coins
-      )
-    ) {
-
-      existing.coins =
-        normalized.coins;
-
-    }
+    user.coins =
+      Math.max(
+        0,
+        Number(
+          data.coins || 0
+        )
+      );
 
   }
 
@@ -1547,57 +2021,85 @@ function getGiftEventKey(data = {}) {
     data.msgId ||
     data.messageId ||
     data.transactionId ||
-    data.transaction_id ||
     data.groupId ||
-    data.group_id;
+    data.giftEventId;
 
 
   if (stableId) {
 
-    return (
-      "gift:" +
-      String(stableId)
+    return String(
+      stableId
     );
 
   }
 
 
-  return [
-    data.username ||
-    data.uniqueId ||
-    "",
+  /*
+   * Fallback
+   */
 
+  const username =
+    normalizeUserId(
+      data.username ||
+      data.uniqueId ||
+      data.unique_id ||
+      data.userId
+    );
+
+
+  const giftId =
     data.giftId ||
-    "",
+    data.gift_id ||
+    "";
 
+
+  const giftName =
     data.giftName ||
-    "",
+    data.gift_name ||
+    "";
 
+
+  const coinValue =
     data.coinValue ??
     data.coins ??
+    data.coinCount ??
     data.diamondCount ??
-    "",
+    0;
 
+
+  const repeatCount =
     data.repeatCount ??
-    ""
+    data.repeat_count ??
+    1;
 
+
+  return [
+    username,
+    giftId,
+    giftName,
+    coinValue,
+    repeatCount
   ].join("|");
 
 }
 
 
 /* =========================================================
-   GIFT DUPLICATE CHECK
+   CHECK DUPLICATE
    ========================================================= */
 
 function isDuplicateGift(data) {
 
   /*
-   * Test/manual gift jangan dideduplikasi.
+   * Test manual tidak didedup.
    */
 
-  if (data.__test) {
+  if (
+    data.__test
+  ) {
+
     return false;
+
   }
 
 
@@ -1610,17 +2112,19 @@ function isDuplicateGift(data) {
 
 
   /*
-   * Bersihkan data lama.
+   * Cleanup
    */
 
   for (
-    const [oldKey, timestamp]
-    of processedGiftEvents
+    const [
+      oldKey,
+      timestamp
+    ] of processedGiftEvents
   ) {
 
     if (
       now - timestamp >
-      GIFT_DEDUPE_TIME
+      GIFT_DEDUP_TIME
     ) {
 
       processedGiftEvents.delete(
@@ -1658,46 +2162,84 @@ function isDuplicateGift(data) {
 
 function handleGift(data = {}) {
 
+  if (!data) {
+    return;
+  }
+
+
   /*
-   * Jangan proses gift yang sama dua kali.
+   * Streak gift TikTok:
+   * hanya proses final event.
+   */
+
+  const giftType =
+    Number(
+      data.giftType ??
+      data.gift_type ??
+      0
+    );
+
+
+  const repeatEnd =
+    data.repeatEnd ??
+    data.repeat_end;
+
+
+  if (
+    giftType === 1 &&
+    repeatEnd === false
+  ) {
+
+    return;
+
+  }
+
+
+  /*
+   * Jangan proses dua kali
    */
 
   if (
     isDuplicateGift(data)
   ) {
 
-    console.log(
-      "Gift duplicate diabaikan:",
-      data
-    );
-
     return;
 
   }
 
 
   /*
-   * TikTok streak gift:
-   * server seharusnya mengirim final event.
+   * Nama user
    */
 
-  if (
-    Number(data.giftType) === 1 &&
-    data.repeatEnd === false
-  ) {
-
-    return;
-
-  }
+  const name =
+    getUserName(data);
 
 
   /*
+   * Repeat count
+   */
+
+  const repeatCount =
+    Math.max(
+      1,
+      Math.floor(
+        Number(
+          data.repeatCount ??
+          data.repeat_count ??
+          1
+        )
+      )
+    );
+
+
+  /*
+   * =======================================================
    * COIN 1:1
+   * =======================================================
    *
-   * Prioritas:
-   * coinValue dari server
-   * kemudian coins
-   * kemudian diamondCount.
+   * Kalau server sudah mengirim coinValue,
+   * gunakan nilai tersebut.
    *
    * Tidak ada x2.
    */
@@ -1727,179 +2269,100 @@ function handleGift(data = {}) {
 
   } else {
 
-    const diamondCount =
+    const diamond =
       Number(
-        data.diamondCount ||
-        data.diamonds ||
+        data.diamondCount ??
+        data.coinCount ??
+        data.coin ??
         0
       );
 
 
-    const repeatCount =
-      Number(
-        data.repeatCount ||
-        1
-      );
-
-
     /*
-     * 1 coin per diamond,
-     * repeat count hanya untuk
-     * menghitung jumlah gift streak.
+     * 1 gift coin = 1 coin.
+     *
+     * Kalau gift dikirim 5 kali,
+     * diamondCount × 5.
+     *
+     * BUKAN ×2.
      */
 
     coins =
-      diamondCount *
-      Math.max(
-        1,
-        repeatCount
-      );
+      diamond *
+      repeatCount;
 
   }
 
 
+  coins =
+    Math.max(
+      0,
+      Math.floor(
+        coins || 0
+      )
+    );
+
+
   if (
-    !Number.isFinite(coins) ||
     coins <= 0
   ) {
-
-    console.warn(
-      "Gift tanpa coin diabaikan:",
-      data
-    );
 
     return;
 
   }
 
 
-  coins =
-    Math.floor(
+  /*
+   * Update participant
+   */
+
+  const user =
+    upsertUser(
+      data,
       coins
     );
 
 
-  const normalized =
-    normalizeUser(data);
-
-
-  let existing =
-    users.find(
-      (user) => {
-
-        if (
-          normalized.userId &&
-          user.userId
-        ) {
-
-          return (
-            String(
-              normalized.userId
-            ) ===
-            String(
-              user.userId
-            )
-          );
-
-        }
-
-
-        if (
-          normalized.username &&
-          user.username
-        ) {
-
-          return (
-            normalizeUserId(
-              normalized.username
-            ) ===
-            normalizeUserId(
-              user.username
-            )
-          );
-
-        }
-
-
-        return (
-          user.key ===
-          normalized.key
-        );
-
-      }
-    );
-
-
-  if (!existing) {
-
-    existing = {
-      ...normalized,
-      coins: 0
-    };
-
-
-    users.push(
-      existing
-    );
-
-  }
-
-
   /*
-   * Tambahkan coin 1:1.
+   * Event count
    */
-
-  existing.coins =
-    Number(
-      existing.coins || 0
-    ) + coins;
-
-
-  if (normalized.name) {
-
-    existing.name =
-      normalized.name;
-
-  }
-
-
-  if (normalized.username) {
-
-    existing.username =
-      normalized.username;
-
-  }
-
-
-  if (normalized.avatar) {
-
-    existing.avatar =
-      normalized.avatar;
-
-  }
-
 
   liveEventCount++;
 
 
+  /*
+   * Gift name
+   */
+
+  const giftName =
+    data.giftName ||
+    data.gift_name ||
+    "Gift";
+
+
+  /*
+   * Activity
+   */
+
   activities.unshift({
 
     name:
-      existing.name,
-
-    username:
-      existing.username,
+      name,
 
     avatar:
-      existing.avatar,
+      getAvatar(data),
 
-    gift:
-      data.giftName ||
-      data.gift ||
-      data.name ||
-      "Gift",
+    giftName:
+      giftName,
 
-    coins
+    coins:
+      coins,
+
+    repeatCount:
+      repeatCount,
+
+    time:
+      Date.now()
 
   });
 
@@ -1907,8 +2370,529 @@ function handleGift(data = {}) {
   activities =
     activities.slice(
       0,
-      50
+      20
     );
+
+
+  render();
+
+
+  /*
+   * Broadcast state
+   */
+
+  syncAuctionState();
+
+
+  toast(
+    "🎁 " +
+    name +
+    " +" +
+    formatNumber(coins) +
+    " coin"
+  );
+
+}
+
+
+/* =========================================================
+   HANDLE LIVE EVENT
+   ========================================================= */
+
+function handleLiveEvent(event) {
+
+  if (!event) {
+    return;
+  }
+
+
+  /*
+   * Server bisa mengirim:
+   *
+   * {
+   *   type: "gift",
+   *   data: {...}
+   * }
+   */
+
+  const type =
+    String(
+      event.type ||
+      ""
+    ).toLowerCase();
+
+
+  if (
+    type === "gift"
+  ) {
+
+    handleGift(
+      event.data ||
+      event
+    );
+
+  }
+
+}
+
+
+/* =========================================================
+   START EXTRA TIME
+   ========================================================= */
+
+function startExtraTime() {
+
+  if (
+    extraTime <= 0
+  ) {
+
+    /*
+     * Tidak ada Extra Time.
+     * Langsung cek Draw.
+     */
+
+    if (
+      leadersAreTied()
+    ) {
+
+      startDrawTime();
+
+    } else {
+
+      finishAuction();
+
+    }
+
+    return;
+
+  }
+
+
+  extraActive =
+    true;
+
+
+  extraRemaining =
+    extraTime;
+
+
+  running =
+    true;
+
+
+  auctionFinished =
+    false;
+
+
+  toast(
+    "🔴 EXTRA TIME dimulai!"
+  );
+
+
+  render();
+
+  syncAuctionState();
+
+}
+
+
+/* =========================================================
+   START DRAW TIME
+   ========================================================= */
+
+function startDrawTime() {
+
+  stopInterval();
+
+
+  inDraw =
+    true;
+
+
+  extraActive =
+    false;
+
+
+  drawRemaining =
+    drawDuration;
+
+
+  running =
+    true;
+
+
+  auctionFinished =
+    false;
+
+
+  toast(
+    "🟡 DRAW TIME dimulai!"
+  );
+
+
+  startInterval();
+
+  render();
+
+  syncAuctionState();
+
+}
+
+
+/* =========================================================
+   FINISH AUCTION
+   ========================================================= */
+
+function finishAuction() {
+
+  stopInterval();
+
+
+  running =
+    false;
+
+
+  extraActive =
+    false;
+
+
+  inDraw =
+    false;
+
+
+  extraRemaining =
+    0;
+
+
+  drawRemaining =
+    drawDuration;
+
+
+  auctionFinished =
+    true;
+
+
+  const sorted =
+    sortedUsers();
+
+
+  if (
+    sorted.length > 0 &&
+    Number(
+      sorted[0].coins || 0
+    ) > 0
+  ) {
+
+    if (
+      hasClearLeader()
+    ) {
+
+      toast(
+        "🏆 Selesai — " +
+        sorted[0].name +
+        " menang!"
+      );
+
+    } else {
+
+      toast(
+        "🤝 Selesai"
+      );
+
+    }
+
+  } else {
+
+    toast(
+      "■ Selesai"
+    );
+
+  }
+
+
+  render();
+
+  syncAuctionState();
+
+}
+
+
+/* =========================================================
+   HANDLE TIME END
+   ========================================================= */
+
+function handleTimeEnd() {
+
+  /*
+   * DRAW SELESAI
+   */
+
+  if (inDraw) {
+
+    inDraw =
+      false;
+
+
+    running =
+      false;
+
+
+    drawRemaining =
+      drawDuration;
+
+
+    if (
+      leadersAreTied()
+    ) {
+
+      auctionFinished =
+        true;
+
+
+      toast(
+        "🤝 Hasil masih seri"
+      );
+
+    } else {
+
+      finishAuction();
+
+    }
+
+
+    render();
+
+    syncAuctionState();
+
+    return;
+
+  }
+
+
+  /*
+   * EXTRA TIME SELESAI
+   */
+
+  if (extraActive) {
+
+    extraActive =
+      false;
+
+
+    extraRemaining =
+      0;
+
+
+    /*
+     * Setelah Extra Time,
+     * baru cek Draw Time.
+     */
+
+    if (
+      leadersAreTied()
+    ) {
+
+      startDrawTime();
+
+    } else {
+
+      finishAuction();
+
+    }
+
+
+    return;
+
+  }
+
+
+  /*
+   * WAKTU UTAMA SELESAI
+   */
+
+  remaining =
+    0;
+
+
+  /*
+   * Extra Time selalu mendapat
+   * kesempatan terlebih dahulu.
+   */
+
+  if (
+    extraTime > 0
+  ) {
+
+    startExtraTime();
+
+    return;
+
+  }
+
+
+  /*
+   * Jika tidak ada Extra Time,
+   * langsung cek seri.
+   */
+
+  if (
+    leadersAreTied()
+  ) {
+
+    startDrawTime();
+
+    return;
+
+  }
+
+
+  finishAuction();
+
+}
+
+
+/* =========================================================
+   INTERVAL
+   ========================================================= */
+
+function startInterval() {
+
+  stopInterval();
+
+
+  interval =
+    setInterval(
+      tick,
+      1000
+    );
+
+}
+
+
+function stopInterval() {
+
+  if (interval) {
+
+    clearInterval(
+      interval
+    );
+
+    interval =
+      null;
+
+  }
+
+}
+
+
+/* =========================================================
+   TICK
+   ========================================================= */
+
+function tick() {
+
+  if (!running) {
+    return;
+  }
+
+
+  /*
+   * DRAW
+   */
+
+  if (inDraw) {
+
+    if (
+      drawRemaining > 0
+    ) {
+
+      drawRemaining--;
+
+    }
+
+
+    if (
+      drawRemaining <= 0
+    ) {
+
+      drawRemaining =
+        0;
+
+      handleTimeEnd();
+
+      return;
+
+    }
+
+
+    render();
+
+    return;
+
+  }
+
+
+  /*
+   * EXTRA
+   */
+
+  if (extraActive) {
+
+    if (
+      extraRemaining > 0
+    ) {
+
+      extraRemaining--;
+
+    }
+
+
+    if (
+      extraRemaining <= 0
+    ) {
+
+      extraRemaining =
+        0;
+
+      handleTimeEnd();
+
+      return;
+
+    }
+
+
+    render();
+
+    return;
+
+  }
+
+
+  /*
+   * MAIN
+   */
+
+  if (
+    remaining > 0
+  ) {
+
+    remaining--;
+
+  }
+
+
+  if (
+    remaining <= 0
+  ) {
+
+    remaining =
+      0;
+
+    handleTimeEnd();
+
+    return;
+
+  }
 
 
   render();
@@ -1917,540 +2901,279 @@ function handleGift(data = {}) {
 
 
 /* =========================================================
-   RENDER RANKING
+   SET RUNNING
    ========================================================= */
 
-function renderRanking() {
+function setRunning(value) {
 
-  const list =
-    $("rankingList");
-
-
-  if (!list) {
-    return;
-  }
+  running =
+    Boolean(value);
 
 
-  const sorted =
-    sortedUsers();
+  if (running) {
 
+    startInterval();
 
-  if (!sorted.length) {
+  } else {
 
-    list.innerHTML = `
-      <div class="rank-card rank-box empty-box">
-        <div class="rank-info">
-          <strong>Menunggu peserta</strong>
-        </div>
-      </div>
-    `;
-
-    return;
+    stopInterval();
 
   }
 
 
-  const medals = [
-    "🥇",
-    "🥈",
-    "🥉"
-  ];
+  render();
 
-
-  list.innerHTML =
-    sorted
-      .slice(
-        0,
-        topLimit
-      )
-      .map(
-        (user, index) => {
-
-          const rank =
-            index + 1;
-
-
-          const medal =
-            medals[index] ||
-            "#" + rank;
-
-
-          return `
-            <article
-              class="rank-card rank-box"
-            >
-
-              <div class="box-top">
-
-                <span class="rank-no">
-                  ${medal}
-                </span>
-
-                <span class="box-rank">
-                  ${rank}
-                </span>
-
-              </div>
-
-              ${avatarHTML(user)}
-
-              <div class="rank-info">
-
-                <strong>
-                  ${esc(
-                    getDisplayName(user)
-                  )}
-                </strong>
-
-              </div>
-
-              <div class="coin">
-
-                <span class="coin-icon">
-                  🪙
-                </span>
-
-                <strong>
-                  ${
-                    Number(
-                      user.coins || 0
-                    ).toLocaleString(
-                      "id-ID"
-                    )
-                  }
-                </strong>
-
-              </div>
-
-            </article>
-          `;
-
-        }
-      )
-      .join("");
+  syncAuctionState();
 
 }
 
 
 /* =========================================================
-   RENDER ACTIVITIES
+   START AUCTION
    ========================================================= */
 
-function renderActivities() {
+function startAuction() {
 
-  const list =
-    $("activityList");
+  /*
+   * Kalau sesi sudah selesai,
+   * mulai sesi baru.
+   */
 
+  if (
+    auctionFinished
+  ) {
 
-  if (!list) {
-    return;
-  }
+    auctionFinished =
+      false;
 
+    inDraw =
+      false;
 
-  if (!activities.length) {
+    extraActive =
+      false;
 
-    list.innerHTML = `
-      <p class="empty">
-        Belum ada gift masuk.
-      </p>
-    `;
+    remaining =
+      duration;
 
-    return;
+    extraRemaining =
+      0;
 
-  }
-
-
-  list.innerHTML =
-    activities
-      .slice(
-        0,
-        10
-      )
-      .map(
-        (activity) => {
-
-          return `
-            <div class="activity">
-
-              ${avatarHTML(
-                activity,
-                "user-avatar activity-avatar"
-              )}
-
-              <div>
-
-                <strong>
-                  ${esc(
-                    activity.name ||
-                    "Peserta"
-                  )}
-                </strong>
-
-                <span>
-                  ${esc(
-                    activity.gift ||
-                    "Gift"
-                  )}
-                </span>
-
-              </div>
-
-              <div class="event-coin">
-                🪙 +${
-                  Number(
-                    activity.coins || 0
-                  ).toLocaleString(
-                    "id-ID"
-                  )
-                }
-              </div>
-
-            </div>
-          `;
-
-        }
-      )
-      .join("");
-
-}
-
-
-/* =========================================================
-   RENDER
-   ========================================================= */
-
-function render() {
-
-  const timer =
-    $("timer");
-
-
-  if (timer) {
-
-    let currentTime;
-
-
-    if (inDraw) {
-
-      currentTime =
-        drawRemaining;
-
-    } else if (extraActive) {
-
-      currentTime =
-        extraRemaining;
-
-    } else {
-
-      currentTime =
-        remaining;
-
-    }
-
-
-    timer.textContent =
-      formatTime(
-        currentTime
-      );
+    drawRemaining =
+      drawDuration;
 
   }
 
 
   /*
-   * Judul
+   * Kalau Draw sedang pause,
+   * lanjutkan Draw.
    */
 
-  const title =
-    $("auctionTitleDisplay");
+  if (
+    inDraw
+  ) {
 
+    running =
+      true;
 
-  if (title) {
+    startInterval();
 
-    title.textContent =
-      auctionTitle;
+    render();
 
-  }
+    syncAuctionState();
 
-
-  /*
-   * Jumlah peserta
-   */
-
-  const count =
-    $("participantCount");
-
-
-  if (count) {
-
-    count.textContent =
-      `${users.length} peserta`;
-
-  }
-
-
-  /*
-   * Progress
-   */
-
-  const progress =
-    $("progressBar");
-
-
-  if (progress) {
-
-    let percent = 0;
-
-
-    if (inDraw) {
-
-      percent =
-        drawDuration > 0
-          ? (
-              (
-                drawDuration -
-                drawRemaining
-              ) /
-              drawDuration
-            ) * 100
-          : 0;
-
-    } else if (extraActive) {
-
-      percent =
-        extraTime > 0
-          ? (
-              (
-                extraTime -
-                extraRemaining
-              ) /
-              extraTime
-            ) * 100
-          : 0;
-
-    } else {
-
-      percent =
-        duration > 0
-          ? (
-              (
-                duration -
-                remaining
-              ) /
-              duration
-            ) * 100
-          : 0;
-
-    }
-
-
-    percent =
-      Math.max(
-        0,
-        Math.min(
-          100,
-          percent
-        )
-      );
-
-
-    progress.style.width =
-      percent + "%";
-
-  }
-
-
-  /*
-   * Timer note
-   */
-
-  const note =
-    $("timerNote");
-
-
-  if (note) {
-
-    if (inDraw) {
-
-      note.textContent =
-        "⚡ DRAW TIME AKTIF";
-
-    } else if (extraActive) {
-
-      note.textContent =
-        "🔴 EXTRA TIME AKTIF";
-
-    } else if (auctionFinished) {
-
-      /*
-       * Jangan menimpa pesan selesai.
-       */
-
-    } else if (running) {
-
-      note.textContent =
-        "⏱️ Waktu sedang berjalan";
-
-    } else if (
-      remaining < duration
-    ) {
-
-      note.textContent =
-        "⏸ Dijeda";
-
-    } else {
-
-      note.textContent =
-        "Siap untuk memulai";
-
-    }
-
-  }
-
-
-  /*
-   * Extra Time status
-   */
-
-  const extraStatus =
-    $("extraTimeStatus");
-
-
-  if (extraStatus) {
-
-    if (extraActive) {
-
-      extraStatus.textContent =
-        "🔴 EXTRA TIME — " +
-        formatTime(
-          extraRemaining
-        );
-
-      extraStatus.classList.add(
-        "active"
-      );
-
-    } else if (inDraw) {
-
-      extraStatus.textContent =
-        "⚡ DRAW TIME AKTIF";
-
-      extraStatus.classList.remove(
-        "active"
-      );
-
-    } else {
-
-      if (extraTime > 0) {
-
-        extraStatus.textContent =
-          "Extra Time tersedia: " +
-          formatTime(
-            extraTime
-          );
-
-      } else {
-
-        extraStatus.textContent =
-          "Extra Time tidak digunakan";
-
-      }
-
-
-      extraStatus.classList.remove(
-        "active"
-      );
-
-    }
-
-  }
-
-
-  /*
-   * Event count
-   */
-
-  const hero =
-    $("heroViewer");
-
-
-  if (hero) {
-
-    hero.textContent =
-      liveEventCount;
-
-  }
-
-
-  /*
-   * TikTok name
-   */
-
-  const liveName =
-    $("liveName");
-
-
-  if (liveName) {
-
-    liveName.textContent =
-      connectedUsername
-        ? "@" +
-          connectedUsername.replace(
-            /^@/,
-            ""
-          )
-        : "@Belum Terhubung";
-
-  }
-
-
-  /*
-   * Status
-   */
-
-  const badge =
-    $("statusBadge");
-
-
-  if (badge) {
-
-    badge.textContent =
-      liveConnected
-        ? "ONLINE"
-        : "OFFLINE";
-
-
-    badge.classList.toggle(
-      "offline",
-      !liveConnected
+    toast(
+      "▶ Draw Time dilanjutkan"
     );
 
-
-    badge.classList.toggle(
-      "online",
-      liveConnected
-    );
+    return;
 
   }
 
 
-  renderRanking();
+  /*
+   * Kalau Extra sedang pause,
+   * lanjutkan Extra.
+   */
 
-  renderActivities();
+  if (
+    extraActive
+  ) {
 
-  updateTimerColor();
+    running =
+      true;
+
+    startInterval();
+
+    render();
+
+    syncAuctionState();
+
+    toast(
+      "▶ Extra Time dilanjutkan"
+    );
+
+    return;
+
+  }
+
+
+  /*
+   * Kalau timer kosong dan belum selesai,
+   * mulai dari awal.
+   */
+
+  if (
+    remaining <= 0
+  ) {
+
+    remaining =
+      duration;
+
+  }
+
+
+  running =
+    true;
+
+
+  auctionFinished =
+    false;
+
+
+  startInterval();
+
+  render();
+
+  syncAuctionState();
+
+
+  toast(
+    "▶ Dimulai"
+  );
 
 }
 
 
 /* =========================================================
-   SYNC AUCTION STATE
+   PAUSE AUCTION
+   ========================================================= */
+
+function pauseAuction() {
+
+  if (
+    !running
+  ) {
+
+    toast(
+      "⏸ Sudah dijeda"
+    );
+
+    return;
+
+  }
+
+
+  running =
+    false;
+
+
+  stopInterval();
+
+  render();
+
+  syncAuctionState();
+
+
+  toast(
+    "⏸ Dijeda"
+  );
+
+}
+
+
+/* =========================================================
+   RESET AUCTION
+   ========================================================= */
+
+function resetAuction() {
+
+  stopInterval();
+
+
+  running =
+    false;
+
+
+  remaining =
+    duration;
+
+
+  extraRemaining =
+    0;
+
+
+  extraActive =
+    false;
+
+
+  drawRemaining =
+    drawDuration;
+
+
+  inDraw =
+    false;
+
+
+  auctionFinished =
+    false;
+
+
+  /*
+   * Peserta tetap dipertahankan?
+   *
+   * Untuk Reset, kita kosongkan
+   * peserta dan activity.
+   */
+
+  users = [];
+
+  activities = [];
+
+  liveEventCount = 0;
+
+
+  render();
+
+  syncAuctionState();
+
+
+  toast(
+    "↻ Di-reset"
+  );
+
+}
+
+
+/* =========================================================
+   FINISH BUTTON
+   ========================================================= */
+
+function finishButton() {
+
+  finishAuction();
+
+}
+
+
+/* =========================================================
+   SOCKET STATE
    ========================================================= */
 
 function syncAuctionState() {
 
   if (
-    !socket ||
-    !socket.connected
+    !socket
   ) {
 
     return;
@@ -2463,26 +3186,45 @@ function syncAuctionState() {
     {
 
       active:
-        running &&
-        !auctionFinished,
+        running ||
+        extraActive ||
+        inDraw,
 
-      running,
+      running:
+        running,
 
-      remaining,
+      remaining:
+        remaining,
 
-      duration,
+      duration:
+        duration,
 
-      extraTime,
+      extraTime:
+        extraTime,
 
-      extraRemaining,
+      extraRemaining:
+        extraRemaining,
 
-      extraActive,
+      extraActive:
+        extraActive,
 
-      inDraw,
+      inDraw:
+        inDraw,
 
-      drawRemaining,
+      drawRemaining:
+        drawRemaining,
 
-      drawDuration
+      drawDuration:
+        drawDuration,
+
+      auctionFinished:
+        auctionFinished,
+
+      auctionTitle:
+        auctionTitle,
+
+      topLimit:
+        topLimit
 
     }
   );
@@ -2491,133 +3233,7 @@ function syncAuctionState() {
 
 
 /* =========================================================
-   CONNECT TIKTOK
-   ========================================================= */
-
-function connectTikTok() {
-
-  const input =
-    $("tiktokUsername");
-
-
-  if (!input) {
-    return;
-  }
-
-
-  const username =
-    input.value
-      .trim()
-      .replace(
-        /^@/,
-        ""
-      );
-
-
-  if (!username) {
-
-    toast(
-      "Masukkan username TikTok"
-    );
-
-    input.focus();
-
-    return;
-
-  }
-
-
-  if (
-    !socket ||
-    !socket.connected
-  ) {
-
-    toast(
-      "Server belum terhubung"
-    );
-
-    return;
-
-  }
-
-
-  const log =
-    $("connectionLog");
-
-
-  if (log) {
-
-    log.textContent =
-      "Status: menghubungkan ke TikTok LIVE...";
-
-  }
-
-
-  socket.emit(
-    "live:connect",
-    {
-      username
-    }
-  );
-
-
-  toast(
-    "🔌 Menghubungkan..."
-  );
-
-}
-
-
-/* =========================================================
-   DISCONNECT TIKTOK
-   ========================================================= */
-
-function disconnectTikTok() {
-
-  if (
-    socket &&
-    socket.connected
-  ) {
-
-    socket.emit(
-      "live:disconnect"
-    );
-
-  }
-
-
-  liveConnected =
-    false;
-
-
-  connectedUsername =
-    "";
-
-
-  const log =
-    $("connectionLog");
-
-
-  if (log) {
-
-    log.textContent =
-      "Status: koneksi diputuskan";
-
-  }
-
-
-  render();
-
-
-  toast(
-    "🔌 Koneksi diputuskan"
-  );
-
-}
-
-
-/* =========================================================
-   SOCKET CONNECTION
+   SOCKET CONNECT
    ========================================================= */
 
 function connectSocket() {
@@ -2627,19 +3243,12 @@ function connectSocket() {
   ) {
 
     console.error(
-      "Socket.IO client tidak ditemukan."
+      "Socket.IO tidak ditemukan."
     );
 
-    const log =
-      $("connectionLog");
-
-
-    if (log) {
-
-      log.textContent =
-        "Status: Socket.IO tidak ditemukan";
-
-    }
+    toast(
+      "Socket.IO tidak ditemukan."
+    );
 
     return;
 
@@ -2647,69 +3256,61 @@ function connectSocket() {
 
 
   socket =
-    io();
+    io({
+      transports: [
+        "websocket",
+        "polling"
+      ]
+    });
 
+
+  /*
+   * Browser connected ke server
+   */
 
   socket.on(
     "connect",
     () => {
 
       console.log(
-        "✅ Socket.IO connected"
+        "Socket connected:",
+        socket.id
       );
 
 
-      const log =
-        $("connectionLog");
+      if ($("connectionLog")) {
 
-
-      if (log) {
-
-        log.textContent =
-          "Status: server terhubung";
+        $("connectionLog").textContent =
+          "Status: server terhubung.";
 
       }
-
-
-      /*
-       * Jangan menganggap socket connected
-       * berarti TikTok LIVE connected.
-       */
-
-      render();
-
-      syncAuctionState();
 
     }
   );
 
+
+  /*
+   * Socket disconnect
+   *
+   * Tidak otomatis berarti TikTok
+   * disconnected.
+   */
 
   socket.on(
     "disconnect",
     () => {
 
       console.log(
-        "❌ Socket.IO disconnected"
+        "Socket disconnected"
       );
 
 
-      liveConnected =
-        false;
+      if ($("connectionLog")) {
 
-
-      const log =
-        $("connectionLog");
-
-
-      if (log) {
-
-        log.textContent =
-          "Status: server terputus";
+        $("connectionLog").textContent =
+          "Status: koneksi server terputus.";
 
       }
-
-
-      render();
 
     }
   );
@@ -2721,55 +3322,23 @@ function connectSocket() {
 
   socket.on(
     "live:status",
-    (data = {}) => {
+    (data) => {
 
-      console.log(
-        "LIVE STATUS:",
-        data
-      );
+      data =
+        data || {};
 
 
-      liveConnected =
+      updateConnectionUI(
         Boolean(
-          data.connected ??
-          data.active ??
-          false
-        );
-
-
-      connectedUsername =
+          data.connected
+        ),
         data.username ||
         data.uniqueId ||
-        data.user ||
-        connectedUsername ||
-        "";
-
-
-      const log =
-        $("connectionLog");
-
-
-      if (log) {
-
-        if (data.message) {
-
-          log.textContent =
-            "Status: " +
-            data.message;
-
-        } else {
-
-          log.textContent =
-            liveConnected
-              ? "Status: TikTok LIVE terhubung"
-              : "Status: belum terhubung";
-
-        }
-
-      }
-
-
-      render();
+        connectedUsername,
+        data.message ||
+        data.status ||
+        ""
+      );
 
     }
   );
@@ -2781,41 +3350,35 @@ function connectSocket() {
 
   socket.on(
     "participants",
-    (list) => {
+    (data) => {
 
-      if (!Array.isArray(list)) {
-        return;
-      }
-
-
-      users =
-        list.map(
-          normalizeUser
-        );
-
-
-      render();
+      updateUserFromServer(
+        data
+      );
 
     }
   );
 
 
   socket.on(
-    "auction:participants",
-    (list) => {
+    "participants:update",
+    (data) => {
 
-      if (!Array.isArray(list)) {
-        return;
-      }
+      updateUserFromServer(
+        data
+      );
 
-
-      users =
-        list.map(
-          normalizeUser
-        );
+    }
+  );
 
 
-      render();
+  socket.on(
+    "live:participants",
+    (data) => {
+
+      updateUserFromServer(
+        data
+      );
 
     }
   );
@@ -2827,60 +3390,229 @@ function connectSocket() {
 
   socket.on(
     "user:update",
-    updateUser
+    (data) => {
+
+      updateUserFromServer(
+        data
+      );
+
+    }
   );
 
 
   socket.on(
-    "participant:update",
-    updateUser
+    "live:user",
+    (data) => {
+
+      updateUserFromServer(
+        data
+      );
+
+    }
   );
 
 
   /* =======================================================
-     GIFT EVENTS
+     GIFT
      ======================================================= */
 
   socket.on(
-    "gift",
-    handleGift
-  );
-
-
-  socket.on(
-    "tiktok:gift",
-    handleGift
-  );
-
-
-  socket.on(
-    "gift:event",
-    handleGift
-  );
-
-
-  socket.on(
     "live:gift",
-    handleGift
+    (data) => {
+
+      handleGift(
+        data
+      );
+
+    }
   );
 
 
   /*
-   * live:event hanya diproses jika type = gift.
+   * Server juga bisa mengirim event umum.
+   *
+   * Anti-double-event mencegah
+   * gift dihitung dua kali.
    */
 
   socket.on(
     "live:event",
-    (event = {}) => {
+    (event) => {
+
+      handleLiveEvent(
+        event
+      );
+
+    }
+  );
+
+
+  /* =======================================================
+     AUCTION STATE FROM SERVER
+     ======================================================= */
+
+  socket.on(
+    "auction:state",
+    (state) => {
+
+      if (!state) {
+        return;
+      }
+
+
+      /*
+       * Jangan memaksa running dari server
+       * jika state kosong.
+       */
 
       if (
-        event.type === "gift" &&
-        event.data
+        typeof state.remaining ===
+        "number"
       ) {
 
-        handleGift(
-          event.data
-        );
+        remaining =
+          Math.max(
+            0,
+            Math.floor(
+              state.remaining
+            )
+          );
+
+      }
+
+
+      if (
+        typeof state.duration ===
+        "number" &&
+        state.duration > 0
+      ) {
+
+        duration =
+          Math.floor(
+            state.duration
+          );
+
+      }
+
+
+      if (
+        typeof state.extraTime ===
+        "number"
+      ) {
+
+        extraTime =
+          Math.max(
+            0,
+            Math.floor(
+              state.extraTime
+            )
+          );
+
+      }
+
+
+      if (
+        typeof state.extraRemaining ===
+        "number"
+      ) {
+
+        extraRemaining =
+          Math.max(
+            0,
+            Math.floor(
+              state.extraRemaining
+            )
+          );
+
+      }
+
+
+      if (
+        typeof state.extraActive ===
+        "boolean"
+      ) {
+
+        extraActive =
+          state.extraActive;
+
+      }
+
+
+      if (
+        typeof state.inDraw ===
+        "boolean"
+      ) {
+
+        inDraw =
+          state.inDraw;
+
+      }
+
+
+      if (
+        typeof state.drawRemaining ===
+        "number"
+      ) {
+
+        drawRemaining =
+          Math.max(
+            0,
+            Math.floor(
+              state.drawRemaining
+            )
+          );
+
+      }
+
+
+      if (
+        typeof state.running ===
+        "boolean"
+      ) {
+
+        running =
+          state.running;
+
+      }
+
+
+      if (
+        typeof state.auctionFinished ===
+        "boolean"
+      ) {
+
+        auctionFinished =
+          state.auctionFinished;
+
+      }
+
+
+      if (
+        state.auctionTitle
+      ) {
+
+        auctionTitle =
+          String(
+            state.auctionTitle
+          );
+
+      }
+
+
+      updateTitleDisplay();
+
+      writeSettingsToInputs();
+
+      render();
+
+
+      if (running) {
+
+        startInterval();
+
+      } else {
+
+        stopInterval();
 
       }
 
@@ -2889,122 +3621,195 @@ function connectSocket() {
 
 
   /* =======================================================
-     AUCTION STATE
+     VIEWER / ROOM
      ======================================================= */
 
   socket.on(
-    "auction:state",
-    (data = {}) => {
+    "live:viewers",
+    (data) => {
 
-      if (
-        typeof data.duration ===
-        "number"
-      ) {
-
-        duration =
-          data.duration;
-
+      if (!data) {
+        return;
       }
 
 
-      if (
-        typeof data.remaining ===
-        "number"
-      ) {
-
-        remaining =
-          data.remaining;
-
-      }
+      const count =
+        Number(
+          data.viewerCount ??
+          data.viewers ??
+          data.count ??
+          0
+        );
 
 
-      if (
-        typeof data.running ===
-        "boolean"
-      ) {
-
-        running =
-          data.running;
-
-      }
-
+      /*
+       * Hanya tampilkan jika server
+       * memang mengirim viewer count.
+       */
 
       if (
-        typeof data.extraTime ===
-        "number"
+        Number.isFinite(count) &&
+        count >= 0
       ) {
 
-        extraTime =
-          data.extraTime;
+        const hero =
+          $("heroViewer");
+
+
+        const label =
+          document.querySelector(
+            ".hero-stat span"
+          );
+
+
+        if (hero) {
+
+          hero.textContent =
+            formatNumber(count);
+
+        }
+
+
+        if (label) {
+
+          label.textContent =
+            "VIEWERS";
+
+        }
 
       }
-
-
-      if (
-        typeof data.extraRemaining ===
-        "number"
-      ) {
-
-        extraRemaining =
-          data.extraRemaining;
-
-      }
-
-
-      if (
-        typeof data.extraActive ===
-        "boolean"
-      ) {
-
-        extraActive =
-          data.extraActive;
-
-      }
-
-
-      if (
-        typeof data.inDraw ===
-        "boolean"
-      ) {
-
-        inDraw =
-          data.inDraw;
-
-      }
-
-
-      if (
-        typeof data.drawRemaining ===
-        "number"
-      ) {
-
-        drawRemaining =
-          data.drawRemaining;
-
-      }
-
-
-      if (
-        typeof data.drawDuration ===
-        "number"
-      ) {
-
-        drawDuration =
-          data.drawDuration;
-
-      }
-
-
-      render();
 
     }
   );
+
 
 }
 
 
 /* =========================================================
-   BUTTON BIND
+   INPUT BINDING
+   ========================================================= */
+
+function bindInputs() {
+
+  const titleInput =
+    $("titleInput");
+
+
+  if (titleInput) {
+
+    titleInput.addEventListener(
+      "input",
+      () => {
+
+        auctionTitle =
+          titleInput.value ||
+          "LIVE COIN AUCTION";
+
+
+        updateTitleDisplay();
+
+      }
+    );
+
+  }
+
+
+  const minuteInput =
+    $("minuteInput");
+
+
+  if (minuteInput) {
+
+    minuteInput.addEventListener(
+      "change",
+      () => {
+
+        readSettings();
+
+      }
+    );
+
+  }
+
+
+  const secondInput =
+    $("secondInput");
+
+
+  if (secondInput) {
+
+    secondInput.addEventListener(
+      "change",
+      () => {
+
+        readSettings();
+
+      }
+    );
+
+  }
+
+
+  const extraInput =
+    $("extraTimeInput");
+
+
+  if (extraInput) {
+
+    extraInput.addEventListener(
+      "input",
+      () => {
+
+        readExtraTime();
+
+        render();
+
+      }
+    );
+
+  }
+
+
+  const topInput =
+    $("topInput");
+
+
+  if (topInput) {
+
+    topInput.addEventListener(
+      "change",
+      () => {
+
+        const value =
+          Number(
+            topInput.value
+          );
+
+
+        if (
+          Number.isFinite(value) &&
+          value > 0
+        ) {
+
+          topLimit =
+            Math.floor(value);
+
+        }
+
+
+        render();
+
+      }
+    );
+
+  }
+
+}
+
+
+/* =========================================================
+   BUTTON BINDING
    ========================================================= */
 
 function bindButtons() {
@@ -3065,6 +3870,20 @@ function bindButtons() {
   }
 
 
+  const saveBtn =
+    $("saveSettings");
+
+
+  if (saveBtn) {
+
+    saveBtn.addEventListener(
+      "click",
+      saveSettings
+    );
+
+  }
+
+
   const connectBtn =
     $("connectBtn");
 
@@ -3093,15 +3912,27 @@ function bindButtons() {
   }
 
 
-  const saveBtn =
-    $("saveSettings");
+  const usernameInput =
+    $("tiktokUsername");
 
 
-  if (saveBtn) {
+  if (usernameInput) {
 
-    saveBtn.addEventListener(
-      "click",
-      saveSettings
+    usernameInput.addEventListener(
+      "keydown",
+      (event) => {
+
+        if (
+          event.key === "Enter"
+        ) {
+
+          event.preventDefault();
+
+          connectTikTok();
+
+        }
+
+      }
     );
 
   }
@@ -3110,318 +3941,215 @@ function bindButtons() {
 
 
 /* =========================================================
-   INPUT BIND
-   ========================================================= */
-
-function bindInputs() {
-
-  const ids = [
-    "minuteInput",
-    "secondInput",
-    "extraTimeInput",
-    "titleInput",
-    "topInput"
-  ];
-
-
-  ids.forEach(
-    (id) => {
-
-      const input =
-        $(id);
-
-
-      if (!input) {
-        return;
-      }
-
-
-      input.addEventListener(
-        "input",
-        () => {
-
-          /*
-           * Jangan reset timer saat sedang berjalan.
-           * Hanya update tampilan pengaturan.
-           */
-
-          if (id === "extraTimeInput") {
-
-            const value =
-              Number(
-                input.value
-              );
-
-
-            if (
-              Number.isFinite(value)
-            ) {
-
-              extraTime =
-                Math.max(
-                  0,
-                  Math.min(
-                    3600,
-                    Math.floor(value)
-                  )
-                );
-
-            }
-
-          }
-
-
-          if (id === "topInput") {
-
-            const value =
-              Number(
-                input.value
-              );
-
-
-            if (
-              Number.isFinite(value) &&
-              value > 0
-            ) {
-
-              topLimit =
-                Math.floor(value);
-
-            }
-
-          }
-
-
-          if (id === "titleInput") {
-
-            if (
-              input.value.trim()
-            ) {
-
-              auctionTitle =
-                input.value.trim();
-
-            }
-
-          }
-
-
-          render();
-
-        }
-      );
-
-    }
-  );
-
-}
-
-
-/* =========================================================
-   KEYBOARD ENTER FOR USERNAME
-   ========================================================= */
-
-function bindUsernameEnter() {
-
-  const input =
-    $("tiktokUsername");
-
-
-  if (!input) {
-    return;
-  }
-
-
-  input.addEventListener(
-    "keydown",
-    (event) => {
-
-      if (
-        event.key ===
-        "Enter"
-      ) {
-
-        event.preventDefault();
-
-        connectTikTok();
-
-      }
-
-    }
-  );
-
-}
-
-
-/* =========================================================
-   DEBUG / TEST
+   OPTIONAL TEST COIN
    =========================================================
-   Karena coin TikTok Anda sudah habis,
-   fungsi ini bisa dipakai untuk simulasi gift.
+   Bisa dipanggil dari console browser:
 
-   Contoh di Console browser:
+   addTestCoin("TestUser", 10)
 
-   auctionDebug.addTestCoin("Budi", 100)
-
-   lalu:
-
-   auctionDebug.addTestCoin("Andi", 200)
+   Tidak membutuhkan coin TikTok.
    ========================================================= */
 
-window.auctionDebug = {
+function addTestCoin(
+  name = "TestUser",
+  coins = 10
+) {
 
-  getUsers: function() {
-
-    return users;
-
-  },
-
-
-  getState: function() {
-
-    return {
-
-      duration,
-
-      remaining,
-
-      running,
-
-      extraTime,
-
-      extraRemaining,
-
-      extraActive,
-
-      drawDuration,
-
-      drawRemaining,
-
-      inDraw,
-
-      auctionFinished
-
-    };
-
-  },
+  const amount =
+    Math.max(
+      1,
+      Math.floor(
+        Number(coins) || 10
+      )
+    );
 
 
-  addTestCoin: function(
-    username = "Test User",
-    coins = 10
-  ) {
+  const userData = {
 
-    handleGift({
+    userId:
+      "test-" +
+      normalizeUserId(name),
 
-      __test: true,
+    username:
+      normalizeUserId(name),
 
-      username,
+    nickname:
+      name,
 
-      uniqueId:
-        username,
+    name:
+      name,
 
-      nickname:
-        username,
+    __test:
+      true
 
-      giftName:
-        "Test Gift",
-
-      coinValue:
-        Number(coins) || 0
-
-    });
-
-  },
+  };
 
 
-  reset:
-    resetAuction
-
-};
-
-
-/* =========================================================
-   GLOBAL FUNCTIONS
-   ========================================================= */
-
-window.startAuction =
-  startAuction;
-
-window.pauseAuction =
-  pauseAuction;
-
-window.resetAuction =
-  resetAuction;
-
-window.finishAuction =
-  finishButton;
-
-window.saveSettings =
-  saveSettings;
+  const user =
+    upsertUser(
+      userData,
+      amount
+    );
 
 
-/* =========================================================
-   INIT
-   ========================================================= */
+  activities.unshift({
 
-function init() {
+    name:
+      user.name,
 
-  console.log(
-    "🚀 Coin Auction Dashboard mulai..."
-  );
+    avatar:
+      "",
 
+    giftName:
+      "Test Gift",
 
-  /*
-   * Baca pengaturan awal.
-   */
+    coins:
+      amount,
 
-  readSettings();
+    repeatCount:
+      1,
 
+    time:
+      Date.now()
 
-  /*
-   * Pasang event tombol.
-   */
-
-  bindButtons();
+  });
 
 
-  /*
-   * Pasang event input.
-   */
-
-  bindInputs();
-
-
-  /*
-   * Enter pada username.
-   */
-
-  bindUsernameEnter();
+  activities =
+    activities.slice(
+      0,
+      20
+    );
 
 
-  /*
-   * Render awal.
-   */
+  liveEventCount++;
+
 
   render();
 
 
-  /*
-   * Socket.
-   */
-
-  connectSocket();
-
-
-  console.log(
-    "✅ Semua tombol sudah dipasang."
+  toast(
+    "🧪 Test +" +
+    formatNumber(amount) +
+    " coin"
   );
 
 }
 
 
 /* =========================================================
-   START AFTER DOM READY
+   CLEAR TEST USERS
+   ========================================================= */
+
+function clearParticipants() {
+
+  users = [];
+
+  activities = [];
+
+  liveEventCount = 0;
+
+  render();
+
+}
+
+
+/* =========================================================
+   GLOBAL DEBUG
+   ========================================================= */
+
+window.addTestCoin =
+  addTestCoin;
+
+window.clearParticipants =
+  clearParticipants;
+
+
+/* =========================================================
+   INITIALIZE
+   ========================================================= */
+
+function init() {
+
+  /*
+   * Default settings
+   */
+
+  auctionTitle =
+    "LIVE COIN AUCTION";
+
+
+  duration =
+    300;
+
+
+  remaining =
+    duration;
+
+
+  extraTime =
+    30;
+
+
+  extraRemaining =
+    0;
+
+
+  drawDuration =
+    20;
+
+
+  drawRemaining =
+    drawDuration;
+
+
+  running =
+    false;
+
+
+  extraActive =
+    false;
+
+
+  inDraw =
+    false;
+
+
+  auctionFinished =
+    false;
+
+
+  topLimit =
+    5;
+
+
+  writeSettingsToInputs();
+
+  updateConnectionUI(
+    false,
+    "",
+    "Status: Belum terhubung ke TikTok LIVE."
+  );
+
+
+  bindInputs();
+
+  bindButtons();
+
+  connectSocket();
+
+  render();
+
+
+  console.log(
+    "Coin Auction Dashboard V6 siap."
+  );
+
+}
+
+
+/* =========================================================
+   START
    ========================================================= */
 
 if (

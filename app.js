@@ -1499,7 +1499,9 @@
           );
 
         const ok =
-          !!data?.ok;
+          data?.ok !== undefined
+            ? !!data.ok
+            : !!data?.connected;
 
         state.connected =
           ok;
@@ -1703,11 +1705,13 @@
         state.participants.clear();
 
         const participants =
-          Array.isArray(
-            data?.participants
-          )
-            ? data.participants
-            : [];
+          Array.isArray(data)
+            ? data
+            : Array.isArray(
+                data?.participants
+              )
+              ? data.participants
+              : [];
 
         for (
           const participant
@@ -1734,14 +1738,45 @@
       "live:gift",
       gift => {
 
-        if (
-          !gift?.participant
-        ) {
+        if (!gift) {
           return;
         }
 
         const participant =
-          gift.participant;
+          gift.participant || {
+            userId:
+              gift.userId ||
+              gift.uniqueId ||
+              gift.username ||
+              gift.nickname ||
+              "unknown",
+
+            uniqueId:
+              gift.uniqueId ||
+              gift.username ||
+              "",
+
+            username:
+              gift.username ||
+              gift.uniqueId ||
+              "",
+
+            nickname:
+              gift.nickname ||
+              gift.username ||
+              gift.uniqueId ||
+              "TikTok User",
+
+            avatar:
+              gift.avatar ||
+              "",
+
+            coins:
+              Number(gift.coinValue) || 0,
+
+            gifts:
+              Number(gift.repeatCount) || 1
+          };
 
         state.participants.set(
           participantKey(

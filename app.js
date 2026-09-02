@@ -7,7 +7,101 @@
 
   document.addEventListener("DOMContentLoaded", init);
 
+  function injectMobileAuctionUI() {
+    if (document.getElementById("coin-auction-mobile-ui")) return;
+
+    const style = document.createElement("style");
+    style.id = "coin-auction-mobile-ui";
+    style.textContent = `
+      /* Tampilan peserta mobile: hanya ranking + nama + coin */
+      #rankingList .participant-row {
+        display: grid !important;
+        grid-template-columns: 58px minmax(0, 1fr) auto !important;
+        align-items: center !important;
+        gap: 10px !important;
+        min-height: 52px !important;
+        padding: 8px 4px !important;
+        border: 0 !important;
+        background: transparent !important;
+        box-shadow: none !important;
+      }
+
+      #rankingList .participant-avatar,
+      #rankingList .participant-username {
+        display: none !important;
+      }
+
+      #rankingList .participant-info {
+        min-width: 0 !important;
+        display: block !important;
+      }
+
+      #rankingList .participant-name {
+        overflow: hidden !important;
+        text-overflow: ellipsis !important;
+        white-space: nowrap !important;
+        font-size: 17px !important;
+        font-weight: 700 !important;
+        line-height: 1.2 !important;
+      }
+
+      #rankingList .participant-rank {
+        width: 58px !important;
+        min-width: 58px !important;
+        text-align: left !important;
+        font-size: 23px !important;
+        font-weight: 800 !important;
+      }
+
+      #rankingList .participant-coins {
+        white-space: nowrap !important;
+        font-size: 16px !important;
+        font-weight: 800 !important;
+      }
+
+      #rankingList .coin-icon {
+        display: none !important;
+      }
+
+      /* Jangan tampilkan progress bar yang berat/menyita ruang */
+      #progressBar {
+        display: none !important;
+      }
+
+      /* Sembunyikan panel aktivitas pada layar HP agar fokus ke peserta */
+      @media (max-width: 700px) {
+        #activityList,
+        .activity-list,
+        .activity-panel {
+          display: none !important;
+        }
+
+        #rankingList {
+          width: 100% !important;
+        }
+
+        #rankingList .participant-row {
+          grid-template-columns: 58px minmax(0, 1fr) auto !important;
+        }
+      }
+    `;
+    document.head.appendChild(style);
+
+    // Pastikan heading tidak kembali menjadi "PESERTA LELANG".
+    document.querySelectorAll("h1,h2,h3,h4,.section-title,.panel-title,.card-title").forEach(node => {
+      if ((node.textContent || "").trim().toUpperCase() === "PESERTA LELANG") {
+        node.textContent = "PESERTA";
+      }
+    });
+  }
+
   function init() {
+
+    /* =======================================================
+       MOBILE UI PATCH - RINGAN
+       Tidak mengubah koneksi TikTok / gift / coin.
+       ======================================================= */
+    injectMobileAuctionUI();
 
     /* =======================================================
        SOCKET.IO
@@ -1092,17 +1186,17 @@
                 "Viewer"
               );
 
-            const username =
-              escapeHtml(
-                p.username ||
-                "viewer"
-              );
-
             const coins =
               num(
                 p.coins,
                 0
               );
+
+            const medal =
+              index === 0 ? "🥇" :
+              index === 1 ? "🥈" :
+              index === 2 ? "🥉" :
+              String(index + 1);
 
             return `
               <div
@@ -1114,34 +1208,24 @@
 
                 <div
                   class="participant-rank rank-number rank-no"
+                  aria-label="Peringkat ${index + 1}"
                 >
-                  ${index + 1}
+                  ${medal}
                 </div>
-
-                ${avatarHtml(p)}
 
                 <div
                   class="participant-info rank-info"
                 >
-
                   <div
                     class="participant-name"
                   >
                     ${nickname}
                   </div>
-
-                  <div
-                    class="participant-username"
-                  >
-                    @${username}
-                  </div>
-
                 </div>
 
                 <div
                   class="participant-coins coin"
                 >
-                  <span class="coin-icon">🪙</span>
                   <strong>${coins}</strong>
                 </div>
 

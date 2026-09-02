@@ -20,6 +20,61 @@ app.use(express.json());
 app.use(express.static(__dirname));
 
 /* =========================================================
+   API KEY
+   ========================================================= */
+
+/*
+ * API key TikTok/Euler Stream diambil dari:
+ *
+ * SIGN_API_KEY
+ *
+ * Railway:
+ * Project
+ *   -> Variables
+ *   -> New Variable
+ *
+ * Name:
+ * SIGN_API_KEY
+ *
+ * Value:
+ * API KEY KAMU
+ */
+
+const SIGN_API_KEY =
+  process.env.SIGN_API_KEY ||
+  "";
+
+if (!SIGN_API_KEY) {
+  console.warn(
+    "================================================"
+  );
+
+  console.warn(
+    "[WARNING] SIGN_API_KEY BELUM DIATUR."
+  );
+
+  console.warn(
+    "[WARNING] TikTok LIVE kemungkinan gagal terhubung."
+  );
+
+  console.warn(
+    "Tambahkan environment variable:"
+  );
+
+  console.warn(
+    "SIGN_API_KEY=API_KEY_EULER_STREAM_KAMU"
+  );
+
+  console.warn(
+    "================================================"
+  );
+} else {
+  console.log(
+    "[TikTok] SIGN_API_KEY ditemukan."
+  );
+}
+
+/* =========================================================
    TIKTOK CONNECTION
    ========================================================= */
 
@@ -38,24 +93,6 @@ let auctionActive = false;
 
 /* =========================================================
    GIFT DEDUPLICATION
-   =========================================================
-   
-   PENTING:
-   Jangan menggunakan kombinasi:
-   user + giftId + repeatCount + timestamp
-   sebagai ID event.
-
-   Karena beberapa gift 1 coin yang dikirim terpisah
-   dapat mempunyai data yang sama dan akhirnya salah
-   dianggap sebagai event duplikat.
-
-   Sekarang dedup hanya menggunakan ID unik dari TikTok:
-   - msgId
-   - transactionId
-   - transaction_id
-
-   Jika TikTok tidak memberikan ID tersebut,
-   event TIDAK dibuang.
    ========================================================= */
 
 const processedGiftEvents = new Map();
@@ -143,13 +180,23 @@ function formatError(err) {
   }
 
   if (
+    s.includes("api key") ||
+    s.includes("apikey") ||
+    s.includes("unauthorized") ||
+    s.includes("401") ||
+    s.includes("403")
+  ) {
+    return "API key TikTok/Euler Stream tidak valid atau belum diatur.";
+  }
+
+  if (
     s.includes("sign") ||
     s.includes("signature") ||
     s.includes("euler") ||
     s.includes("business plan") ||
     s.includes("404")
   ) {
-    return "TikTok/signing provider menolak koneksi tanpa API key.";
+    return "TikTok/signing provider menolak koneksi. Periksa SIGN_API_KEY.";
   }
 
   return msg;
@@ -329,11 +376,8 @@ function giftData(event) {
     repeatValue === "true";
 
   /*
-   * TikTok giftType 1 biasanya merupakan gift yang sedang
-   * dalam proses streak.
-   *
-   * Jangan menghitung setiap update streak.
-   * Hitung ketika streak sudah selesai.
+   * Gift type 1 biasanya merupakan streak.
+   * Jangan menghitung update streak yang belum selesai.
    */
 
   if (giftType === 1 && !repeatEnd) {
@@ -368,15 +412,6 @@ function giftData(event) {
 
   /* -------------------------------------------------------
      UNIQUE EVENT ID
-     -------------------------------------------------------
-
-     Hanya gunakan ID yang memang diberikan TikTok.
-
-     Jangan membuat fallback berdasarkan:
-       user + gift + repeatCount + waktu
-
-     karena itu dapat menyebabkan 1 coin berikutnya
-     dianggap duplicate.
      ------------------------------------------------------- */
 
   const msgId =
@@ -394,7 +429,8 @@ function giftData(event) {
   if (msgId) {
     eventKey = `msg:${String(msgId)}`;
   } else if (transactionId) {
-    eventKey = `transaction:${String(transactionId)}`;
+    eventKey =
+      `transaction:${String(transactionId)}`;
   }
 
   /* -------------------------------------------------------
@@ -410,7 +446,7 @@ function giftData(event) {
   }
 
   /* -------------------------------------------------------
-     DEDUP ONLY IF REAL EVENT ID EXISTS
+     DEDUP ONLY REAL EVENT ID
      ------------------------------------------------------- */
 
   if (eventKey) {
@@ -462,13 +498,10 @@ function giftData(event) {
     avatar: user.avatar,
 
     /*
-     * FLAG UNTUK FRONTEND
+     * FRONTEND:
      *
-     * Data ini tetap dikirim karena diperlukan
-     * untuk menambah coin peserta.
-     *
-     * Tetapi frontend tidak perlu menampilkan
-     * popup/notifikasi.
+     * Data tetap dikirim untuk penambahan coin.
+     * Tidak perlu menampilkan notifikasi.
      */
 
     silent: true,
@@ -521,6 +554,16 @@ async function connectToLive(rawUsername) {
     );
   }
 
+  /* -------------------------------------------------------
+     API KEY CHECK
+     ------------------------------------------------------- */
+
+  if (!SIGN_API_KEY) {
+    throw new Error(
+      "SIGN_API_KEY belum diatur di Environment Variables."
+    );
+  }
+
   await stopConnection();
 
   manualDisconnect = false;
@@ -536,7 +579,11 @@ async function connectToLive(rawUsername) {
   );
 
   console.log(
-    "[TikTok] MODE TANPA API KEY"
+    "[TikTok] MODE API KEY AKTIF"
+  );
+
+  console.log(
+    "[TikTok] SIGN_API_KEY: tersedia"
   );
 
   console.log(
@@ -554,6 +601,17 @@ async function connectToLive(rawUsername) {
   const conn = new Connector(
     username,
     {
+      /*
+       * ===================================================
+       * API KEY DIKEMBALIKAN DI SINI
+       * ===================================================
+       *
+       * tiktok-live-connector menggunakan opsi
+       * signApiKey untuk Euler Stream.
+       */
+
+      signApiKey: SIGN_API_KEY,
+
       processInitialData: false,
 
       fetchRoomInfoOnConnect: true,
@@ -595,14 +653,9 @@ async function connectToLive(rawUsername) {
     }
 
     /*
-     * PENTING:
+     * Data coin tetap dikirim.
      *
-     * Tetap kirim data coin ke frontend.
-     * Karena frontend membutuhkan event ini
-     * untuk menambahkan coin peserta.
-     *
-     * Tetapi diberi flag silent/displayNotification=false
-     * agar tidak ditampilkan sebagai notifikasi.
+     * Tidak mengirim event notifikasi tambahan.
      */
 
     io.emit(
@@ -615,12 +668,10 @@ async function connectToLive(rawUsername) {
      CHAT EVENT
      ======================================================= */
 
-  conn.on("chat", (event) => {
+  conn.on("chat", () => {
     /*
-     * Sengaja TIDAK mengirim live:event.
-     *
-     * Tujuannya agar chat/event TikTok tidak muncul
-     * sebagai notifikasi atau aktivitas di dashboard.
+     * Chat TikTok sengaja tidak dikirim
+     * ke frontend.
      */
   });
 
@@ -666,11 +717,6 @@ async function connectToLive(rawUsername) {
       console.warn(
         `[TikTok] @${activeUsername} terputus.`
       );
-
-      /*
-       * Jangan reconnect jika memang sengaja
-       * diputus oleh user.
-       */
 
       if (
         manualDisconnect ||
@@ -892,11 +938,6 @@ io.on(
 
         activeUsername = null;
 
-        /*
-         * Bersihkan cache dedup ketika
-         * koneksi benar-benar diputus.
-         */
-
         processedGiftEvents.clear();
 
         emitStatus(
@@ -944,7 +985,10 @@ app.get(
       auctionActive,
 
       apiKeyRequired:
-        false
+        true,
+
+      apiKeyConfigured:
+        Boolean(SIGN_API_KEY)
     });
   }
 );
@@ -988,7 +1032,15 @@ server.listen(
     );
 
     console.log(
-      "MODE: TANPA API KEY"
+      "MODE: API KEY AKTIF"
+    );
+
+    console.log(
+      `SIGN_API_KEY: ${
+        SIGN_API_KEY
+          ? "TERSEDIA"
+          : "BELUM DIATUR"
+      }`
     );
 
     console.log(

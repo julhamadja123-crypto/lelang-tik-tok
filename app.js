@@ -1,21 +1,8 @@
 /* =========================================================
-   COIN AUCTION DASHBOARD V6
-   =========================================================
-   - Coin gift 1:1
-   - Tidak ada x2
-   - Tidak ada @viewer
-   - Foto profil TikTok diprioritaskan
-   - Peserta compact
-   - Extra Time benar-benar aktif
-   - Timer utama PUTIH
-   - Extra Time MERAH
-   - Draw Time KUNING
-   - Menit + detik digunakan dengan benar
-   - Socket.IO compatible
+   COIN AUCTION DASHBOARD V7
    ========================================================= */
 
 "use strict";
-
 
 /* =========================================================
    STATE
@@ -48,11 +35,6 @@ let socket = null;
 
 let liveEventCount = 0;
 
-
-/* =========================================================
-   EXTRA TIME
-   ========================================================= */
-
 let extraTime = 30;
 let extraRemaining = 0;
 let extraActive = false;
@@ -62,8 +44,7 @@ let extraActive = false;
    DOM
    ========================================================= */
 
-const $ = (id) =>
-  document.getElementById(id);
+const $ = (id) => document.getElementById(id);
 
 
 /* =========================================================
@@ -72,45 +53,38 @@ const $ = (id) =>
 
 function formatTime(sec) {
 
-  sec = Math.max(
-    0,
-    Math.floor(
-      Number(sec) || 0
-    )
-  );
+    sec = Math.max(
+        0,
+        Math.floor(Number(sec) || 0)
+    );
 
-  const minutes =
-    Math.floor(sec / 60);
+    const minutes = Math.floor(sec / 60);
+    const seconds = sec % 60;
 
-  const seconds =
-    sec % 60;
-
-  return (
-    String(minutes).padStart(2, "0") +
-    ":" +
-    String(seconds).padStart(2, "0")
-  );
+    return (
+        String(minutes).padStart(2, "0") +
+        ":" +
+        String(seconds).padStart(2, "0")
+    );
 }
 
 
 /* =========================================================
-   ESCAPE
+   ESCAPE HTML
    ========================================================= */
 
 function esc(value) {
 
-  return String(
-    value ?? ""
-  ).replace(
-    /[&<>"']/g,
-    (m) => ({
-      "&": "&amp;",
-      "<": "&lt;",
-      ">": "&gt;",
-      '"': "&quot;",
-      "'": "&#039;"
-    }[m])
-  );
+    return String(value ?? "").replace(
+        /[&<>"']/g,
+        (m) => ({
+            "&": "&amp;",
+            "<": "&lt;",
+            ">": "&gt;",
+            '"': "&quot;",
+            "'": "&#039;"
+        }[m])
+    );
 
 }
 
@@ -121,34 +95,31 @@ function esc(value) {
 
 function getInitial(name) {
 
-  const text =
-    String(
-      name ||
-      "Viewer"
-    ).trim();
+    const text =
+        String(name || "Viewer").trim();
 
-  return text
-    ? text.charAt(0).toUpperCase()
-    : "?";
+    return text
+        ? text.charAt(0).toUpperCase()
+        : "?";
 }
 
 
 /* =========================================================
-   USER ID
+   NORMALIZE ID
    ========================================================= */
 
 function normalizeUserId(value) {
 
-  if (
-    value === undefined ||
-    value === null
-  ) {
-    return "";
-  }
+    if (
+        value === undefined ||
+        value === null
+    ) {
+        return "";
+    }
 
-  return String(value)
-    .trim()
-    .toLowerCase();
+    return String(value)
+        .trim()
+        .toLowerCase();
 }
 
 
@@ -158,48 +129,48 @@ function normalizeUserId(value) {
 
 function getUserKey(data = {}) {
 
-  const id =
-    normalizeUserId(
-      data.userId ||
-      data.user_id ||
-      data.uid
+    const id =
+        normalizeUserId(
+            data.userId ||
+            data.user_id ||
+            data.uid
+        );
+
+    if (id) {
+        return "id:" + id;
+    }
+
+
+    const username =
+        normalizeUserId(
+            data.username ||
+            data.uniqueId ||
+            data.unique_id
+        );
+
+    if (username) {
+        return "username:" + username;
+    }
+
+
+    const nickname =
+        normalizeUserId(
+            data.nickname ||
+            data.name ||
+            data.displayName
+        );
+
+    if (nickname) {
+        return "name:" + nickname;
+    }
+
+
+    return (
+        "unknown:" +
+        Date.now() +
+        ":" +
+        Math.random()
     );
-
-  if (id) {
-    return "id:" + id;
-  }
-
-
-  const username =
-    normalizeUserId(
-      data.username ||
-      data.uniqueId ||
-      data.unique_id
-    );
-
-  if (username) {
-    return "username:" + username;
-  }
-
-
-  const nickname =
-    normalizeUserId(
-      data.nickname ||
-      data.name ||
-      data.displayName
-    );
-
-  if (nickname) {
-    return "name:" + nickname;
-  }
-
-
-  return (
-    "unknown:" +
-    Date.now() +
-    ":" +
-    Math.random()
-  );
 
 }
 
@@ -210,17 +181,17 @@ function getUserKey(data = {}) {
 
 function getAvatar(data = {}) {
 
-  return (
-    data.avatar ||
-    data.profilePictureUrl ||
-    data.profilePicture ||
-    data.avatarLarger ||
-    data.avatarMedium ||
-    data.avatarThumb ||
-    data.profilePicUrl ||
-    data.profile_picture_url ||
-    ""
-  );
+    return (
+        data.avatar ||
+        data.profilePictureUrl ||
+        data.profilePicture ||
+        data.avatarLarger ||
+        data.avatarMedium ||
+        data.avatarThumb ||
+        data.profilePicUrl ||
+        data.profile_picture_url ||
+        ""
+    );
 
 }
 
@@ -230,128 +201,131 @@ function getAvatar(data = {}) {
    ========================================================= */
 
 function avatarHTML(
-  user,
-  className = "user-avatar"
+    user,
+    className = "user-avatar"
 ) {
 
-  const name =
-    user?.name ||
-    user?.nickname ||
-    "Viewer";
+    const name =
+        user?.name ||
+        user?.nickname ||
+        "Viewer";
 
-  const avatar =
-    getAvatar(user);
+    const avatar =
+        getAvatar(user);
 
 
-  if (avatar) {
+    if (avatar) {
+
+        return `
+            <div class="${className}">
+                <img
+                    src="${esc(avatar)}"
+                    alt=""
+                    referrerpolicy="no-referrer"
+                    loading="lazy"
+                    onerror="
+                        this.style.display='none';
+                        if(this.nextElementSibling)
+                            this.nextElementSibling.style.display='flex';
+                    "
+                >
+
+                <span
+                    class="avatar-fallback"
+                    style="display:none;"
+                >
+                    ${esc(getInitial(name))}
+                </span>
+            </div>
+        `;
+
+    }
+
 
     return `
-      <div class="${className}">
-        <img
-          src="${esc(avatar)}"
-          alt=""
-          referrerpolicy="no-referrer"
-          loading="lazy"
-          onload="
-            this.style.display='block';
-            this.nextElementSibling.style.display='none';
-          "
-          onerror="
-            this.style.display='none';
-            this.nextElementSibling.style.display='flex';
-          "
-        >
-
-        <span
-          class="avatar-fallback"
-          style="display:none;"
-        >
-          ${esc(getInitial(name))}
-        </span>
-      </div>
+        <div class="${className}">
+            <span class="avatar-fallback">
+                ${esc(getInitial(name))}
+            </span>
+        </div>
     `;
-
-  }
-
-
-  return `
-    <div class="${className}">
-      <span class="avatar-fallback">
-        ${esc(getInitial(name))}
-      </span>
-    </div>
-  `;
 
 }
 
 
 /* =========================================================
-   SORT
+   SORT USERS
    ========================================================= */
 
 function sortedUsers() {
 
-  return [...users].sort(
-    (a, b) => {
+    return [...users].sort(
+        (a, b) => {
 
-      const coinA =
-        Number(a.coins || 0);
+            const coinA =
+                Number(a.coins || 0);
 
-      const coinB =
-        Number(b.coins || 0);
-
-
-      if (coinB !== coinA) {
-        return coinB - coinA;
-      }
+            const coinB =
+                Number(b.coins || 0);
 
 
-      return String(
-        a.name || ""
-      ).localeCompare(
-        String(b.name || ""),
-        "id"
-      );
+            if (coinB !== coinA) {
+                return coinB - coinA;
+            }
 
-    }
-  );
+
+            return String(
+                a.name || ""
+            ).localeCompare(
+                String(b.name || ""),
+                "id"
+            );
+
+        }
+    );
 
 }
 
 
 /* =========================================================
-   DRAW CHECK
+   TIE CHECK
    ========================================================= */
 
 function leadersAreTied() {
 
-  const sorted =
-    sortedUsers();
+    const sorted =
+        sortedUsers();
 
-  return (
-    sorted.length >= 2 &&
-    Number(sorted[0].coins || 0) > 0 &&
-    Number(sorted[0].coins || 0) ===
-      Number(sorted[1].coins || 0)
-  );
+
+    return (
+        sorted.length >= 2 &&
+        Number(sorted[0].coins || 0) > 0 &&
+        Number(sorted[0].coins || 0) ===
+        Number(sorted[1].coins || 0)
+    );
 
 }
 
 
+/* =========================================================
+   CLEAR WINNER
+   ========================================================= */
+
 function hasClearLeader() {
 
-  const sorted =
-    sortedUsers();
+    const sorted =
+        sortedUsers();
 
-  return (
-    sorted.length >= 1 &&
-    Number(sorted[0].coins || 0) > 0 &&
-    (
-      sorted.length === 1 ||
-      Number(sorted[0].coins || 0) >
-        Number(sorted[1].coins || 0)
-    )
-  );
+
+    return (
+        sorted.length >= 1 &&
+        Number(sorted[0].coins || 0) > 0 &&
+        (
+            sorted.length === 1 ||
+            Number(sorted[0].coins || 0) >
+            Number(sorted[1].coins || 0)
+        )
+    );
 
 }
 
@@ -362,36 +336,36 @@ function hasClearLeader() {
 
 function toast(message) {
 
-  const el =
-    $("toast");
-
-  if (!el) return;
+    const el =
+        $("toast");
 
 
-  el.textContent =
-    message;
-
-  el.classList.add(
-    "show"
-  );
+    if (!el) {
+        return;
+    }
 
 
-  clearTimeout(
-    window.__auctionToastTimer
-  );
+    el.textContent =
+        message;
 
 
-  window.__auctionToastTimer =
-    setTimeout(
-      () => {
+    el.classList.add("show");
 
-        el.classList.remove(
-          "show"
-        );
 
-      },
-      2200
+    clearTimeout(
+        window.__auctionToastTimer
     );
+
+
+    window.__auctionToastTimer =
+        setTimeout(
+            () => {
+
+                el.classList.remove("show");
+
+            },
+            2200
+        );
 
 }
 
@@ -402,71 +376,51 @@ function toast(message) {
 
 function updateTimerColor() {
 
-  const timer =
-    $("timer");
-
-  if (!timer) return;
+    const timer =
+        $("timer");
 
 
-  timer.classList.remove(
-    "extra-active",
-    "draw-time-active"
-  );
-
-
-  if (inDraw) {
-
-    timer.classList.add(
-      "draw-time-active"
-    );
-
-    timer.style.color =
-      "#ffd43b";
-
-    return;
-  }
-
-
-  if (extraActive) {
-
-    timer.classList.add(
-      "extra-active"
-    );
-
-    timer.style.color =
-      "#ff3030";
-
-    return;
-  }
-
-
-  timer.style.color =
-    "#ffffff";
-
-}
-
-
-/* =========================================================
-   INPUT HELPERS
-   ========================================================= */
-
-function findInput(
-  ids,
-  fallback = null
-) {
-
-  for (const id of ids) {
-
-    const el =
-      $(id);
-
-    if (el) {
-      return el;
+    if (!timer) {
+        return;
     }
 
-  }
 
-  return fallback;
+    timer.classList.remove(
+        "extra-active",
+        "draw-time-active"
+    );
+
+
+    if (inDraw) {
+
+        timer.classList.add(
+            "draw-time-active"
+        );
+
+        timer.style.color =
+            "#ffd43b";
+
+        return;
+
+    }
+
+
+    if (extraActive) {
+
+        timer.classList.add(
+            "extra-active"
+        );
+
+        timer.style.color =
+            "#ff3030";
+
+        return;
+
+    }
+
+
+    timer.style.color =
+        "#ffffff";
 
 }
 
@@ -477,73 +431,75 @@ function findInput(
 
 function readMainDuration() {
 
-  const minuteInput =
-    $("minuteInput");
+    const minuteInput =
+        $("minuteInput");
 
-  const secondInput =
-    $("secondInput");
-
-
-  let minutes =
-    Number(
-      minuteInput?.value ?? 5
-    );
-
-  let seconds =
-    Number(
-      secondInput?.value ?? 0
-    );
+    const secondInput =
+        $("secondInput");
 
 
-  if (!Number.isFinite(minutes)) {
-    minutes = 5;
-  }
-
-  if (!Number.isFinite(seconds)) {
-    seconds = 0;
-  }
+    let minutes =
+        Number(
+            minuteInput?.value ?? 5
+        );
 
 
-  minutes =
-    Math.max(
-      0,
-      Math.min(
-        120,
-        Math.floor(minutes)
-      )
-    );
+    let seconds =
+        Number(
+            secondInput?.value ?? 0
+        );
 
 
-  seconds =
-    Math.max(
-      0,
-      Math.min(
-        59,
-        Math.floor(seconds)
-      )
-    );
+    if (!Number.isFinite(minutes)) {
+        minutes = 5;
+    }
 
 
-  duration =
-    minutes * 60 +
-    seconds;
+    if (!Number.isFinite(seconds)) {
+        seconds = 0;
+    }
 
 
-  if (duration <= 0) {
-    duration = 1;
-  }
+    minutes =
+        Math.max(
+            0,
+            Math.min(
+                120,
+                Math.floor(minutes)
+            )
+        );
 
 
-  if (
-    !running &&
-    !extraActive &&
-    !inDraw
-  ) {
+    seconds =
+        Math.max(
+            0,
+            Math.min(
+                59,
+                Math.floor(seconds)
+            )
+        );
 
-    remaining =
-      duration;
 
-  }
+    duration =
+        minutes * 60 +
+        seconds;
+
+
+    if (duration <= 0) {
+        duration = 1;
+    }
+
+
+    if (
+        !running &&
+        !extraActive &&
+        !inDraw
+    ) {
+
+        remaining =
+            duration;
+
+    }
 
 }
 
@@ -554,44 +510,44 @@ function readMainDuration() {
 
 function readExtraTime() {
 
-  const input =
-    $("extraTimeInput");
+    const input =
+        $("extraTimeInput");
 
 
-  if (!input) {
-    return;
-  }
+    if (!input) {
+        return;
+    }
 
 
-  let value =
-    Number(input.value);
+    let value =
+        Number(input.value);
 
 
-  if (!Number.isFinite(value)) {
-    value = 30;
-  }
+    if (!Number.isFinite(value)) {
+        value = 30;
+    }
 
 
-  value =
-    Math.max(
-      0,
-      Math.min(
-        3600,
-        Math.floor(value)
-      )
-    );
+    value =
+        Math.max(
+            0,
+            Math.min(
+                3600,
+                Math.floor(value)
+            )
+        );
 
 
-  extraTime =
-    value;
+    extraTime =
+        value;
 
 
-  if (!extraActive) {
+    if (!extraActive) {
 
-    extraRemaining =
-      0;
+        extraRemaining =
+            0;
 
-  }
+    }
 
 }
 
@@ -602,52 +558,120 @@ function readExtraTime() {
 
 function readSettings() {
 
-  readMainDuration();
+    readMainDuration();
 
-  readExtraTime();
-
-
-  const titleInput =
-    $("titleInput");
+    readExtraTime();
 
 
-  if (
-    titleInput &&
-    titleInput.value.trim()
-  ) {
-
-    auctionTitle =
-      titleInput.value.trim();
-
-  }
-
-
-  const topInput =
-    $("topInput");
-
-
-  if (topInput) {
-
-    const value =
-      Number(
-        topInput.value
-      );
+    const titleInput =
+        $("titleInput");
 
 
     if (
-      Number.isFinite(value) &&
-      value > 0
+        titleInput &&
+        titleInput.value.trim()
     ) {
 
-      topLimit =
-        Math.floor(value);
+        auctionTitle =
+            titleInput.value.trim();
 
     }
 
-  }
+
+    const topInput =
+        $("topInput");
 
 
-  render();
+    if (topInput) {
+
+        const value =
+            Number(topInput.value);
+
+
+        if (
+            Number.isFinite(value) &&
+            value > 0
+        ) {
+
+            topLimit =
+                Math.floor(value);
+
+        }
+
+    }
+
+
+    render();
+
+}
+
+
+/* =========================================================
+   WRITE SETTINGS
+   ========================================================= */
+
+function writeSettings() {
+
+    const minuteInput =
+        $("minuteInput");
+
+
+    const secondInput =
+        $("secondInput");
+
+
+    const extraInput =
+        $("extraTimeInput");
+
+
+    const titleInput =
+        $("titleInput");
+
+
+    const topInput =
+        $("topInput");
+
+
+    if (minuteInput) {
+
+        minuteInput.value =
+            Math.floor(
+                duration / 60
+            );
+
+    }
+
+
+    if (secondInput) {
+
+        secondInput.value =
+            duration % 60;
+
+    }
+
+
+    if (extraInput) {
+
+        extraInput.value =
+            extraTime;
+
+    }
+
+
+    if (titleInput) {
+
+        titleInput.value =
+            auctionTitle;
+
+    }
+
+
+    if (topInput) {
+
+        topInput.value =
+            String(topLimit);
+
+    }
 
 }
 
@@ -658,19 +682,135 @@ function readSettings() {
 
 function saveSettings() {
 
-  const wasRunning =
-    running;
+    const wasRunning =
+        running;
 
 
-  if (wasRunning) {
+    readSettings();
+
+    writeSettings();
+
+
+    if (!wasRunning) {
+
+        remaining =
+            duration;
+
+        extraActive =
+            false;
+
+        extraRemaining =
+            0;
+
+        inDraw =
+            false;
+
+        drawRemaining =
+            drawDuration;
+
+        auctionFinished =
+            false;
+
+    }
+
+
+    syncAuctionState();
+
+    render();
+
 
     toast(
-      "⏳ Pengaturan akan digunakan pada sesi berikutnya"
+        "⚙️ Pengaturan berhasil disimpan"
     );
 
-  }
+}
 
 
-  readSettings();
+/* =========================================================
+   START EXTRA TIME
+   ========================================================= */
 
-  write
+function startExtraTime() {
+
+    readExtraTime();
+
+
+    if (extraTime <= 0) {
+
+        if (leadersAreTied()) {
+
+            startDrawTime();
+
+        } else {
+
+            finishAuction(
+                "Waktu selesai"
+            );
+
+        }
+
+        return;
+
+    }
+
+
+    extraActive =
+        true;
+
+
+    extraRemaining =
+        extraTime;
+
+
+    auctionFinished =
+        false;
+
+
+    const note =
+        $("timerNote");
+
+
+    if (note) {
+
+        note.textContent =
+            "🔴 EXTRA TIME AKTIF";
+
+    }
+
+
+    toast(
+        "🔴 Extra Time dimulai"
+    );
+
+
+    syncAuctionState();
+
+    render();
+
+}
+
+
+/* =========================================================
+   START DRAW
+   ========================================================= */
+
+function startDrawTime() {
+
+    inDraw =
+        true;
+
+
+    drawRemaining =
+        drawDuration;
+
+
+    extraActive =
+        false;
+
+
+    extraRemaining =
+        0;
+
+
+    auctionFinished =
+        false

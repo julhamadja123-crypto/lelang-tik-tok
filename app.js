@@ -1,93 +1,148 @@
 /* =========================================================
-   COIN AUCTION - APP.JS
-   FINAL VERSION
+   COIN AUCTION DASHBOARD - FINAL APP.JS
+   Cocok dengan index (1).html
+
+   FUNGSI:
+   - Hubungkan TikTok LIVE
+   - Putuskan koneksi TikTok LIVE
+   - Mulai
+   - Pause
+   - Reset
+   - Selesai
+   - Timer countdown
+   - Extra Time
+   - Peserta realtime
+   - Coin realtime
+   - Anti double render
+   - Simpan pengaturan
+   - LocalStorage
+   - Tidak ada popup gift yang mengganggu
    ========================================================= */
 
 (() => {
   "use strict";
 
-  function initAuctionApp() {
+  document.addEventListener("DOMContentLoaded", init);
 
-    console.log("[APP] Coin Auction App dimulai");
+  function init() {
 
     /* =======================================================
        SOCKET.IO
        ======================================================= */
 
-    const socket = window.io();
+    const socket = window.io ? window.io() : null;
+
+    /* =======================================================
+       ELEMENT HTML
+       SEMUA ID DISESUAIKAN DENGAN index (1).html
+       ======================================================= */
+
+    const el = {
+      username: document.getElementById("tiktokUsername"),
+
+      connect: document.getElementById("connectBtn"),
+      disconnect: document.getElementById("disconnectBtn"),
+
+      start: document.getElementById("startBtn"),
+      pause: document.getElementById("pauseBtn"),
+      reset: document.getElementById("resetBtn"),
+      finish: document.getElementById("finishBtn"),
+
+      timer: document.getElementById("timer"),
+      progress: document.getElementById("progressBar"),
+
+      titleInput: document.getElementById("titleInput"),
+      titleDisplay: document.getElementById("auctionTitleDisplay"),
+
+      minuteInput: document.getElementById("minuteInput"),
+      secondInput: document.getElementById("secondInput"),
+      extraInput: document.getElementById("extraTimeInput"),
+      topInput: document.getElementById("topInput"),
+
+      save: document.getElementById("saveSettings"),
+
+      participantCount: document.getElementById("participantCount"),
+      rankingList: document.getElementById("rankingList"),
+
+      connectionLog: document.getElementById("connectionLog"),
+      statusBadge: document.getElementById("statusBadge"),
+
+      activityList: document.getElementById("activityList"),
+      extraStatus: document.getElementById("extraTimeStatus"),
+
+      timerNote: document.getElementById("timerNote"),
+      toast: document.getElementById("toast")
+    };
 
     /* =======================================================
        STATE
        ======================================================= */
 
     const state = {
+
+      // idle | running | paused | finished
       auction: "idle",
+
       participants: new Map(),
+
       timer: 0,
-      initialTimer: 0,
-      timerInterval: null,
+      initialTimer: 300,
+
       extraTime: 0,
-      extraUsed: 0,
-      version: 0
+      extraUsed: false,
+
+      top: 5,
+
+      version: 0,
+
+      timerInterval: null,
+
+      connected: false,
+      connecting: false
     };
 
     /* =======================================================
-       HELPERS
+       STORAGE
        ======================================================= */
 
-    const $ = (selectors) => {
+    const STORAGE_KEY = "coinAuctionSettingsVFinal";
 
-      for (const selector of selectors) {
-
-        const el =
-          document.querySelector(selector);
-
-        if (el) {
-          return el;
-        }
-      }
-
-      return null;
-    };
-
-    const $$ = (selectors) => {
-
-      for (const selector of selectors) {
-
-        const els =
-          document.querySelectorAll(selector);
-
-        if (els.length) {
-          return Array.from(els);
-        }
-      }
-
-      return [];
-    };
+    /* =======================================================
+       BASIC HELPERS
+       ======================================================= */
 
     function num(value, fallback = 0) {
 
-      const n =
-        Number(value);
+      const n = Number(value);
 
       return Number.isFinite(n)
         ? n
         : fallback;
     }
 
+    function clampInt(value, min, max) {
+
+      return Math.max(
+        min,
+        Math.min(
+          max,
+          Math.floor(num(value, min))
+        )
+      );
+    }
+
     function escapeHtml(value) {
 
-      return String(value ?? "")
-        .replace(
-          /[&<>'"]/g,
-          char => ({
-            "&": "&amp;",
-            "<": "&lt;",
-            ">": "&gt;",
-            "'": "&#39;",
-            '"': "&quot;"
-          })[char]
-        );
+      return String(value ?? "").replace(
+        /[&<>"']/g,
+        char => ({
+          "&": "&amp;",
+          "<": "&lt;",
+          ">": "&gt;",
+          '"': "&quot;",
+          "'": "&#39;"
+        }[char])
+      );
     }
 
     function escapeAttr(value) {
@@ -95,275 +150,237 @@
     }
 
     /* =======================================================
-       FIND ELEMENTS
+       SETTINGS
        ======================================================= */
 
-    const usernameInput = $([
-      "#username",
-      "#tiktokUsername",
-      "#tiktok-username",
-      "input[name='username']",
-      "input[placeholder*='username' i]"
-    ]);
+    function getTitle() {
 
-    const connectButton = $([
-      "#connectTikTok",
-      "#connectBtn",
-      "#btnConnect",
-      "button[data-action='connect']"
-    ]);
-
-    const startButton = $([
-      "#startAuction",
-      "#startBtn",
-      "#btnStart",
-      "button[data-action='start']"
-    ]);
-
-    const pauseButton = $([
-      "#pauseAuction",
-      "#pauseBtn",
-      "#btnPause",
-      "button[data-action='pause']"
-    ]);
-
-    const resetButton = $([
-      "#resetAuction",
-      "#resetBtn",
-      "#btnReset",
-      "button[data-action='reset']"
-    ]);
-
-    const finishButton = $([
-      "#finishAuction",
-      "#finishBtn",
-      "#btnFinish",
-      "button[data-action='finish']"
-    ]);
-
-    const saveSettingsButton = $([
-      "#saveSettings",
-      "#saveSettingsBtn",
-      "#btnSaveSettings",
-      "#simpanPengaturan",
-      "#btnSimpanPengaturan",
-      "button[data-action='save-settings']"
-    ]);
-
-    const timerEl = $([
-      "#timer",
-      "#auctionTimer",
-      "#countdown",
-      "[data-role='timer']"
-    ]);
-
-    const participantCountEl = $([
-      "#participantCount",
-      "#participantsCount",
-      "#jumlahPeserta",
-      "[data-role='participant-count']"
-    ]);
-
-    const participantList = $([
-      "#participants",
-      "#participantList",
-      "#participantsList",
-      ".participants-list",
-      "[data-role='participants']"
-    ]);
-
-    const extraTimeEl = $([
-      "#extraTime",
-      "#extraTimeAvailable",
-      "[data-role='extra-time']"
-    ]);
-
-    const titleInput = $([
-      "#auctionTitle",
-      "#titleAuction",
-      "#judulLelang",
-      "input[name='auctionTitle']",
-      "input[name='title']"
-    ]);
-
-    const minutesInput = $([
-      "#minutes",
-      "#auctionMinutes",
-      "#menit",
-      "input[name='minutes']"
-    ]);
-
-    const secondsInput = $([
-      "#seconds",
-      "#auctionSeconds",
-      "#detik",
-      "input[name='seconds']"
-    ]);
-
-    const extraInput = $([
-      "#extraSeconds",
-      "#extraTimeSeconds",
-      "#extraTimeInput",
-      "input[name='extraTime']"
-    ]);
-
-    function findButtonByText(label) {
-
-      const wanted =
-        label.toLowerCase();
-
-      return $$([
-        "button",
-        "[role='button']"
-      ]).find(el => {
-
-        return (
-          el.textContent ||
-          ""
+      return (
+        String(
+          el.titleInput?.value ||
+          "LIVE COIN AUCTION"
         )
           .trim()
-          .toLowerCase()
-          .includes(wanted);
-      }) || null;
+          .slice(0, 140)
+      ) || "LIVE COIN AUCTION";
     }
 
-    const btnStart =
-      startButton ||
-      findButtonByText("mulai");
+    function getMinutes() {
 
-    const btnPause =
-      pauseButton ||
-      findButtonByText("pause");
+      return clampInt(
+        el.minuteInput?.value ?? 5,
+        0,
+        120
+      );
+    }
 
-    const btnReset =
-      resetButton ||
-      findButtonByText("reset");
+    function getSeconds() {
 
-    const btnFinish =
-      finishButton ||
-      findButtonByText("selesai");
+      return clampInt(
+        el.secondInput?.value ?? 0,
+        0,
+        59
+      );
+    }
 
-    const btnConnect =
-      connectButton ||
-      findButtonByText("hubungkan");
+    function getMainTime() {
 
-    /* =======================================================
-       DEBUG ELEMENTS
-       ======================================================= */
+      return Math.max(
+        0,
+        getMinutes() * 60 +
+        getSeconds()
+      );
+    }
 
-    console.log(
-      "[BUTTON] Connect:",
-      btnConnect
-    );
+    function getExtraTime() {
 
-    console.log(
-      "[BUTTON] Start:",
-      btnStart
-    );
+      return clampInt(
+        el.extraInput?.value ?? 0,
+        0,
+        3600
+      );
+    }
 
-    console.log(
-      "[BUTTON] Pause:",
-      btnPause
-    );
+    function getTop() {
 
-    console.log(
-      "[BUTTON] Reset:",
-      btnReset
-    );
+      return clampInt(
+        el.topInput?.value ?? 5,
+        1,
+        100
+      );
+    }
 
-    console.log(
-      "[BUTTON] Finish:",
-      btnFinish
-    );
+    function loadSettings() {
 
-    console.log(
-      "[BUTTON] Save:",
-      saveSettingsButton
-    );
+      try {
+
+        const raw =
+          localStorage.getItem(STORAGE_KEY);
+
+        if (!raw) return;
+
+        const saved =
+          JSON.parse(raw);
+
+        if (!saved) return;
+
+        if (
+          el.titleInput &&
+          typeof saved.title === "string"
+        ) {
+          el.titleInput.value =
+            saved.title;
+        }
+
+        if (
+          el.minuteInput &&
+          saved.minutes !== undefined
+        ) {
+          el.minuteInput.value =
+            clampInt(
+              saved.minutes,
+              0,
+              120
+            );
+        }
+
+        if (
+          el.secondInput &&
+          saved.seconds !== undefined
+        ) {
+          el.secondInput.value =
+            clampInt(
+              saved.seconds,
+              0,
+              59
+            );
+        }
+
+        if (
+          el.extraInput &&
+          saved.extra !== undefined
+        ) {
+          el.extraInput.value =
+            clampInt(
+              saved.extra,
+              0,
+              3600
+            );
+        }
+
+        if (
+          el.topInput &&
+          saved.top !== undefined
+        ) {
+
+          const top =
+            clampInt(
+              saved.top,
+              1,
+              100
+            );
+
+          const optionExists =
+            [...el.topInput.options]
+              .some(
+                option =>
+                  Number(option.value) === top
+              );
+
+          if (optionExists) {
+            el.topInput.value =
+              String(top);
+          }
+        }
+
+      } catch (error) {
+
+        console.warn(
+          "[Settings] Gagal membaca settings:",
+          error
+        );
+      }
+    }
+
+    function saveSettings() {
+
+      const settings = {
+
+        title: getTitle(),
+
+        minutes: getMinutes(),
+
+        seconds: getSeconds(),
+
+        extra: getExtraTime(),
+
+        top: getTop()
+      };
+
+      try {
+
+        localStorage.setItem(
+          STORAGE_KEY,
+          JSON.stringify(settings)
+        );
+
+      } catch (error) {
+
+        console.warn(
+          "[Settings] Gagal menyimpan:",
+          error
+        );
+      }
+
+      state.initialTimer =
+        getMainTime();
+
+      state.extraTime =
+        getExtraTime();
+
+      state.top =
+        getTop();
+
+      if (
+        state.auction === "idle" ||
+        state.auction === "finished"
+      ) {
+
+        state.timer =
+          state.initialTimer;
+
+        state.extraUsed =
+          false;
+
+        renderTimer();
+      }
+
+      if (el.titleDisplay) {
+
+        el.titleDisplay.textContent =
+          settings.title ||
+          "LIVE COIN AUCTION";
+      }
+
+      renderParticipants();
+
+      updateProgress();
+
+      showToast(
+        "Pengaturan berhasil disimpan"
+      );
+    }
 
     /* =======================================================
        TIMER
        ======================================================= */
-
-    function parseTimerText(text) {
-
-      const match =
-        String(text || "")
-          .match(
-            /(\d+)\s*:\s*(\d+)/
-          );
-
-      if (!match) {
-        return 0;
-      }
-
-      return (
-        Number(match[1]) * 60 +
-        Number(match[2])
-      );
-    }
-
-    function readInitialTimer() {
-
-      const minutes =
-        num(
-          minutesInput?.value,
-          0
-        );
-
-      const seconds =
-        num(
-          secondsInput?.value,
-          0
-        );
-
-      const total =
-        Math.max(
-          0,
-          Math.floor(
-            minutes * 60 +
-            seconds
-          )
-        );
-
-      if (total > 0) {
-        return total;
-      }
-
-      const current =
-        parseTimerText(
-          timerEl?.textContent ||
-          ""
-        );
-
-      return current > 0
-        ? current
-        : 300;
-    }
-
-    function readExtraTime() {
-
-      const value =
-        num(
-          extraInput?.value,
-          0
-        );
-
-      if (value > 0) {
-        return Math.floor(value);
-      }
-
-      return 0;
-    }
 
     function formatTime(total) {
 
       total =
         Math.max(
           0,
-          Math.floor(
-            total || 0
-          )
+          Math.floor(total)
         );
 
       const hours =
@@ -404,17 +421,43 @@
 
     function renderTimer() {
 
-      if (!timerEl) {
-        return;
+      if (el.timer) {
+
+        el.timer.textContent =
+          formatTime(
+            state.timer
+          );
       }
 
-      timerEl.textContent =
-        formatTime(
-          state.timer
-        );
+      updateProgress();
     }
 
-    function clearTimer() {
+    function updateProgress() {
+
+      if (!el.progress) return;
+
+      const total =
+        Math.max(
+          1,
+          state.initialTimer
+        );
+
+      const percent =
+        Math.max(
+          0,
+          Math.min(
+            100,
+            state.timer /
+            total *
+            100
+          )
+        );
+
+      el.progress.style.width =
+        `${percent}%`;
+    }
+
+    function stopTimer() {
 
       if (
         state.timerInterval
@@ -423,19 +466,15 @@
         clearInterval(
           state.timerInterval
         );
-      }
 
-      state.timerInterval =
-        null;
+        state.timerInterval =
+          null;
+      }
     }
 
-    /* =======================================================
-       LOCAL TIMER
-       ======================================================= */
+    function startTimer() {
 
-    function startLocalTimer() {
-
-      clearTimer();
+      stopTimer();
 
       if (
         state.auction !==
@@ -461,216 +500,623 @@
             state.timer--;
 
             renderTimer();
-
-            return;
           }
-
-          /*
-            Timer habis.
-          */
 
           if (
-            state.extraTime >
-            state.extraUsed
+            state.timer <= 0
           ) {
 
-            const remainingExtra =
-              state.extraTime -
-              state.extraUsed;
-
-            state.timer =
-              remainingExtra;
-
-            state.extraUsed +=
-              remainingExtra;
-
-            renderTimer();
-
-            return;
+            timerFinished();
           }
 
-          clearTimer();
-
-          state.auction =
-            "finished";
-
-          updateButtons();
-
-          socket.emit(
-            "auction:state",
-            {
-              state: "finished"
-            }
-          );
-
-          console.log(
-            "[AUCTION] Timer habis -> FINISHED"
-          );
-
         }, 1000);
+    }
+
+    function timerFinished() {
+
+      if (
+        state.auction !==
+        "running"
+      ) {
+        return;
+      }
+
+      /*
+       * EXTRA TIME
+       */
+
+      if (
+        !state.extraUsed &&
+        state.extraTime > 0
+      ) {
+
+        state.extraUsed =
+          true;
+
+        state.timer =
+          state.extraTime;
+
+        if (el.extraStatus) {
+
+          el.extraStatus.textContent =
+            `Extra Time aktif: ${formatTime(
+              state.extraTime
+            )}`;
+        }
+
+        renderTimer();
+
+        showToast(
+          "Extra Time dimulai"
+        );
+
+        return;
+      }
+
+      /*
+       * WAKTU BENAR-BENAR HABIS
+       */
+
+      finishAuction(true);
+    }
+
+    /* =======================================================
+       AUCTION STATE
+       ======================================================= */
+
+    function sendAuctionState(next) {
+
+      if (!socket) return;
+
+      socket.emit(
+        "auction:state",
+        {
+          state: next
+        }
+      );
+    }
+
+    function startAuction() {
+
+      if (
+        state.auction ===
+        "running"
+      ) {
+        return;
+      }
+
+      state.initialTimer =
+        getMainTime();
+
+      state.extraTime =
+        getExtraTime();
+
+      state.top =
+        getTop();
+
+      /*
+       * PAUSE -> LANJUT
+       */
+
+      if (
+        state.auction ===
+        "paused" &&
+        state.timer > 0
+      ) {
+
+        /*
+         * Pertahankan timer.
+         */
+      }
+
+      /*
+       * IDLE / FINISHED -> TIMER BARU
+       */
+
+      else {
+
+        state.timer =
+          state.initialTimer;
+
+        state.extraUsed =
+          false;
+
+        if (el.extraStatus) {
+
+          el.extraStatus.textContent =
+            "";
+        }
+      }
+
+      if (
+        state.timer <= 0
+      ) {
+
+        showToast(
+          "Atur waktu lelang terlebih dahulu"
+        );
+
+        return;
+      }
+
+      state.auction =
+        "running";
+
+      renderTimer();
+
+      setAuctionUI(
+        "running"
+      );
+
+      updateButtons();
+
+      startTimer();
+
+      sendAuctionState(
+        "running"
+      );
+    }
+
+    function pauseAuction() {
+
+      if (
+        state.auction !==
+        "running"
+      ) {
+        return;
+      }
+
+      stopTimer();
+
+      state.auction =
+        "paused";
+
+      setAuctionUI(
+        "paused"
+      );
+
+      updateButtons();
+
+      sendAuctionState(
+        "paused"
+      );
+    }
+
+    function resetAuction() {
+
+      stopTimer();
+
+      state.auction =
+        "idle";
+
+      state.initialTimer =
+        getMainTime();
+
+      state.extraTime =
+        getExtraTime();
+
+      state.top =
+        getTop();
+
+      state.extraUsed =
+        false;
+
+      state.timer =
+        state.initialTimer;
+
+      /*
+       * HAPUS SEMUA PESERTA
+       */
+
+      state.participants.clear();
+
+      if (el.extraStatus) {
+
+        el.extraStatus.textContent =
+          "";
+      }
+
+      renderTimer();
+
+      renderParticipants();
+
+      clearActivity();
+
+      setAuctionUI(
+        "idle"
+      );
+
+      updateButtons();
+
+      /*
+       * SERVER JUGA RESET
+       */
+
+      if (socket) {
+
+        socket.emit(
+          "auction:reset"
+        );
+      }
+
+      showToast(
+        "Lelang di-reset"
+      );
+    }
+
+    function finishAuction(
+      fromTimer = false
+    ) {
+
+      if (
+        state.auction ===
+          "idle" ||
+        state.auction ===
+          "finished"
+      ) {
+        return;
+      }
+
+      stopTimer();
+
+      state.auction =
+        "finished";
+
+      /*
+       * PENTING:
+       *
+       * FINISH TIDAK MENGHAPUS
+       * PESERTA.
+       */
+
+      setAuctionUI(
+        "finished"
+      );
+
+      updateButtons();
+
+      if (socket) {
+
+        socket.emit(
+          "auction:state",
+          {
+            state: "finished"
+          }
+        );
+      }
+
+      if (fromTimer) {
+
+        showToast(
+          "Waktu habis — lelang selesai"
+        );
+
+      } else {
+
+        showToast(
+          "Lelang selesai"
+        );
+      }
+    }
+
+    /* =======================================================
+       BUTTON STATE
+       ======================================================= */
+
+    function updateButtons() {
+
+      if (el.connect) {
+
+        el.connect.disabled =
+          state.connecting;
+      }
+
+      if (el.disconnect) {
+
+        el.disconnect.disabled =
+          !state.connected;
+      }
+
+      if (el.start) {
+
+        el.start.disabled =
+          state.auction ===
+          "running";
+      }
+
+      if (el.pause) {
+
+        el.pause.disabled =
+          state.auction !==
+          "running";
+      }
+
+      /*
+       * RESET SELALU BISA DITEKAN
+       */
+
+      if (el.reset) {
+
+        el.reset.disabled =
+          false;
+      }
+
+      if (el.finish) {
+
+        el.finish.disabled =
+          state.auction ===
+            "idle" ||
+          state.auction ===
+            "finished";
+      }
+
+      if (el.save) {
+
+        el.save.disabled =
+          false;
+      }
+    }
+
+    /* =======================================================
+       AUCTION UI
+       ======================================================= */
+
+    function setAuctionUI(next) {
+
+      const labels = {
+
+        idle:
+          "Siap untuk memulai",
+
+        running:
+          "Lelang sedang berjalan",
+
+        paused:
+          "Lelang dijeda",
+
+        finished:
+          "Lelang selesai"
+      };
+
+      if (el.timerNote) {
+
+        el.timerNote.textContent =
+          labels[next] || "";
+      }
+
+      if (el.statusBadge) {
+
+        el.statusBadge.dataset.auctionState =
+          next;
+      }
+    }
+
+    /* =======================================================
+       TOAST
+       ======================================================= */
+
+    function showToast(message) {
+
+      if (!el.toast) {
+
+        console.log(
+          "[Toast]",
+          message
+        );
+
+        return;
+      }
+
+      el.toast.textContent =
+        String(message || "");
+
+      el.toast.classList.add(
+        "show"
+      );
+
+      clearTimeout(
+        showToast.timer
+      );
+
+      showToast.timer =
+        setTimeout(() => {
+
+          el.toast.classList.remove(
+            "show"
+          );
+
+        }, 1800);
     }
 
     /* =======================================================
        PARTICIPANT KEY
        ======================================================= */
 
-    function participantKey(participant) {
+    function participantKey(p) {
 
       return String(
-        participant?.userId ||
-        participant?.username ||
-        participant?.uniqueId ||
+        p?.userId ||
+        p?.username ||
+        p?.uniqueId ||
+        p?.nickname ||
         "unknown"
       );
     }
 
     /* =======================================================
-       RENDER PARTICIPANTS
+       AVATAR
+       ======================================================= */
+
+    function avatarHtml(p) {
+
+      const name =
+        String(
+          p?.nickname ||
+          p?.username ||
+          "V"
+        );
+
+      const first =
+        escapeHtml(
+          name
+            .charAt(0)
+            .toUpperCase()
+        );
+
+      if (p?.avatar) {
+
+        return `
+          <img
+            class="participant-avatar"
+            src="${escapeAttr(p.avatar)}"
+            alt=""
+            loading="lazy"
+            onerror="
+              this.style.display='none';
+              this.nextElementSibling.style.display='flex';
+            "
+          >
+
+          <div
+            class="participant-avatar participant-initial"
+            style="display:none"
+          >
+            ${first}
+          </div>
+        `;
+      }
+
+      return `
+        <div
+          class="participant-avatar participant-initial"
+        >
+          ${first}
+        </div>
+      `;
+    }
+
+    /* =======================================================
+       RENDER PESERTA
        ======================================================= */
 
     function renderParticipants() {
 
-      if (
-        participantCountEl
-      ) {
-
-        participantCountEl.textContent =
-          `${state.participants.size} peserta`;
-      }
-
-      if (
-        !participantList
-      ) {
-        return;
-      }
-
       const list =
         Array.from(
           state.participants.values()
-        ).sort(
-          (a, b) => {
+        )
+        .sort((a, b) => {
 
-            const coinDifference =
-              num(b.coins) -
-              num(a.coins);
+          const coinDiff =
+            num(b.coins) -
+            num(a.coins);
 
-            if (
-              coinDifference !== 0
-            ) {
-              return coinDifference;
-            }
-
-            return (
-              num(a.joinedAt) -
-              num(b.joinedAt)
-            );
+          if (
+            coinDiff !== 0
+          ) {
+            return coinDiff;
           }
-        );
 
-      if (
-        list.length === 0
-      ) {
+          return (
+            num(a.joinedAt) -
+            num(b.joinedAt)
+          );
+        });
 
-        participantList.innerHTML =
-          `
+      if (el.participantCount) {
+
+        el.participantCount.textContent =
+          `${list.length} peserta`;
+      }
+
+      if (!el.rankingList) {
+        return;
+      }
+
+      if (!list.length) {
+
+        el.rankingList.innerHTML = `
           <div class="empty-participants">
             Menunggu peserta
           </div>
-          `;
+        `;
 
         return;
       }
 
-      participantList.innerHTML =
-        list.map(
-          (participant, index) => {
+      const visible =
+        list.slice(
+          0,
+          state.top
+        );
+
+      el.rankingList.innerHTML =
+        visible.map(
+          (p, index) => {
 
             const nickname =
               escapeHtml(
-                participant.nickname ||
-                participant.username ||
+                p.nickname ||
+                p.username ||
                 "Viewer"
               );
 
             const username =
               escapeHtml(
-                participant.username ||
-                participant.uniqueId ||
+                p.username ||
                 "viewer"
               );
 
-            let avatar;
+            const coins =
+              num(
+                p.coins,
+                0
+              );
 
-            if (
-              participant.avatar
-            ) {
-
-              avatar =
-                `
-                <img
-                  src="${escapeAttr(
-                    participant.avatar
-                  )}"
-                  alt=""
-                  class="participant-avatar"
-                  loading="lazy"
-                >
-                `;
-
-            } else {
-
-              const first =
-                (
-                  participant.nickname ||
-                  participant.username ||
-                  "V"
-                )
-                  .charAt(0)
-                  .toUpperCase();
-
-              avatar =
-                `
-                <div
-                  class="participant-avatar participant-initial"
-                >
-                  ${escapeHtml(first)}
-                </div>
-                `;
-            }
+            const gifts =
+              num(
+                p.gifts,
+                0
+              );
 
             return `
               <div
-                class="participant-row"
+                class="participant-row rank-card"
                 data-user-id="${escapeAttr(
-                  participantKey(
-                    participant
-                  )
+                  participantKey(p)
                 )}"
               >
 
-                <div class="participant-rank">
+                <div
+                  class="participant-rank rank-number"
+                >
                   ${index + 1}
                 </div>
 
-                ${avatar}
+                ${avatarHtml(p)}
 
-                <div class="participant-info">
+                <div
+                  class="participant-info"
+                >
 
-                  <div class="participant-name">
+                  <div
+                    class="participant-name"
+                  >
                     ${nickname}
                   </div>
 
-                  <div class="participant-username">
+                  <div
+                    class="participant-username"
+                  >
                     @${username}
                   </div>
 
                 </div>
 
-                <div class="participant-coins">
-                  🪙 ${num(
-                    participant.coins,
-                    0
-                  )}
+                <div
+                  class="participant-coins"
+                >
+                  🪙 ${coins}
                 </div>
 
               </div>
@@ -680,312 +1126,176 @@
     }
 
     /* =======================================================
-       BUTTON STATE
+       ACTIVITY
+       Gift tidak membuat popup.
+       Hanya ditampilkan secara ringan di activity list.
        ======================================================= */
 
-    function updateButtons() {
-
-      /*
-        SEMUA TOMBOL SELALU AKTIF.
-        Jangan menggunakan disabled karena
-        beberapa layout mobile dapat membuat
-        tombol tidak menerima touch.
-      */
-
-      [
-        btnStart,
-        btnPause,
-        btnReset,
-        btnFinish,
-        btnConnect,
-        saveSettingsButton
-      ]
-        .filter(Boolean)
-        .forEach(button => {
-
-          button.disabled =
-            false;
-
-          button.removeAttribute(
-            "disabled"
-          );
-
-          button.style.pointerEvents =
-            "auto";
-
-          button.style.touchAction =
-            "manipulation";
-
-          button.style.cursor =
-            "pointer";
-
-          button.style.userSelect =
-            "none";
-
-          button.style.webkitTapHighlightColor =
-            "transparent";
-        });
-    }
-
-    /* =======================================================
-       START AUCTION
-       ======================================================= */
-
-    function startAuction() {
-
-      console.log(
-        "[BUTTON] START ditekan"
-      );
+    function addActivity(gift) {
 
       if (
-        state.auction ===
-        "running"
+        !el.activityList ||
+        !gift
       ) {
         return;
       }
 
-      /*
-        Kalau mulai dari idle/finished,
-        timer kembali ke awal.
+      const empty =
+        el.activityList.querySelector(
+          ".empty"
+        );
 
-        Kalau pause,
-        lanjut dari timer terakhir.
-      */
-
-      if (
-        state.auction ===
-        "paused" &&
-        state.timer > 0
-      ) {
-
-        // lanjut timer
-
-      } else {
-
-        state.initialTimer =
-          readInitialTimer();
-
-        state.timer =
-          state.initialTimer;
-
-        state.extraUsed =
-          0;
+      if (empty) {
+        empty.remove();
       }
 
-      state.extraTime =
-        readExtraTime();
+      const item =
+        document.createElement(
+          "div"
+        );
 
-      state.auction =
-        "running";
+      item.className =
+        "activity-item";
 
-      renderTimer();
+      const username =
+        gift.nickname ||
+        gift.username ||
+        "Viewer";
 
-      updateButtons();
+      const giftName =
+        gift.giftName ||
+        "Gift";
 
-      startLocalTimer();
+      const coins =
+        num(
+          gift.coinValue,
+          0
+        );
 
-      socket.emit(
-        "auction:state",
-        {
-          state: "running"
-        }
+      item.innerHTML = `
+        <div class="activity-main">
+
+          <strong>
+            ${escapeHtml(username)}
+          </strong>
+
+          <span>
+            ${escapeHtml(giftName)}
+          </span>
+
+        </div>
+
+        <div class="activity-coins">
+          +${coins} 🪙
+        </div>
+      `;
+
+      el.activityList.prepend(
+        item
       );
 
-      console.log(
-        "[AUCTION] RUNNING"
-      );
+      /*
+       * Maksimal 10 activity.
+       */
+
+      while (
+        el.activityList.children
+          .length > 10
+      ) {
+
+        el.activityList
+          .lastElementChild
+          .remove();
+      }
     }
 
-    /* =======================================================
-       PAUSE AUCTION
-       ======================================================= */
+    function clearActivity() {
 
-    function pauseAuction() {
-
-      console.log(
-        "[BUTTON] PAUSE ditekan"
-      );
-
-      if (
-        state.auction !==
-        "running"
-      ) {
+      if (!el.activityList) {
         return;
       }
 
-      clearTimer();
-
-      state.auction =
-        "paused";
-
-      updateButtons();
-
-      socket.emit(
-        "auction:state",
-        {
-          state: "paused"
-        }
-      );
-
-      console.log(
-        "[AUCTION] PAUSED"
-      );
+      el.activityList.innerHTML = `
+        <p class="empty">
+          Belum ada gift masuk.
+        </p>
+      `;
     }
 
     /* =======================================================
-       RESET AUCTION
+       TIKTOK USERNAME
        ======================================================= */
 
-    function resetAuction() {
+    function cleanUsername(value) {
 
-      console.log(
-        "[BUTTON] RESET ditekan"
-      );
-
-      /*
-        Hentikan timer.
-      */
-
-      clearTimer();
-
-      /*
-        Hapus peserta lokal.
-      */
-
-      state.participants.clear();
-
-      /*
-        Reset timer.
-      */
-
-      state.initialTimer =
-        readInitialTimer();
-
-      state.timer =
-        state.initialTimer;
-
-      /*
-        Reset extra time.
-      */
-
-      state.extraTime =
-        readExtraTime();
-
-      state.extraUsed =
-        0;
-
-      /*
-        Status idle.
-      */
-
-      state.auction =
-        "idle";
-
-      /*
-        Naikkan version lokal.
-      */
-
-      state.version++;
-
-      /*
-        Render langsung.
-      */
-
-      renderTimer();
-
-      renderParticipants();
-
-      updateButtons();
-
-      /*
-        Reset server.
-      */
-
-      socket.emit(
-        "auction:reset"
-      );
-
-      console.log(
-        "[AUCTION] RESET selesai"
-      );
+      return String(value || "")
+        .trim()
+        .replace(
+          /^https?:\/\/(www\.)?tiktok\.com\/@/i,
+          ""
+        )
+        .replace(
+          /^https?:\/\/(www\.)?tiktok\.com\//i,
+          ""
+        )
+        .replace(
+          /^@/,
+          ""
+        )
+        .replace(
+          /\/live.*$/i,
+          ""
+        )
+        .replace(
+          /[/?#].*$/g,
+          ""
+        )
+        .replace(
+          /\s+/g,
+          ""
+        );
     }
 
     /* =======================================================
-       FINISH AUCTION
-       ======================================================= */
-
-    function finishAuction() {
-
-      console.log(
-        "[BUTTON] SELESAI ditekan"
-      );
-
-      /*
-        Hentikan timer.
-      */
-
-      clearTimer();
-
-      /*
-        Status finished.
-      */
-
-      state.auction =
-        "finished";
-
-      /*
-        JANGAN clear participants.
-      */
-
-      renderParticipants();
-
-      updateButtons();
-
-      /*
-        Beritahu server.
-      */
-
-      socket.emit(
-        "auction:state",
-        {
-          state: "finished"
-        }
-      );
-
-      console.log(
-        "[AUCTION] FINISHED - peserta tetap"
-      );
-    }
-
-    /* =======================================================
-       TIKTOK CONNECT
+       CONNECT TIKTOK
        ======================================================= */
 
     function connectTikTok() {
 
-      console.log(
-        "[BUTTON] CONNECT TIKTOK ditekan"
-      );
+      if (!socket) {
 
-      const username =
-        String(
-          usernameInput?.value ||
-          ""
-        )
-          .trim()
-          .replace(
-            /^@/,
-            ""
-          );
-
-      if (!username) {
-
-        console.warn(
-          "[TikTok] Username kosong"
+        showToast(
+          "Socket.IO tidak tersedia"
         );
 
         return;
       }
+
+      const username =
+        cleanUsername(
+          el.username?.value
+        );
+
+      if (!username) {
+
+        showToast(
+          "Masukkan username TikTok"
+        );
+
+        el.username?.focus();
+
+        return;
+      }
+
+      state.connecting =
+        true;
+
+      updateButtons();
+
+      setConnectionText(
+        `Menghubungkan ke @${username}...`,
+        false
+      );
 
       socket.emit(
         "live:connect",
@@ -993,369 +1303,164 @@
           username
         }
       );
-
-      console.log(
-        "[TikTok] Meminta koneksi:",
-        username
-      );
     }
 
     /* =======================================================
-       SAVE SETTINGS
+       DISCONNECT TIKTOK
        ======================================================= */
 
-    const SETTINGS_KEY =
-      "coinAuctionSettings";
+    function disconnectTikTok() {
 
-    function saveSettings() {
-
-      console.log(
-        "[BUTTON] SAVE SETTINGS ditekan"
-      );
-
-      const title =
-        String(
-          titleInput?.value ||
-          ""
-        ).trim();
-
-      const minutes =
-        Math.max(
-          0,
-          Math.floor(
-            num(
-              minutesInput?.value,
-              0
-            )
-          )
-        );
-
-      const seconds =
-        Math.max(
-          0,
-          Math.floor(
-            num(
-              secondsInput?.value,
-              0
-            )
-          )
-        );
-
-      const extraTime =
-        Math.max(
-          0,
-          Math.floor(
-            num(
-              extraInput?.value,
-              0
-            )
-          )
-        );
-
-      const settings = {
-        title,
-        minutes,
-        seconds,
-        extraTime
-      };
-
-      try {
-
-        localStorage.setItem(
-          SETTINGS_KEY,
-          JSON.stringify(
-            settings
-          )
-        );
-
-      } catch (error) {
-
-        console.warn(
-          "[SETTINGS] localStorage gagal",
-          error
-        );
-      }
-
-      state.initialTimer =
-        minutes * 60 +
-        seconds;
-
-      state.extraTime =
-        extraTime;
-
-      state.extraUsed =
-        0;
-
-      if (
-        state.auction === "idle" ||
-        state.auction === "finished"
-      ) {
-
-        state.timer =
-          state.initialTimer;
-      }
-
-      renderTimer();
-
-      const titleDisplay =
-        $([
-          "#auctionTitleDisplay",
-          "#displayAuctionTitle",
-          "#auctionTitleText",
-          "#displayTitle",
-          "[data-role='auction-title']"
-        ]);
-
-      if (
-        titleDisplay &&
-        title
-      ) {
-
-        titleDisplay.textContent =
-          title;
-      }
-
-      if (
-        saveSettingsButton
-      ) {
-
-        const oldText =
-          saveSettingsButton
-            .textContent;
-
-        saveSettingsButton.textContent =
-          "✓ Pengaturan Tersimpan";
-
-        setTimeout(() => {
-
-          saveSettingsButton.textContent =
-            oldText ||
-            "Simpan Pengaturan";
-
-        }, 1500);
-      }
-
-      console.log(
-        "[SETTINGS] Tersimpan:",
-        settings
-      );
-    }
-
-    /* =======================================================
-       LOAD SETTINGS
-       ======================================================= */
-
-    function loadSettings() {
-
-      try {
-
-        const raw =
-          localStorage.getItem(
-            SETTINGS_KEY
-          );
-
-        if (!raw) {
-          return;
-        }
-
-        const settings =
-          JSON.parse(raw);
-
-        if (
-          titleInput &&
-          settings.title !==
-            undefined
-        ) {
-
-          titleInput.value =
-            settings.title;
-        }
-
-        if (
-          minutesInput &&
-          settings.minutes !==
-            undefined
-        ) {
-
-          minutesInput.value =
-            settings.minutes;
-        }
-
-        if (
-          secondsInput &&
-          settings.seconds !==
-            undefined
-        ) {
-
-          secondsInput.value =
-            settings.seconds;
-        }
-
-        if (
-          extraInput &&
-          settings.extraTime !==
-            undefined
-        ) {
-
-          extraInput.value =
-            settings.extraTime;
-        }
-
-      } catch (error) {
-
-        console.warn(
-          "[SETTINGS] Gagal membaca settings",
-          error
-        );
-      }
-    }
-
-    /* =======================================================
-       BUTTON BIND
-       ======================================================= */
-
-    function bindButton(
-      button,
-      handler,
-      name
-    ) {
-
-      if (!button) {
-
-        console.warn(
-          `[BUTTON] ${name} tidak ditemukan`
-        );
-
+      if (!socket) {
         return;
       }
 
-      /*
-        Pastikan tombol benar-benar aktif.
-      */
+      socket.emit(
+        "live:disconnect"
+      );
 
-      button.disabled =
+      state.connected =
         false;
 
-      button.removeAttribute(
-        "disabled"
+      state.connecting =
+        false;
+
+      setConnectionText(
+        "Koneksi TikTok LIVE diputus.",
+        false
       );
 
-      button.style.pointerEvents =
-        "auto";
-
-      button.style.touchAction =
-        "manipulation";
-
-      button.style.cursor =
-        "pointer";
-
-      button.style.userSelect =
-        "none";
-
-      /*
-        Animasi tekan.
-      */
-
-      button.addEventListener(
-        "pointerdown",
-        () => {
-
-          button.style.transform =
-            "scale(.96)";
-
-          button.style.opacity =
-            ".78";
-
-        },
-        {
-          passive: true
-        }
-      );
-
-      function releaseButton() {
-
-        button.style.transform =
-          "scale(1)";
-
-        button.style.opacity =
-          "1";
-      }
-
-      button.addEventListener(
-        "pointerup",
-        releaseButton,
-        {
-          passive: true
-        }
-      );
-
-      button.addEventListener(
-        "pointercancel",
-        releaseButton,
-        {
-          passive: true
-        }
-      );
-
-      button.addEventListener(
-        "pointerleave",
-        releaseButton,
-        {
-          passive: true
-        }
-      );
-
-      /*
-        CLICK.
-      */
-
-      button.addEventListener(
-        "click",
-        event => {
-
-          event.preventDefault();
-
-          event.stopPropagation();
-
-          console.log(
-            `[BUTTON] ${name} CLICK`
-          );
-
-          handler();
-
-        }
-      );
-
-      console.log(
-        `[BUTTON] ${name} berhasil di-bind`
-      );
+      updateButtons();
     }
 
     /* =======================================================
-       SOCKET CONNECT
+       CONNECTION STATUS
        ======================================================= */
+
+    function setConnectionText(
+      message,
+      ok = false
+    ) {
+
+      if (el.connectionLog) {
+
+        el.connectionLog.textContent =
+          `Status: ${
+            message ||
+            "belum terhubung"
+          }`;
+      }
+
+      if (el.statusBadge) {
+
+        el.statusBadge.textContent =
+          ok
+            ? "TERHUBUNG"
+            : "OFFLINE";
+
+        el.statusBadge.classList.toggle(
+          "online",
+          !!ok
+        );
+
+        el.statusBadge.classList.toggle(
+          "connected",
+          !!ok
+        );
+      }
+    }
+
+    /* =======================================================
+       SOCKET.IO EVENTS
+       ======================================================= */
+
+    if (!socket) {
+
+      console.error(
+        "[Auction] Socket.IO tidak ditemukan."
+      );
+
+      showToast(
+        "Socket.IO tidak ditemukan"
+      );
+
+      updateButtons();
+
+      return;
+    }
+
+    /*
+     * SERVER SOCKET CONNECTED
+     */
 
     socket.on(
       "connect",
       () => {
 
         console.log(
-          "[SOCKET] Terhubung:",
+          "[Socket] Terhubung:",
           socket.id
+        );
+
+        state.connecting =
+          false;
+
+        updateButtons();
+      }
+    );
+
+    /*
+     * SERVER SOCKET DISCONNECTED
+     */
+
+    socket.on(
+      "disconnect",
+      () => {
+
+        console.warn(
+          "[Socket] Terputus"
+        );
+
+        state.connected =
+          false;
+
+        state.connecting =
+          false;
+
+        setConnectionText(
+          "Koneksi server terputus.",
+          false
         );
 
         updateButtons();
       }
     );
 
-    socket.on(
-      "disconnect",
-      reason => {
+    /*
+     * SOCKET ERROR
+     */
 
-        console.warn(
-          "[SOCKET] Terputus:",
-          reason
+    socket.on(
+      "connect_error",
+      error => {
+
+        console.error(
+          "[Socket] Error:",
+          error
         );
+
+        state.connected =
+          false;
+
+        state.connecting =
+          false;
+
+        setConnectionText(
+          "Gagal terhubung ke server.",
+          false
+        );
+
+        updateButtons();
       }
     );
 
@@ -1367,171 +1472,250 @@
       "live:status",
       data => {
 
-        console.log(
-          "[TIKTOK STATUS]",
-          data
+        const message =
+          String(
+            data?.message ||
+            "Status TikTok tidak diketahui"
+          );
+
+        const ok =
+          !!data?.ok;
+
+        state.connected =
+          ok;
+
+        state.connecting =
+          false;
+
+        setConnectionText(
+          message,
+          ok
         );
 
-        const statusEl =
-          $([
-            "#connectionStatus",
-            "#liveStatus",
-            "#status",
-            "[data-role='live-status']"
-          ]);
+        updateButtons();
 
-        if (
-          statusEl &&
-          data?.message
-        ) {
-
-          statusEl.textContent =
-            data.message;
-        }
-      }
-    );
-
-    socket.on(
-      "live:error",
-      data => {
-
-        console.error(
-          "[TIKTOK ERROR]",
-          data
+        console.log(
+          "[TikTok]",
+          message
         );
       }
     );
 
     /* =======================================================
-       SERVER AUCTION STATE
+       TIKTOK ERROR
+       ======================================================= */
+
+    socket.on(
+      "live:error",
+      data => {
+
+        const message =
+          String(
+            data?.message ||
+            "Gagal menghubungkan TikTok LIVE."
+          );
+
+        state.connected =
+          false;
+
+        state.connecting =
+          false;
+
+        setConnectionText(
+          message,
+          false
+        );
+
+        updateButtons();
+
+        showToast(
+          message
+        );
+
+        console.error(
+          "[TikTok]",
+          message
+        );
+      }
+    );
+
+    /* =======================================================
+       AUCTION STATE DARI SERVER
        ======================================================= */
 
     socket.on(
       "auction:state",
       data => {
 
-        if (!data) {
-          return;
-        }
-
-        const nextState =
-          data.state ||
+        const next =
+          data?.state ||
           (
-            data.active
+            data?.active
               ? "running"
               : "idle"
           );
 
-        if (
-          data.version !==
-            undefined &&
-          Number(data.version) <
-            Number(state.version)
-        ) {
+        const incomingVersion =
+          Number(
+            data?.version
+          );
 
+        /*
+         * Abaikan state lama.
+         */
+
+        if (
+          Number.isFinite(
+            incomingVersion
+          ) &&
+          incomingVersion <
+            state.version
+        ) {
           return;
         }
 
         if (
-          data.version !==
-            undefined
+          Number.isFinite(
+            incomingVersion
+          )
         ) {
 
           state.version =
-            Number(data.version);
+            incomingVersion;
         }
-
-        state.auction =
-          nextState;
-
-        console.log(
-          "[AUCTION STATE FROM SERVER]",
-          nextState
-        );
 
         if (
-          nextState ===
-          "running"
+          ![
+            "idle",
+            "running",
+            "paused",
+            "finished"
+          ].includes(next)
+        ) {
+          return;
+        }
+
+        const previous =
+          state.auction;
+
+        state.auction =
+          next;
+
+        /*
+         * SERVER RUNNING
+         */
+
+        if (
+          next === "running"
         ) {
 
-          startLocalTimer();
+          /*
+           * Jangan reset timer ketika
+           * server hanya mengirim ulang
+           * state yang sama.
+           */
 
-        } else {
+          if (
+            previous !== "running" &&
+            state.timer <= 0
+          ) {
 
-          clearTimer();
+            state.initialTimer =
+              getMainTime();
+
+            state.timer =
+              state.initialTimer;
+
+            state.extraTime =
+              getExtraTime();
+
+            state.extraUsed =
+              false;
+          }
+
+          startTimer();
         }
+
+        /*
+         * PAUSED / IDLE / FINISHED
+         */
+
+        else {
+
+          stopTimer();
+        }
+
+        setAuctionUI(
+          next
+        );
+
+        renderTimer();
 
         updateButtons();
       }
     );
 
     /* =======================================================
-       SERVER PARTICIPANTS
+       PARTICIPANT SNAPSHOT
        ======================================================= */
 
     socket.on(
       "auction:participants",
       data => {
 
-        if (!data) {
-          return;
-        }
-
-        if (
-          data.version !==
-            undefined &&
-          Number(data.version) <
-            Number(state.version)
-        ) {
-
-          console.log(
-            "[PARTICIPANTS] Snapshot lama diabaikan"
+        const incomingVersion =
+          Number(
+            data?.version
           );
 
+        if (
+          Number.isFinite(
+            incomingVersion
+          ) &&
+          incomingVersion <
+            state.version
+        ) {
           return;
         }
 
         if (
-          data.version !==
-            undefined
+          Number.isFinite(
+            incomingVersion
+          )
         ) {
 
           state.version =
-            Number(data.version);
+            incomingVersion;
         }
 
         state.participants.clear();
 
-        const list =
+        const participants =
           Array.isArray(
-            data.participants
+            data?.participants
           )
             ? data.participants
             : [];
 
-        list.forEach(
-          participant => {
+        for (
+          const participant
+          of participants
+        ) {
 
-            state.participants.set(
-              participantKey(
-                participant
-              ),
+          state.participants.set(
+            participantKey(
               participant
-            );
-          }
-        );
+            ),
+            participant
+          );
+        }
 
         renderParticipants();
-
-        console.log(
-          "[PARTICIPANTS] Update:",
-          state.participants.size
-        );
       }
     );
 
     /* =======================================================
-       LIVE GIFT
+       GIFT EVENT
        ======================================================= */
 
     socket.on(
@@ -1539,105 +1723,307 @@
       gift => {
 
         /*
-          Jangan proses gift kalau
-          lelang tidak running.
-        */
+         * SERVER HANYA MENGIRIM EVENT
+         * SETELAH GIFT DITERIMA.
+         *
+         * Jadi tidak perlu menghitung
+         * coin di frontend lagi.
+         */
 
         if (
-          state.auction !==
-          "running"
+          !gift?.participant
         ) {
-
           return;
         }
 
-        if (
-          gift?.participant
-        ) {
+        const participant =
+          gift.participant;
 
-          state.participants.set(
-            participantKey(
-              gift.participant
-            ),
-            gift.participant
-          );
+        state.participants.set(
+          participantKey(
+            participant
+          ),
+          participant
+        );
 
-          renderParticipants();
-        }
+        renderParticipants();
+
+        /*
+         * Tidak ada popup.
+         */
+
+        addActivity(
+          gift
+        );
 
         console.log(
-          "[GIFT]",
-          gift?.username,
-          "+",
-          gift?.coinValue,
-          "coin"
+          `[GIFT] ${
+            gift.username ||
+            "Viewer"
+          } +${
+            gift.coinValue ||
+            0
+          } coin`
         );
       }
     );
 
     /* =======================================================
-       BIND ALL BUTTONS
+       LIVE EVENT
        ======================================================= */
 
-    bindButton(
-      btnConnect,
-      connectTikTok,
-      "CONNECT"
-    );
+    socket.on(
+      "live:event",
+      event => {
 
-    bindButton(
-      btnStart,
-      startAuction,
-      "START"
-    );
+        /*
+         * Chat sengaja tidak
+         * dibuat popup.
+         */
 
-    bindButton(
-      btnPause,
-      pauseAuction,
-      "PAUSE"
-    );
+        if (
+          event?.type ===
+          "chat"
+        ) {
 
-    bindButton(
-      btnReset,
-      resetAuction,
-      "RESET"
-    );
-
-    bindButton(
-      btnFinish,
-      finishAuction,
-      "FINISH"
-    );
-
-    bindButton(
-      saveSettingsButton,
-      saveSettings,
-      "SAVE SETTINGS"
+          console.log(
+            `[TikTok] Chat @${
+              event.username ||
+              "Viewer"
+            }`
+          );
+        }
+      }
     );
 
     /* =======================================================
-       INITIALIZE
+       BUTTON EVENT DELEGATION
+       =======================================================
+
+       Menggunakan document delegation supaya
+       tombol tetap berfungsi walaupun ada
+       perubahan/re-render elemen.
+       ======================================================= */
+
+    document.addEventListener(
+      "click",
+      event => {
+
+        const button =
+          event.target?.closest?.(
+            "button"
+          );
+
+        if (!button) {
+          return;
+        }
+
+        switch (button.id) {
+
+          case "connectBtn":
+
+            event.preventDefault();
+
+            connectTikTok();
+
+            break;
+
+
+          case "disconnectBtn":
+
+            event.preventDefault();
+
+            disconnectTikTok();
+
+            break;
+
+
+          case "startBtn":
+
+            event.preventDefault();
+
+            startAuction();
+
+            break;
+
+
+          case "pauseBtn":
+
+            event.preventDefault();
+
+            pauseAuction();
+
+            break;
+
+
+          case "resetBtn":
+
+            event.preventDefault();
+
+            resetAuction();
+
+            break;
+
+
+          case "finishBtn":
+
+            event.preventDefault();
+
+            finishAuction(false);
+
+            break;
+
+
+          case "saveSettings":
+
+            event.preventDefault();
+
+            saveSettings();
+
+            break;
+        }
+      }
+    );
+
+    /* =======================================================
+       INPUT SETTINGS
+       ======================================================= */
+
+    [
+      el.minuteInput,
+      el.secondInput,
+      el.extraInput,
+      el.topInput
+    ]
+      .filter(Boolean)
+      .forEach(input => {
+
+        input.addEventListener(
+          "change",
+          () => {
+
+            state.initialTimer =
+              getMainTime();
+
+            state.extraTime =
+              getExtraTime();
+
+            state.top =
+              getTop();
+
+            if (
+              state.auction ===
+                "idle" ||
+              state.auction ===
+                "finished"
+            ) {
+
+              state.timer =
+                state.initialTimer;
+
+              state.extraUsed =
+                false;
+
+              renderTimer();
+            }
+
+            renderParticipants();
+          }
+        );
+      });
+
+    /* =======================================================
+       TITLE INPUT
+       ======================================================= */
+
+    if (el.titleInput) {
+
+      el.titleInput.addEventListener(
+        "input",
+        () => {
+
+          if (el.titleDisplay) {
+
+            el.titleDisplay.textContent =
+              getTitle();
+          }
+        }
+      );
+    }
+
+    /* =======================================================
+       ENTER PADA USERNAME
+       ======================================================= */
+
+    if (el.username) {
+
+      el.username.addEventListener(
+        "keydown",
+        event => {
+
+          if (
+            event.key ===
+            "Enter"
+          ) {
+
+            event.preventDefault();
+
+            connectTikTok();
+          }
+        }
+      );
+    }
+
+    /* =======================================================
+       INITIAL STATE
        ======================================================= */
 
     loadSettings();
 
     state.initialTimer =
-      readInitialTimer();
+      getMainTime();
 
     state.timer =
       state.initialTimer;
 
     state.extraTime =
-      readExtraTime();
+      getExtraTime();
+
+    state.top =
+      getTop();
+
+    state.extraUsed =
+      false;
+
+    if (el.titleDisplay) {
+
+      el.titleDisplay.textContent =
+        getTitle();
+    }
 
     renderTimer();
 
     renderParticipants();
 
+    clearActivity();
+
+    setAuctionUI(
+      "idle"
+    );
+
+    setConnectionText(
+      "Belum terhubung ke TikTok LIVE.",
+      false
+    );
+
     updateButtons();
 
+    console.log(
+      "[Auction] app.js FINAL berhasil dimuat."
+    );
+
     /* =======================================================
-       PUBLIC API
+       COMPATIBILITY API
        ======================================================= */
 
     window.coinAuction = {
@@ -1659,7 +2045,11 @@
       connect:
         connectTikTok,
 
-      saveSettings,
+      disconnect:
+        disconnectTikTok,
+
+      saveSettings:
+        saveSettings,
 
       getState() {
 
@@ -1683,6 +2073,9 @@
           version:
             state.version,
 
+          connected:
+            state.connected,
+
           participants:
             Array.from(
               state.participants.values()
@@ -1690,34 +2083,6 @@
         };
       }
     };
-
-    console.log(
-      "[APP] Coin Auction siap."
-    );
-
-  } // END initAuctionApp
-
-
-  /* =========================================================
-     DOM READY
-     ========================================================= */
-
-  if (
-    document.readyState ===
-    "loading"
-  ) {
-
-    document.addEventListener(
-      "DOMContentLoaded",
-      initAuctionApp,
-      {
-        once: true
-      }
-    );
-
-  } else {
-
-    initAuctionApp();
   }
 
 })();

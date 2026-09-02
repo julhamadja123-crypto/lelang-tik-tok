@@ -191,3 +191,18 @@ body{background:#09090b}
   .auction-board-dashboard .auction-title-card{min-height:170px!important}
   .auction-board-dashboard .auction-title-card h2{min-height:105px!important}
 }
+/* =========================================================
+   EXTRA TIME
+   TIMER BERUBAH MERAH
+   ========================================================= */
+
+#timer.extra-time-active {
+  color: #ff4050 !important;
+  text-shadow:
+    0 0 6px rgba(255, 64, 80, 0.35),
+    0 0 14px rgba(255, 64, 80, 0.25) !important;
+
+  transition:
+    color 0.2s ease,
+    text-shadow 0.2s ease;
+}

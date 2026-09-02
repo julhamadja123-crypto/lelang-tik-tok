@@ -135,6 +135,11 @@
       extraInput: document.getElementById("extraTimeInput"),
       topInput: document.getElementById("topInput"),
 
+      drawTimeInput: document.getElementById("drawTimeInput"),
+      drawCustomInput: document.getElementById("drawCustomInput"),
+      drawCustomWrap: document.getElementById("drawCustomWrap"),
+      drawTimeDisplay: document.getElementById("drawTimeDisplay"),
+
       save: document.getElementById("saveSettings"),
 
       participantCount: document.getElementById("participantCount"),
@@ -164,6 +169,10 @@
 
       extraTime: 0,
       extraUsed: false,
+
+      drawTime: 20,
+      drawActive: false,
+      drawDeadline: null,
 
       top: 5,
 
@@ -283,6 +292,40 @@
       );
     }
 
+    function getDrawTime() {
+
+      const mode =
+        String(el.drawTimeInput?.value || "20");
+
+      if (mode === "custom") {
+        return clampInt(
+          el.drawCustomInput?.value ?? 20,
+          1,
+          3600
+        );
+      }
+
+      return clampInt(mode, 1, 3600);
+    }
+
+    function updateDrawTimeSettingsUI() {
+
+      const custom =
+        String(el.drawTimeInput?.value || "20") === "custom";
+
+      if (el.drawCustomWrap) {
+        el.drawCustomWrap.style.display =
+          custom ? "flex" : "none";
+      }
+
+      state.drawTime = getDrawTime();
+
+      if (el.drawTimeDisplay) {
+        el.drawTimeDisplay.textContent =
+          `${state.drawTime} DETIK`;
+      }
+    }
+
     function loadSettings() {
 
       try {
@@ -368,6 +411,24 @@
           }
         }
 
+        if (el.drawTimeInput) {
+          const savedDraw = clampInt(
+            saved.drawTime ?? 20,
+            1,
+            3600
+          );
+          const standard = [10, 20, 30];
+          if (standard.includes(savedDraw)) {
+            el.drawTimeInput.value = String(savedDraw);
+          } else {
+            el.drawTimeInput.value = "custom";
+            if (el.drawCustomInput) {
+              el.drawCustomInput.value = String(savedDraw);
+            }
+          }
+          updateDrawTimeSettingsUI();
+        }
+
       } catch (error) {
 
         console.warn(
@@ -384,7 +445,8 @@
         minutes: getMinutes(),
         seconds: getSeconds(),
         extra: getExtraTime(),
-        top: getTop()
+        top: getTop(),
+        drawTime: getDrawTime()
       };
 
       try {
@@ -411,6 +473,11 @@
       state.top =
         getTop();
 
+      state.drawTime =
+        getDrawTime();
+
+      updateDrawTimeSettingsUI();
+
       if (
         state.auction === "idle" ||
         state.auction === "finished"
@@ -424,6 +491,10 @@
 
         state.extraUsed =
           false;
+
+        state.drawActive = false;
+        state.drawDeadline = null;
+        state.drawTime = getDrawTime();
 
         removeExtraTimeColor();
 
@@ -587,151 +658,240 @@
 
       stopTimer();
 
-      if (
-        state.auction !==
-        "running"
-      ) {
+      if (state.auction !== "running") {
         return;
       }
 
       /*
-       * Gunakan deadline absolut, bukan timer-- setiap 1 detik.
-       * Ini membuat countdown tetap akurat walaupun browser/HP
-       * sempat menunda callback JavaScript.
+       * Jangan pernah membuat deadline baru hanya karena
+       * startTimer() dipanggil ulang. Deadline hanya dibuat
+       * saat timer benar-benar mulai / resume.
        */
-      if (
-        !Number.isFinite(state.timerDeadline) ||
-        state.timerDeadline <= 0
-      ) {
+      if (!Number.isFinite(state.timerDeadline) || state.timerDeadline <= 0) {
+        if (state.timer <= 0) {
+          timerFinished();
+          return;
+        }
+
         state.timerDeadline =
-          Date.now() +
-          Math.max(0, state.timer) * 1000;
+          Date.now() + Math.max(0, state.timer) * 1000;
       }
 
       applyExtraTimeColor();
 
       const tick = () => {
 
-        if (
-          state.auction !==
-          "running"
-        ) {
+        if (state.auction !== "running") {
+          return;
+        }
+
+        if (!Number.isFinite(state.timerDeadline)) {
+          stopTimer();
           return;
         }
 
         const remainingMs =
-          state.timerDeadline -
-          Date.now();
+          state.timerDeadline - Date.now();
 
-        const remaining =
-          Math.max(
-            0,
-            Math.ceil(
-              remainingMs / 1000
-            )
-          );
-
-        if (
-          remaining !==
-          state.timer
-        ) {
-          state.timer =
-            remaining;
-
-          renderTimer();
+        /*
+         * Jangan render 00:00 sebelum keputusan akhir dibuat.
+         * Ini mencegah kedipan 00:00 dan lompatan palsu.
+         */
+        if (remainingMs <= 0) {
+          stopTimer();
+          state.timer = 0;
+          timerFinished();
+          return;
         }
 
-        if (
-          remaining <= 0
-        ) {
-          stopTimer();
+        const remaining = Math.max(
+          1,
+          Math.ceil(remainingMs / 1000)
+        );
 
-          state.timer =
-            0;
-
+        if (remaining !== state.timer) {
+          state.timer = remaining;
           renderTimer();
-
-          timerFinished();
         }
       };
 
       tick();
 
-      if (
-        state.auction ===
-        "running"
-      ) {
-        state.timerInterval =
-          setInterval(
-            tick,
-            100
-          );
+      if (state.auction === "running") {
+        state.timerInterval = setInterval(tick, 100);
       }
+    }
+
+    function getTopTwoParticipants() {
+
+      return Array.from(state.participants.values())
+        .sort((a, b) => {
+          const coinDiff = num(b.coins) - num(a.coins);
+          if (coinDiff !== 0) return coinDiff;
+          return num(a.joinedAt) - num(b.joinedAt);
+        })
+        .slice(0, 2);
+    }
+
+    function isTopTwoTied() {
+
+      const topTwo = getTopTwoParticipants();
+
+      return (
+        topTwo.length >= 2 &&
+        num(topTwo[0].coins, 0) === num(topTwo[1].coins, 0)
+      );
+    }
+
+    function resumeDrawTime() {
+
+      if (state.auction !== "running" || !state.drawActive || state.timer <= 0) {
+        return;
+      }
+
+      state.drawDeadline = Date.now() + state.timer * 1000;
+
+      if (el.timer) {
+        el.timer.classList.remove("extra-time-active");
+        el.timer.classList.add("draw-time-active");
+      }
+
+      if (el.timerNote) {
+        el.timerNote.textContent =
+          "DRAW TIME — Coin peringkat 1 & 2 sama";
+      }
+
+      stopTimer();
+
+      const tick = () => {
+        if (state.auction !== "running" || !state.drawActive) return;
+
+        const remainingMs = state.drawDeadline - Date.now();
+        if (remainingMs <= 0) {
+          stopTimer();
+          state.timer = 0;
+          state.drawActive = false;
+          state.drawDeadline = null;
+          if (el.timer) el.timer.classList.remove("draw-time-active");
+          finishAuction(true);
+          return;
+        }
+
+        const remaining = Math.max(1, Math.ceil(remainingMs / 1000));
+        if (remaining !== state.timer) {
+          state.timer = remaining;
+          renderTimer();
+        }
+      };
+
+      tick();
+      state.timerInterval = setInterval(tick, 100);
+    }
+
+    function startDrawTime() {
+
+      const duration = getDrawTime();
+
+      if (duration <= 0) {
+        finishAuction(true);
+        return;
+      }
+
+      state.drawTime = duration;
+      state.drawActive = true;
+      state.drawDeadline = Date.now() + duration * 1000;
+      state.timer = duration;
+      state.timerDeadline = null;
+
+      if (el.timer) {
+        el.timer.classList.remove("extra-time-active");
+        el.timer.classList.add("draw-time-active");
+      }
+
+      if (el.extraStatus) {
+        el.extraStatus.textContent =
+          `Draw Time aktif: ${formatTime(duration)}`;
+        el.extraStatus.classList.remove("active");
+      }
+
+      if (el.timerNote) {
+        el.timerNote.textContent =
+          "DRAW TIME — Coin peringkat 1 & 2 sama";
+        el.timerNote.classList.remove("finished-note");
+      }
+
+      renderTimer();
+      showToast(`Draw Time dimulai: ${duration} detik`);
+
+      stopTimer();
+
+      const tick = () => {
+        if (state.auction !== "running" || !state.drawActive) {
+          return;
+        }
+
+        const remainingMs = state.drawDeadline - Date.now();
+
+        if (remainingMs <= 0) {
+          stopTimer();
+          state.timer = 0;
+          state.drawActive = false;
+          state.drawDeadline = null;
+          if (el.timer) el.timer.classList.remove("draw-time-active");
+          finishAuction(true);
+          return;
+        }
+
+        const remaining = Math.max(1, Math.ceil(remainingMs / 1000));
+
+        if (remaining !== state.timer) {
+          state.timer = remaining;
+          renderTimer();
+        }
+      };
+
+      tick();
+      state.timerInterval = setInterval(tick, 100);
     }
 
     function timerFinished() {
 
-      if (
-        state.auction !==
-        "running"
-      ) {
+      if (state.auction !== "running") {
         return;
       }
 
-      /* =====================================================
-         EXTRA TIME AKTIF
-         ===================================================== */
+      /* Main timer -> Extra Time */
+      if (!state.extraUsed && state.extraTime > 0) {
 
-      if (
-        !state.extraUsed &&
-        state.extraTime > 0
-      ) {
-
-        state.extraUsed =
-          true;
-
-        state.timer =
-          state.extraTime;
-
+        state.extraUsed = true;
+        state.timer = state.extraTime;
         state.timerDeadline =
-          Date.now() +
-          Math.max(0, state.extraTime) * 1000;
+          Date.now() + Math.max(0, state.extraTime) * 1000;
 
         if (el.extraStatus) {
-
           el.extraStatus.textContent =
-            `Extra Time aktif: ${formatTime(
-              state.extraTime
-            )}`;
+            `Extra Time aktif: ${formatTime(state.extraTime)}`;
         }
 
-        /*
-         * LANGSUNG UBAH TIMER MENJADI MERAH
-         */
-
         if (el.timer) {
-
-          el.timer.classList.add(
-            "extra-time-active"
-          );
+          el.timer.classList.remove("draw-time-active");
+          el.timer.classList.add("extra-time-active");
         }
 
         renderTimer();
-
-        showToast(
-          "Extra Time dimulai"
-        );
-
+        showToast("Extra Time dimulai");
+        startTimer();
         return;
       }
 
-      /* =====================================================
-         WAKTU BENAR-BENAR HABIS
-         ===================================================== */
-
+      /* Setelah Extra Time selesai, cek seri peringkat 1 & 2. */
       state.timer = 0;
       state.timerDeadline = null;
-      renderTimer();
+
+      if (isTopTwoTied()) {
+        startDrawTime();
+        return;
+      }
 
       finishAuction(true);
     }
@@ -826,7 +986,11 @@
 
       updateButtons();
 
-      startTimer();
+      if (state.drawActive) {
+        resumeDrawTime();
+      } else {
+        startTimer();
+      }
 
       sendAuctionState(
         "running"
@@ -835,55 +999,37 @@
 
     function pauseAuction() {
 
-      if (
-        state.auction !==
-        "running"
-      ) {
+      if (state.auction !== "running") {
         return;
       }
 
-      /*
-       * Simpan sisa waktu aktual sebelum pause.
-       */
-      if (
-        Number.isFinite(state.timerDeadline)
-      ) {
-        state.timer =
-          Math.max(
-            0,
-            Math.ceil(
-              (state.timerDeadline - Date.now()) / 1000
-            )
-          );
+      if (state.drawActive && Number.isFinite(state.drawDeadline)) {
+        state.timer = Math.max(
+          0,
+          Math.ceil((state.drawDeadline - Date.now()) / 1000)
+        );
+        state.drawDeadline = null;
+        stopTimer();
+      } else if (Number.isFinite(state.timerDeadline)) {
+        state.timer = Math.max(
+          0,
+          Math.ceil((state.timerDeadline - Date.now()) / 1000)
+        );
+        state.timerDeadline = null;
+        stopTimer();
+      } else {
+        stopTimer();
       }
 
-      stopTimer();
-
-      state.timerDeadline =
-        null;
-
       renderTimer();
-
-      state.auction =
-        "paused";
-
-      /*
-       * Saat pause, warna Extra Time
-       * tetap merah jika memang sedang
-       * berada di Extra Time.
-       */
-
+      state.auction = "paused";
       applyExtraTimeColor();
-
-      setAuctionUI(
-        "paused"
-      );
-
+      if (el.timer && state.drawActive) {
+        el.timer.classList.add("draw-time-active");
+      }
+      setAuctionUI("paused");
       updateButtons();
-
-      sendAuctionState(
-        "paused"
-      );
+      sendAuctionState("paused");
     }
 
     function resetAuction() {
@@ -904,6 +1050,10 @@
 
       state.extraUsed =
         false;
+
+      state.drawActive = false;
+      state.drawDeadline = null;
+      state.drawTime = getDrawTime();
 
       state.timer =
         state.initialTimer;
@@ -970,6 +1120,10 @@
 
       state.timer = 0;
       state.timerDeadline = null;
+      state.drawActive = false;
+      state.drawDeadline = null;
+
+      if (el.timer) el.timer.classList.remove("draw-time-active");
 
       state.auction =
         "finished";
@@ -1095,7 +1249,9 @@
         el.timerNote.textContent =
           next === "finished"
             ? "FINISHED"
-            : (labels[next] || "");
+            : (state.drawActive && next === "running"
+                ? "DRAW TIME — Coin peringkat 1 & 2 sama"
+                : (labels[next] || ""));
 
         el.timerNote.classList.toggle(
           "finished-note",
@@ -1815,7 +1971,21 @@
             removeExtraTimeColor();
           }
 
-          startTimer();
+          /*
+           * Event running dari Socket.IO tidak boleh membuat
+           * deadline baru jika timer lokal sudah berjalan.
+           * Ini mencegah timer meloncat / reset mendadak.
+           */
+          if (previous !== "running" || !state.timerInterval) {
+            if (state.drawActive) {
+              resumeDrawTime();
+            } else {
+              if (!Number.isFinite(state.timerDeadline) && state.timer > 0) {
+                state.timerDeadline = Date.now() + state.timer * 1000;
+              }
+              startTimer();
+            }
+          }
 
         } else {
 
@@ -1823,6 +1993,10 @@
 
           state.timerDeadline =
             null;
+
+          if (next !== "paused") {
+            state.drawDeadline = null;
+          }
 
           /*
            * FINISH / IDLE
@@ -2062,7 +2236,9 @@
       el.minuteInput,
       el.secondInput,
       el.extraInput,
-      el.topInput
+      el.topInput,
+      el.drawTimeInput,
+      el.drawCustomInput
     ]
       .filter(Boolean)
       .forEach(input => {
@@ -2079,6 +2255,11 @@
 
             state.top =
               getTop();
+
+            state.drawTime =
+              getDrawTime();
+
+            updateDrawTimeSettingsUI();
 
             if (
               state.auction ===
@@ -2163,6 +2344,11 @@
     state.top =
       getTop();
 
+    state.drawTime =
+      getDrawTime();
+
+    updateDrawTimeSettingsUI();
+
     state.extraUsed =
       false;
 
@@ -2242,6 +2428,12 @@
 
           extraUsed:
             state.extraUsed,
+
+          drawTime:
+            state.drawTime,
+
+          drawActive:
+            state.drawActive,
 
           version:
             state.version,

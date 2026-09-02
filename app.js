@@ -1,19 +1,22 @@
 /* =========================================================
-   COIN AUCTION DASHBOARD V4
-   FRONTEND APP.JS
+   COIN AUCTION DASHBOARD V5
+   FRONTEND APP.JS - FINAL
 
    FITUR:
    - Coin gift 1:1
    - Tidak ada perkalian x2
    - Foto profil TikTok diprioritaskan
-   - Kartu peserta lebih kecil
-   - Lebih banyak peserta terlihat
+   - Kartu peserta compact
+   - @viewer tidak ditampilkan
+   - Timer utama warna putih
+   - Waktu tambahan bisa di-custom
+   - Waktu tambahan berubah MERAH saat aktif
+   - Draw Time tetap KUNING
    - Compatible dengan index.html
    - Compatible dengan server.js + Socket.IO
    ========================================================= */
 
 "use strict";
-
 
 /* =========================================================
    STATE
@@ -46,69 +49,94 @@ let socket = null;
 
 let liveEventCount = 0;
 
+/* =========================================================
+   WAKTU TAMBAHAN
+   ========================================================= */
+
+let extraTime = 30;
+let extraRemaining = 0;
+let extraActive = false;
+
 
 /* =========================================================
-   DOM HELPER
+   DOM
    ========================================================= */
 
 const $ = (id) => document.getElementById(id);
 
 
 /* =========================================================
-   COMPACT PARTICIPANT STYLE
-   =========================================================
-
-   Tidak perlu mengubah index.html.
-   CSS dipasang langsung dari app.js.
+   CSS TAMBAHAN
    ========================================================= */
 
-(function injectCompactStyle() {
+(function injectStyle() {
 
-  if (document.getElementById("auctionCompactStyle")) {
-    return;
-  }
+  if ($("auctionCompactStyle")) return;
 
   const style = document.createElement("style");
 
   style.id = "auctionCompactStyle";
 
   style.textContent = `
-    /* ================================
-       PESERTA LELANG - COMPACT
-       ================================ */
+    /* ==========================================
+       TIMER UTAMA
+       ========================================== */
+
+    #timer {
+      color: #fff !important;
+      transition: color .2s ease;
+    }
+
+    /* ==========================================
+       TIMER TAMBAHAN
+       ========================================== */
+
+    #timer.extra-active,
+    .extra-active,
+    .timer-extra-active {
+      color: #ff3030 !important;
+    }
+
+    /* ==========================================
+       DRAW TIME
+       ========================================== */
+
+    .draw-time-active,
+    #timer.draw-time-active {
+      color: #ffd43b !important;
+    }
+
+    /* ==========================================
+       PESERTA
+       ========================================== */
 
     #rankingList {
       display: flex !important;
       flex-direction: column !important;
-      gap: 8px !important;
+      gap: 7px !important;
     }
 
     #rankingList .rank-card,
     #rankingList .rank-box {
       position: relative !important;
-
       min-height: 0 !important;
       height: auto !important;
-
-      padding: 9px 12px !important;
+      padding: 8px 10px !important;
       margin: 0 !important;
-
       border-radius: 12px !important;
 
       display: grid !important;
 
       grid-template-columns:
-        34px
-        38px
+        30px
+        36px
         minmax(0, 1fr)
         auto !important;
 
       align-items: center !important;
-
-      column-gap: 8px !important;
+      column-gap: 7px !important;
     }
 
-    /* bagian atas kartu */
     #rankingList .box-top {
       display: contents !important;
     }
@@ -116,32 +144,30 @@ const $ = (id) => document.getElementById(id);
     #rankingList .rank-no {
       grid-column: 1 !important;
 
-      width: 32px !important;
-      height: 32px !important;
+      width: 28px !important;
+      height: 28px !important;
 
       display: flex !important;
       align-items: center !important;
       justify-content: center !important;
 
-      font-size: 17px !important;
+      font-size: 15px !important;
     }
 
     #rankingList .box-rank {
       display: none !important;
     }
 
-    /* avatar */
     #rankingList .user-avatar {
       grid-column: 2 !important;
 
-      width: 38px !important;
-      height: 38px !important;
+      width: 36px !important;
+      height: 36px !important;
 
-      min-width: 38px !important;
-      min-height: 38px !important;
+      min-width: 36px !important;
+      min-height: 36px !important;
 
       border-radius: 50% !important;
-
       overflow: hidden !important;
 
       display: flex !important;
@@ -149,48 +175,42 @@ const $ = (id) => document.getElementById(id);
       justify-content: center !important;
 
       background: #25252b !important;
-
-      border: 1px solid rgba(255,255,255,.18) !important;
+      border: 1px solid rgba(255,255,255,.16) !important;
     }
 
     #rankingList .user-avatar img {
       width: 100% !important;
       height: 100% !important;
-
       object-fit: cover !important;
-
-      display: block !important;
+      display: block;
     }
 
     #rankingList .avatar-fallback {
       width: 100% !important;
       height: 100% !important;
 
-      display: flex !important;
-      align-items: center !important;
-      justify-content: center !important;
+      display: flex;
+      align-items: center;
+      justify-content: center;
 
-      font-size: 17px !important;
+      font-size: 15px !important;
       font-weight: 700 !important;
     }
 
-    /* nama + username */
     #rankingList .rank-info {
       grid-column: 3 !important;
-
       min-width: 0 !important;
 
       display: flex !important;
       flex-direction: column !important;
-
       gap: 1px !important;
     }
 
     #rankingList .rank-info strong {
       display: block !important;
 
-      font-size: 14px !important;
-      line-height: 18px !important;
+      font-size: 13px !important;
+      line-height: 17px !important;
 
       white-space: nowrap !important;
       overflow: hidden !important;
@@ -198,134 +218,89 @@ const $ = (id) => document.getElementById(id);
     }
 
     #rankingList .rank-info span {
-      display: block !important;
-
-      font-size: 10px !important;
-      line-height: 13px !important;
-
-      opacity: .65 !important;
-
-      white-space: nowrap !important;
-      overflow: hidden !important;
-      text-overflow: ellipsis !important;
+      display: none !important;
     }
 
-    /* coin */
     #rankingList .coin {
       grid-column: 4 !important;
 
       display: flex !important;
-
       align-items: center !important;
       justify-content: flex-end !important;
 
-      gap: 4px !important;
-
+      gap: 3px !important;
       white-space: nowrap !important;
     }
 
     #rankingList .coin-icon {
-      font-size: 14px !important;
+      font-size: 13px !important;
     }
 
     #rankingList .coin strong {
-      font-size: 15px !important;
-      line-height: 18px !important;
+      font-size: 14px !important;
+      line-height: 17px !important;
     }
 
-    /* kartu kosong */
     #rankingList .empty-box {
       display: block !important;
-      padding: 12px !important;
+      padding: 11px !important;
     }
 
-    /* draw */
-    #rankingList .draw-box {
-      transform: none !important;
+    /* ==========================================
+       EXTRA TIME DISPLAY
+       ========================================== */
+
+    .extra-time-display {
+      transition: color .2s ease;
     }
 
-
-    /* ================================
-       ACTIVITY JUGA DIPERKECIL
-       ================================ */
-
-    #activityList .activity {
-      min-height: 0 !important;
-
-      padding: 7px 8px !important;
-
-      gap: 7px !important;
+    .extra-time-display.active {
+      color: #ff3030 !important;
+      font-weight: 800 !important;
     }
 
-    #activityList .activity-avatar {
-      width: 32px !important;
-      height: 32px !important;
-
-      min-width: 32px !important;
-      min-height: 32px !important;
-    }
-
-    #activityList .activity strong {
-      font-size: 12px !important;
-    }
-
-    #activityList .activity span {
-      font-size: 10px !important;
-    }
-
-    #activityList .event-coin {
-      font-size: 12px !important;
-    }
-
-
-    /* ================================
+    /* ==========================================
        MOBILE
-       ================================ */
+       ========================================== */
 
-    @media (max-width: 480px) {
+    @media (max-width:480px) {
 
       #rankingList {
-        gap: 6px !important;
+        gap: 5px !important;
       }
 
       #rankingList .rank-card,
       #rankingList .rank-box {
-        padding: 7px 9px !important;
+        padding: 6px 8px !important;
 
         grid-template-columns:
-          30px
-          34px
-          minmax(0, 1fr)
+          27px
+          33px
+          minmax(0,1fr)
           auto !important;
 
         column-gap: 6px !important;
       }
 
       #rankingList .rank-no {
-        width: 28px !important;
-        height: 28px !important;
-
-        font-size: 15px !important;
+        width: 26px !important;
+        height: 26px !important;
+        font-size: 14px !important;
       }
 
       #rankingList .user-avatar {
-        width: 34px !important;
-        height: 34px !important;
-
-        min-width: 34px !important;
-        min-height: 34px !important;
+        width: 33px !important;
+        height: 33px !important;
+        min-width: 33px !important;
+        min-height: 33px !important;
       }
 
       #rankingList .rank-info strong {
-        font-size: 13px !important;
-      }
-
-      #rankingList .rank-info span {
-        font-size: 9px !important;
+        font-size: 12px !important;
       }
 
       #rankingList .coin strong {
-        font-size: 14px !important;
+        font-size: 13px !important;
       }
     }
   `;
@@ -336,26 +311,26 @@ const $ = (id) => document.getElementById(id);
 
 
 /* =========================================================
-   TIME
+   FORMAT TIME
    ========================================================= */
 
 function formatTime(sec) {
 
-  sec = Math.max(
-    0,
-    Number(sec) || 0
-  );
+  sec = Math.max(0, Number(sec) || 0);
 
-  return `${String(
-    Math.floor(sec / 60)
-  ).padStart(2, "0")}:${String(
-    sec % 60
-  ).padStart(2, "0")}`;
+  const minutes = Math.floor(sec / 60);
+  const seconds = sec % 60;
+
+  return (
+    String(minutes).padStart(2, "0") +
+    ":" +
+    String(seconds).padStart(2, "0")
+  );
 }
 
 
 /* =========================================================
-   HTML ESCAPE
+   ESCAPE HTML
    ========================================================= */
 
 function esc(value) {
@@ -373,7 +348,7 @@ function esc(value) {
 
 
 /* =========================================================
-   AVATAR INITIAL
+   INITIAL
    ========================================================= */
 
 function getInitial(name) {
@@ -381,13 +356,9 @@ function getInitial(name) {
   const text =
     String(name || "Viewer").trim();
 
-  if (!text) {
-    return "?";
-  }
-
   return text
-    .charAt(0)
-    .toUpperCase();
+    ? text.charAt(0).toUpperCase()
+    : "?";
 }
 
 
@@ -416,34 +387,38 @@ function normalizeUserId(value) {
 
 function getUserKey(data) {
 
-  const userId =
+  const id =
     normalizeUserId(
       data?.userId ||
-      data?.user_id
+      data?.user_id ||
+      data?.uid
     );
 
-  if (userId) {
-    return `id:${userId}`;
+  if (id) {
+    return "id:" + id;
   }
 
   const username =
     normalizeUserId(
       data?.username ||
+      data?.uniqueId ||
+      data?.unique_id ||
       data?.uniqueId
     );
 
   if (username) {
-    return `username:${username}`;
+    return "username:" + username;
   }
 
   const nickname =
     normalizeUserId(
       data?.nickname ||
-      data?.name
+      data?.name ||
+      data?.displayName
     );
 
   if (nickname) {
-    return `name:${nickname}`;
+    return "name:" + nickname;
   }
 
   return (
@@ -456,135 +431,7 @@ function getUserKey(data) {
 
 
 /* =========================================================
-   SORT PARTICIPANTS
-   ========================================================= */
-
-function sortedUsers() {
-
-  return [...users].sort(
-    (a, b) => {
-
-      if (b.coins !== a.coins) {
-        return b.coins - a.coins;
-      }
-
-      return String(
-        a.name || ""
-      ).localeCompare(
-        String(b.name || ""),
-        "id"
-      );
-
-    }
-  );
-
-}
-
-
-/* =========================================================
-   DRAW CHECK
-   ========================================================= */
-
-function leadersAreTied() {
-
-  const sorted =
-    sortedUsers();
-
-  return (
-    sorted.length >= 2 &&
-    sorted[0].coins > 0 &&
-    sorted[0].coins ===
-      sorted[1].coins
-  );
-
-}
-
-
-function hasClearLeader() {
-
-  const sorted =
-    sortedUsers();
-
-  return (
-    sorted.length >= 1 &&
-    (
-      sorted.length === 1 ||
-      sorted[0].coins >
-        sorted[1].coins
-    )
-  );
-
-}
-
-
-/* =========================================================
-   AUCTION STATE TO SERVER
-   ========================================================= */
-
-function syncAuctionState() {
-
-  if (
-    !socket ||
-    !socket.connected
-  ) {
-    return;
-  }
-
-  socket.emit(
-    "auction:state",
-    {
-      active:
-        running &&
-        !auctionFinished
-    }
-  );
-
-}
-
-
-/* =========================================================
-   TOAST
-   ========================================================= */
-
-function toast(message) {
-
-  const el =
-    $("toast");
-
-  if (!el) {
-    return;
-  }
-
-  el.textContent =
-    message;
-
-  el.classList.add(
-    "show"
-  );
-
-  clearTimeout(
-    window.__auctionToastTimer
-  );
-
-  window.__auctionToastTimer =
-    setTimeout(
-      () => {
-        el.classList.remove(
-          "show"
-        );
-      },
-      2200
-    );
-
-}
-
-
-/* =========================================================
-   GET AVATAR
-   =========================================================
-
-   Mencoba semua nama field avatar yang umum
-   dikirim server TikTok.
+   AVATAR
    ========================================================= */
 
 function getAvatar(data) {
@@ -597,10 +444,9 @@ function getAvatar(data) {
     data?.avatarMedium ||
     data?.avatarThumb ||
     data?.profilePicUrl ||
-    data?.profilePictureUrl ||
+    data?.profile_picture_url ||
     ""
   );
-
 }
 
 
@@ -615,6 +461,7 @@ function avatarHTML(
 
   const name =
     user?.name ||
+    user?.nickname ||
     "Viewer";
 
   const avatar =
@@ -626,11 +473,17 @@ function avatarHTML(
       <div class="${className}">
         <img
           src="${esc(avatar)}"
-          alt="Foto profil ${esc(name)}"
+          alt=""
           referrerpolicy="no-referrer"
           loading="lazy"
-          onload="this.style.display='block';this.nextElementSibling.style.display='none';"
-          onerror="this.style.display='none';this.nextElementSibling.style.display='flex';"
+          onload="
+            this.style.display='block';
+            this.nextElementSibling.style.display='none';
+          "
+          onerror="
+            this.style.display='none';
+            this.nextElementSibling.style.display='flex';
+          "
         >
 
         <span
@@ -651,7 +504,457 @@ function avatarHTML(
       </span>
     </div>
   `;
+}
 
+
+/* =========================================================
+   SORT USER
+   ========================================================= */
+
+function sortedUsers() {
+
+  return [...users].sort(
+    (a, b) => {
+
+      const coinA =
+        Number(a.coins || 0);
+
+      const coinB =
+        Number(b.coins || 0);
+
+      if (coinB !== coinA) {
+        return coinB - coinA;
+      }
+
+      return String(
+        a.name || ""
+      ).localeCompare(
+        String(b.name || ""),
+        "id"
+      );
+
+    }
+  );
+}
+
+
+/* =========================================================
+   DRAW CHECK
+   ========================================================= */
+
+function leadersAreTied() {
+
+  const sorted =
+    sortedUsers();
+
+  return (
+    sorted.length >= 2 &&
+    Number(sorted[0].coins || 0) > 0 &&
+    Number(sorted[0].coins || 0) ===
+      Number(sorted[1].coins || 0)
+  );
+}
+
+
+function hasClearLeader() {
+
+  const sorted =
+    sortedUsers();
+
+  return (
+    sorted.length >= 1 &&
+    Number(sorted[0].coins || 0) > 0 &&
+    (
+      sorted.length === 1 ||
+      Number(sorted[0].coins || 0) >
+        Number(sorted[1].coins || 0)
+    )
+  );
+}
+
+
+/* =========================================================
+   TOAST
+   ========================================================= */
+
+function toast(message) {
+
+  const el = $("toast");
+
+  if (!el) return;
+
+  el.textContent = message;
+
+  el.classList.add("show");
+
+  clearTimeout(
+    window.__auctionToastTimer
+  );
+
+  window.__auctionToastTimer =
+    setTimeout(
+      () => {
+        el.classList.remove("show");
+      },
+      2200
+    );
+}
+
+
+/* =========================================================
+   UPDATE TIMER COLOR
+   ========================================================= */
+
+function updateTimerColor() {
+
+  const timer =
+    $("timer");
+
+  if (!timer) return;
+
+  timer.classList.remove(
+    "extra-active",
+    "draw-time-active"
+  );
+
+  if (inDraw) {
+
+    timer.classList.add(
+      "draw-time-active"
+    );
+
+    timer.style.color =
+      "#ffd43b";
+
+    return;
+  }
+
+  if (extraActive) {
+
+    timer.classList.add(
+      "extra-active"
+    );
+
+    timer.style.color =
+      "#ff3030";
+
+    return;
+  }
+
+  timer.style.color =
+    "#ffffff";
+}
+
+
+/* =========================================================
+   FIND INPUT
+   ========================================================= */
+
+function findInput(
+  ids,
+  fallback = null
+) {
+
+  for (const id of ids) {
+
+    const el = $(id);
+
+    if (el) return el;
+  }
+
+  return fallback;
+}
+
+
+/* =========================================================
+   READ CUSTOM EXTRA TIME
+   ========================================================= */
+
+function readExtraTime() {
+
+  const input =
+    findInput([
+      "extraTime",
+      "extraTimeInput",
+      "additionalTime",
+      "tambahanTime",
+      "auctionExtraTime"
+    ]);
+
+  if (!input) {
+    return;
+  }
+
+  const value =
+    Number(input.value);
+
+  if (
+    Number.isFinite(value) &&
+    value >= 0
+  ) {
+
+    extraTime =
+      Math.floor(value);
+
+  }
+}
+
+
+/* =========================================================
+   SAVE CUSTOM TIME TO INPUT
+   ========================================================= */
+
+function writeExtraTime() {
+
+  const input =
+    findInput([
+      "extraTime",
+      "extraTimeInput",
+      "additionalTime",
+      "tambahanTime",
+      "auctionExtraTime"
+    ]);
+
+  if (input) {
+    input.value =
+      extraTime;
+  }
+}
+
+
+/* =========================================================
+   START EXTRA TIME
+   ========================================================= */
+
+function startExtraTime() {
+
+  readExtraTime();
+
+  if (extraTime <= 0) {
+
+    finishAuction(
+      "Waktu habis — tidak ada waktu tambahan"
+    );
+
+    return;
+  }
+
+  extraActive = true;
+
+  extraRemaining =
+    extraTime;
+
+  const note =
+    $("timerNote");
+
+  if (note) {
+
+    note.textContent =
+      `➕ WAKTU TAMBAHAN AKTIF — ${formatTime(extraTime)}`;
+
+  }
+
+  toast(
+    `🔴 Waktu tambahan ${extraTime} detik aktif!`
+  );
+
+  updateTimerColor();
+  render();
+}
+
+
+/* =========================================================
+   START DRAW
+   ========================================================= */
+
+function startDrawTime() {
+
+  inDraw = true;
+
+  drawRemaining =
+    drawDuration;
+
+  extraActive = false;
+  extraRemaining = 0;
+
+  const note =
+    $("timerNote");
+
+  if (note) {
+
+    note.textContent =
+      `⚡ DRAW TIME aktif — ${drawDuration} detik`;
+
+  }
+
+  toast(
+    `⚡ DRAW TIME ${drawDuration} DETIK!`
+  );
+
+  render();
+}
+
+
+/* =========================================================
+   FINISH
+   ========================================================= */
+
+function finishAuction(
+  message =
+    "Lelang selesai — pemenang ditentukan"
+) {
+
+  running = false;
+
+  clearInterval(interval);
+
+  interval = null;
+
+  auctionFinished = true;
+
+  inDraw = false;
+  extraActive = false;
+  extraRemaining = 0;
+
+  syncAuctionState();
+
+  const note =
+    $("timerNote");
+
+  if (note) {
+    note.textContent = message;
+  }
+
+  render();
+
+  toast("🏆 " + message);
+}
+
+
+/* =========================================================
+   TIME END
+   ========================================================= */
+
+function handleTimeEnd() {
+
+  /* ------------------------------
+     DRAW TIME
+     ------------------------------ */
+
+  if (inDraw) {
+
+    if (hasClearLeader()) {
+
+      finishAuction(
+        "DRAW TIME selesai — pemenang ditentukan"
+      );
+
+    } else {
+
+      finishAuction(
+        "DRAW TIME selesai — hasil masih seri"
+      );
+
+    }
+
+    return;
+  }
+
+
+  /* ------------------------------
+     EXTRA TIME
+     ------------------------------ */
+
+  if (extraActive) {
+
+    extraActive = false;
+    extraRemaining = 0;
+
+    if (leadersAreTied()) {
+
+      startDrawTime();
+
+    } else {
+
+      finishAuction(
+        "Waktu tambahan selesai — pemenang ditentukan"
+      );
+
+    }
+
+    return;
+  }
+
+
+  /* ------------------------------
+     WAKTU UTAMA
+     ------------------------------ */
+
+  if (leadersAreTied()) {
+
+    startDrawTime();
+
+    return;
+  }
+
+
+  /* ------------------------------
+     JIKA ADA WAKTU TAMBAHAN
+     ------------------------------ */
+
+  readExtraTime();
+
+  if (extraTime > 0) {
+
+    startExtraTime();
+
+    return;
+  }
+
+
+  finishAuction();
+}
+
+
+/* =========================================================
+   SYNC SERVER
+   ========================================================= */
+
+function syncAuctionState() {
+
+  if (
+    !socket ||
+    !socket.connected
+  ) {
+    return;
+  }
+
+  socket.emit(
+    "auction:state",
+    {
+      active:
+        running &&
+        !auctionFinished,
+
+      running,
+
+      remaining,
+
+      duration,
+
+      extraTime,
+
+      extraRemaining,
+
+      extraActive,
+
+      inDraw,
+
+      drawRemaining,
+
+      drawDuration
+    }
+  );
 }
 
 
@@ -664,9 +967,7 @@ function renderRanking() {
   const rankingList =
     $("rankingList");
 
-  if (!rankingList) {
-    return;
-  }
+  if (!rankingList) return;
 
   const sorted =
     sortedUsers();
@@ -681,25 +982,14 @@ function renderRanking() {
 
     rankingList.innerHTML = `
       <div class="rank-card rank-box empty-box">
-
         <div class="rank-info">
-
-          <strong>
-            Menunggu peserta
-          </strong>
-
-          <span>
-            Gift TikTok LIVE akan muncul di sini.
-          </span>
-
+          <strong>Menunggu peserta</strong>
         </div>
-
       </div>
     `;
 
     return;
   }
-
 
   rankingList.innerHTML =
     sorted
@@ -710,18 +1000,17 @@ function renderRanking() {
           const rank =
             index + 1;
 
+          const isDraw =
+            inDraw &&
+            index < 2;
+
           return `
             <article
               class="
                 rank-card
                 rank-box
                 ${index === 0 ? "top1" : ""}
-                ${
-                  inDraw &&
-                  index < 2
-                    ? "draw-box"
-                    : ""
-                }
+                ${isDraw ? "draw-box" : ""}
               "
             >
 
@@ -740,37 +1029,19 @@ function renderRanking() {
 
               </div>
 
-
               ${avatarHTML(user)}
-
 
               <div class="rank-info">
 
                 <strong>
                   ${esc(
                     user.name ||
+                    user.nickname ||
                     "Viewer"
                   )}
                 </strong>
 
-                <span>
-                  ${
-                    inDraw &&
-                    index < 2
-                      ? "⚡ DRAW TIME"
-                      : (
-                          user.username
-                            ? "@" +
-                              esc(
-                                user.username
-                              )
-                            : "@viewer"
-                        )
-                  }
-                </span>
-
               </div>
-
 
               <div class="coin">
 
@@ -782,9 +1053,7 @@ function renderRanking() {
                   ${
                     Number(
                       user.coins || 0
-                    ).toLocaleString(
-                      "id-ID"
-                    )
+                    ).toLocaleString("id-ID")
                   }
                 </strong>
 
@@ -796,7 +1065,6 @@ function renderRanking() {
         }
       )
       .join("");
-
 }
 
 
@@ -809,9 +1077,7 @@ function renderActivities() {
   const activityList =
     $("activityList");
 
-  if (!activityList) {
-    return;
-  }
+  if (!activityList) return;
 
   if (!activities.length) {
 
@@ -823,7 +1089,6 @@ function renderActivities() {
 
     return;
   }
-
 
   activityList.innerHTML =
     activities
@@ -843,13 +1108,15 @@ function renderActivities() {
 
                 <strong>
                   ${esc(
-                    activity.name
+                    activity.name ||
+                    "Viewer"
                   )}
                 </strong>
 
                 <span>
                   ${esc(
-                    activity.gift
+                    activity.gift ||
+                    "Gift"
                   )}
                 </span>
 
@@ -862,9 +1129,7 @@ function renderActivities() {
                 +${
                   Number(
                     activity.coins || 0
-                  ).toLocaleString(
-                    "id-ID"
-                  )
+                  ).toLocaleString("id-ID")
                 }
 
               </div>
@@ -875,12 +1140,11 @@ function renderActivities() {
         }
       )
       .join("");
-
 }
 
 
 /* =========================================================
-   MAIN RENDER
+   RENDER
    ========================================================= */
 
 function render() {
@@ -890,23 +1154,47 @@ function render() {
 
   if (timer) {
 
+    let value;
+
+    if (inDraw) {
+
+      value =
+        drawRemaining;
+
+    } else if (extraActive) {
+
+      value =
+        extraRemaining;
+
+    } else {
+
+      value =
+        remaining;
+
+    }
+
     timer.textContent =
-      formatTime(
-        inDraw
-          ? drawRemaining
-          : remaining
-      );
+      formatTime(value);
 
   }
 
 
-  const titleDisplay =
+  const title =
     $("auctionTitleDisplay");
 
-  if (titleDisplay) {
-
-    titleDisplay.textContent =
+  if (title) {
+    title.textContent =
       auctionTitle;
+  }
+
+
+  const participantCount =
+    $("participantCount");
+
+  if (participantCount) {
+
+    participantCount.textContent =
+      `${users.length} peserta`;
 
   }
 
@@ -921,7 +1209,7 @@ function render() {
     if (inDraw) {
 
       percent =
-        drawDuration
+        drawDuration > 0
           ? (
               (
                 drawDuration -
@@ -931,10 +1219,23 @@ function render() {
             ) * 100
           : 0;
 
+    } else if (extraActive) {
+
+      percent =
+        extraTime > 0
+          ? (
+              (
+                extraTime -
+                extraRemaining
+              ) /
+              extraTime
+            ) * 100
+          : 0;
+
     } else {
 
       percent =
-        duration
+        duration > 0
           ? (
               (
                 duration -
@@ -957,43 +1258,23 @@ function render() {
 
     progressBar.style.width =
       `${percent}%`;
-
   }
 
 
-  const timerNote =
+  const note =
     $("timerNote");
 
-  if (timerNote) {
+  if (
+    note &&
+    !inDraw &&
+    !extraActive &&
+    !auctionFinished
+  ) {
 
-    if (inDraw) {
-
-      timerNote.textContent =
-        `⚡ DRAW TIME aktif — tetap berjalan sampai ${drawDuration} detik habis`;
-
-    }
-
-  }
-
-
-  const sorted =
-    sortedUsers();
-
-
-  const participantCount =
-    $("participantCount");
-
-  if (participantCount) {
-
-    participantCount.textContent =
-      `${sorted.length} peserta`;
+    note.textContent =
+      "⏱️ Lelang sedang berjalan";
 
   }
-
-
-  renderRanking();
-
-  renderActivities();
 
 
   const heroViewer =
@@ -1006,125 +1287,77 @@ function render() {
 
   }
 
+
+  renderRanking();
+
+  renderActivities();
+
+  updateTimerColor();
 }
 
 
 /* =========================================================
-   FINISH AUCTION
+   TICK TIMER
    ========================================================= */
 
-function finishAuction(
-  message =
-    "Lelang selesai — pemenang ditentukan"
-) {
+function tick() {
 
-  running = false;
-
-  clearInterval(
-    interval
-  );
-
-  interval = null;
-
-  auctionFinished = true;
-
-  inDraw = false;
-
-  syncAuctionState();
-
-
-  const timerNote =
-    $("timerNote");
-
-  if (timerNote) {
-
-    timerNote.textContent =
-      message;
-
+  if (!running) {
+    return;
   }
 
 
-  render();
+  /* DRAW */
 
-  toast(
-    "🏆 " + message
-  );
+  if (inDraw) {
 
-}
+    if (drawRemaining > 0) {
 
+      drawRemaining--;
 
-/* =========================================================
-   START DRAW TIME
-   ========================================================= */
+      render();
 
-function startDrawTime() {
-
-  inDraw = true;
-
-  drawRemaining =
-    drawDuration;
-
-
-  const timerNote =
-    $("timerNote");
-
-  if (timerNote) {
-
-    timerNote.textContent =
-      `⚡ DRAW TIME aktif — ${drawDuration} detik`;
-
-  }
-
-
-  toast(
-    `⚡ DRAW TIME ${drawDuration} DETIK!`
-  );
-
-  render();
-
-}
-
-
-/* =========================================================
-   TIME END
-   ========================================================= */
-
-function handleTimeEnd() {
-
-  if (!inDraw) {
-
-    if (
-      leadersAreTied()
-    ) {
-
-      startDrawTime();
-
-    } else {
-
-      finishAuction();
-
+      return;
     }
+
+    handleTimeEnd();
 
     return;
   }
 
 
-  if (
-    hasClearLeader()
-  ) {
+  /* EXTRA */
 
-    finishAuction(
-      "DRAW TIME selesai — pemenang ditentukan"
-    );
+  if (extraActive) {
 
-  } else {
+    if (extraRemaining > 0) {
 
-    finishAuction(
-      "DRAW TIME selesai — hasil masih seri"
-    );
+      extraRemaining--;
 
+      render();
+
+      return;
+    }
+
+    handleTimeEnd();
+
+    return;
   }
 
+
+  /* NORMAL */
+
+  if (remaining > 0) {
+
+    remaining--;
+
+    render();
+
+    return;
+  }
+
+
+  handleTimeEnd();
 }
 
 
@@ -1139,8 +1372,7 @@ function setRunning(value) {
     value
   ) {
 
-    auctionFinished =
-      false;
+    auctionFinished = false;
 
   }
 
@@ -1148,12 +1380,8 @@ function setRunning(value) {
   running =
     Boolean(value);
 
-  syncAuctionState();
 
-
-  clearInterval(
-    interval
-  );
+  clearInterval(interval);
 
   interval = null;
 
@@ -1162,180 +1390,97 @@ function setRunning(value) {
 
     interval =
       setInterval(
-        () => {
-
-          if (inDraw) {
-
-            if (
-              drawRemaining > 0
-            ) {
-
-              drawRemaining--;
-
-              render();
-
-            } else {
-
-              handleTimeEnd();
-
-            }
-
-            return;
-          }
-
-
-          if (
-            remaining > 0
-          ) {
-
-            remaining--;
-
-            render();
-
-          } else {
-
-            handleTimeEnd();
-
-          }
-
-        },
+        tick,
         1000
       );
 
+  }
 
-  } else if (
-    !auctionFinished
-  ) {
 
-    const timerNote =
-      $("timerNote");
+  syncAuctionState();
 
-    if (timerNote) {
+  render();
+}
 
-      timerNote.textContent =
-        inDraw
-          ? "DRAW TIME dijeda"
-          : "Lelang dijeda";
 
-    }
+/* =========================================================
+   START
+   ========================================================= */
+
+function startAuction() {
+
+  if (auctionFinished) {
+
+    auctionFinished = false;
 
   }
 
+  if (
+    remaining <= 0 &&
+    !extraActive &&
+    !inDraw
+  ) {
+
+    remaining =
+      duration;
+
+  }
+
+  setRunning(true);
+
+  toast("▶️ Lelang dimulai");
 }
 
 
 /* =========================================================
-   START BUTTON
+   PAUSE
    ========================================================= */
 
-if ($("startBtn")) {
+function pauseAuction() {
 
-  $("startBtn").onclick =
-    () => {
+  setRunning(false);
 
-      if (
-        auctionFinished ||
-        (
-          remaining <= 0 &&
-          !inDraw
-        )
-      ) {
-
-        remaining =
-          duration;
-
-        drawRemaining =
-          drawDuration;
-
-        inDraw =
-          false;
-
-        auctionFinished =
-          false;
-
-      }
-
-      setRunning(true);
-
-      toast(
-        "Lelang dimulai"
-      );
-
-    };
-
+  toast("⏸ Lelang dijeda");
 }
 
 
 /* =========================================================
-   PAUSE BUTTON
+   RESET
    ========================================================= */
 
-if ($("pauseBtn")) {
+function resetAuction() {
 
-  $("pauseBtn").onclick =
-    () => {
+  clearInterval(interval);
 
-      setRunning(false);
+  interval = null;
 
-      toast(
-        "Lelang dijeda"
-      );
+  running = false;
 
-    };
+  auctionFinished = false;
 
-}
+  inDraw = false;
 
+  extraActive = false;
 
-/* =========================================================
-   RESET BUTTON
-   ========================================================= */
+  extraRemaining = 0;
 
-if ($("resetBtn")) {
+  remaining =
+    duration;
 
-  $("resetBtn").onclick =
-    () => {
+  drawRemaining =
+    drawDuration;
 
-      setRunning(false);
+  users = [];
 
-      remaining =
-        duration;
+  activities = [];
 
-      drawRemaining =
-        drawDuration;
+  liveEventCount = 0;
 
-      inDraw =
-        false;
+  syncAuctionState();
 
-      auctionFinished =
-        false;
+  render();
 
-      users = [];
-
-      activities = [];
-
-      liveEventCount =
-        0;
-
-
-      const timerNote =
-        $("timerNote");
-
-      if (timerNote) {
-
-        timerNote.textContent =
-          "Siap untuk memulai lelang";
-
-      }
-
-
-      render();
-
-      toast(
-        "Lelang direset"
-      );
-
-    };
-
+  toast("↻ Lelang di-reset");
 }
 
 
@@ -1343,852 +1488,405 @@ if ($("resetBtn")) {
    FINISH BUTTON
    ========================================================= */
 
-if ($("finishBtn")) {
+function finishButton() {
 
-  $("finishBtn").onclick =
-    () => {
-
-      finishAuction();
-
-      toast(
-        "Lelang diselesaikan"
-      );
-
-    };
-
+  finishAuction(
+    "Lelang selesai"
+  );
 }
 
 
 /* =========================================================
-   SAVE SETTINGS
+   READ SETTINGS
    ========================================================= */
 
-if ($("saveSettings")) {
+function readSettings() {
 
-  $("saveSettings").onclick =
-    () => {
+  const durationInput =
+    findInput([
+      "duration",
+      "auctionDuration",
+      "timeDuration"
+    ]);
 
-      const min =
-        Math.max(
-          0,
-          Math.min(
-            120,
-            Number(
-              $("minuteInput")?.value
-            ) || 0
-          )
-        );
+  if (durationInput) {
 
+    const value =
+      Number(durationInput.value);
 
-      const sec =
-        Math.max(
-          0,
-          Math.min(
-            59,
-            Number(
-              $("secondInput")?.value
-            ) || 0
-          )
-        );
-
-
-      if (
-        min === 0 &&
-        sec === 0
-      ) {
-
-        toast(
-          "Waktu minimal 1 detik"
-        );
-
-        return;
-
-      }
-
+    if (
+      Number.isFinite(value) &&
+      value > 0
+    ) {
 
       duration =
-        min * 60 + sec;
+        Math.floor(value);
 
-      remaining =
-        duration;
-
-
-      topLimit =
-        Number(
-          $("topInput")?.value
-        ) || 5;
-
-
-      auctionTitle =
-        (
-          $("titleInput")?.value ||
-          ""
-        ).trim() ||
-        "LIVE COIN AUCTION";
-
-
-      setRunning(false);
-
-
-      const timerNote =
-        $("timerNote");
-
-      if (timerNote) {
-
-        timerNote.textContent =
-          `Pengaturan disimpan • Draw Time ${drawDuration} detik`;
-
+      if (!running) {
+        remaining =
+          duration;
       }
 
-
-      render();
-
-      toast(
-        "Pengaturan disimpan"
-      );
-
-    };
-
-}
-
-
-/* =========================================================
-   CONNECTION LOG
-   ========================================================= */
-
-function updateConnectionLog(
-  message,
-  type = ""
-) {
-
-  const el =
-    $("connectionLog");
-
-  if (!el) {
-    return;
-  }
-
-  el.textContent =
-    "Status: " + message;
-
-  el.className =
-    "connection-log " + type;
-
-}
-
-
-/* =========================================================
-   LIVE UI
-   ========================================================= */
-
-function setLiveUi(
-  connected,
-  username = ""
-) {
-
-  liveConnected =
-    Boolean(connected);
-
-  connectedUsername =
-    String(
-      username || ""
-    ).replace(
-      /^@/,
-      ""
-    );
-
-
-  const liveName =
-    $("liveName");
-
-  if (liveName) {
-
-    liveName.textContent =
-      liveConnected
-        ? "@" +
-          connectedUsername
-        : "@Belum Terhubung";
-
+    }
   }
 
 
-  const connectBtn =
-    $("connectBtn");
+  const drawInput =
+    findInput([
+      "drawDuration",
+      "drawTime",
+      "drawTimeInput"
+    ]);
 
-  if (connectBtn) {
+  if (drawInput) {
 
-    connectBtn.textContent =
-      liveConnected
-        ? "TikTok LIVE Terhubung ✓"
-        : "Hubungkan TikTok LIVE";
+    const value =
+      Number(drawInput.value);
 
+    if (
+      Number.isFinite(value) &&
+      value > 0
+    ) {
+
+      drawDuration =
+        Math.floor(value);
+
+      if (!inDraw) {
+        drawRemaining =
+          drawDuration;
+      }
+
+    }
   }
 
 
-  const statusBadge =
-    $("statusBadge");
-
-  if (statusBadge) {
-
-    statusBadge.textContent =
-      liveConnected
-        ? "ONLINE"
-        : "OFFLINE";
-
-    statusBadge.className =
-      "status-badge " +
-      (
-        liveConnected
-          ? "online"
-          : "offline"
-      );
-
-  }
+  readExtraTime();
 
 
-  const disconnectBtn =
-    $("disconnectBtn");
-
-  if (disconnectBtn) {
-
-    disconnectBtn.style.display =
-      liveConnected
-        ? "block"
-        : "none";
-
-  }
-
-}
-
-
-/* =========================================================
-   FIND PARTICIPANT
-   ========================================================= */
-
-function findParticipant(data) {
-
-  const key =
-    getUserKey(data);
-
-  return {
-
-    key,
-
-    user:
-      users.find(
-        (item) =>
-          item.key === key
-      )
-
-  };
-
-}
-
-
-/* =========================================================
-   ADD / UPDATE PARTICIPANT
-   ========================================================= */
-
-function processGift(data) {
-
-  const userId =
-    data?.userId ||
-    data?.user_id ||
-    "";
-
-
-  const username =
-    data?.username ||
-    data?.uniqueId ||
-    "";
-
-
-  const nickname =
-    data?.nickname ||
-    username ||
-    "Viewer";
-
-
-  /*
-   * Ambil foto profil dari semua kemungkinan field.
-   */
-
-  const avatar =
-    getAvatar(data);
-
-
-  const giftName =
-    data?.giftName ||
-    "TikTok Gift";
-
-
-  /*
-   * PENTING:
-   *
-   * coinValue dipakai LANGSUNG.
-   *
-   * TIDAK ADA:
-   * coinValue * 2
-   * coinValue / 2
-   *
-   * Jadi:
-   * 5 coin = 5
-   * 1 coin = 1
-   */
-
-  const coinValue =
-    Number(
-      data?.coinValue
-    ) || 0;
-
+  const titleInput =
+    findInput([
+      "auctionTitle",
+      "titleInput",
+      "auctionName"
+    ]);
 
   if (
-    coinValue <= 0
+    titleInput &&
+    titleInput.value.trim()
   ) {
 
-    return false;
+    auctionTitle =
+      titleInput.value.trim();
 
   }
 
 
-  const userData = {
+  const topInput =
+    findInput([
+      "topLimit",
+      "participantLimit"
+    ]);
 
-    userId:
-      String(
-        userId || ""
-      ),
+  if (topInput) {
 
-    username:
-      String(
-        username || ""
-      ),
-
-    name:
-      String(
-        nickname ||
-        username ||
-        "Viewer"
-      ),
-
-    avatar:
-      String(
-        avatar || ""
-      )
-
-  };
-
-
-  const key =
-    getUserKey(
-      userData
-    );
-
-
-  let user =
-    users.find(
-      (item) =>
-        item.key === key
-    );
-
-
-  if (!user) {
-
-    user = {
-
-      key,
-
-      userId:
-        userData.userId,
-
-      username:
-        userData.username,
-
-      name:
-        userData.name,
-
-      avatar:
-        userData.avatar,
-
-      coins: 0
-
-    };
-
-
-    users.push(
-      user
-    );
-
-
-  } else {
+    const value =
+      Number(topInput.value);
 
     if (
-      userData.userId
+      Number.isFinite(value) &&
+      value > 0
     ) {
 
-      user.userId =
-        userData.userId;
-
-    }
-
-
-    if (
-      userData.username
-    ) {
-
-      user.username =
-        userData.username;
-
-    }
-
-
-    if (
-      userData.name
-    ) {
-
-      user.name =
-        userData.name;
-
-    }
-
-
-    /*
-     * Foto profil terbaru
-     * selalu menggantikan foto lama
-     * kalau server mengirimkannya.
-     */
-
-    if (
-      userData.avatar
-    ) {
-
-      user.avatar =
-        userData.avatar;
+      topLimit =
+        Math.floor(value);
 
     }
 
   }
 
-
-  /*
-   * =====================================
-   * NILAI LELANG 1:1
-   * =====================================
-   *
-   * Jangan dikali 2.
-   */
-
-  user.coins +=
-    coinValue;
-
-
-  /*
-   * Activity.
-   */
-
-  activities.unshift({
-
-    name:
-      user.name,
-
-    username:
-      user.username,
-
-    userId:
-      user.userId,
-
-    gift:
-      giftName,
-
-    coins:
-      coinValue,
-
-    avatar:
-      user.avatar
-
-  });
-
-
-  if (
-    activities.length > 50
-  ) {
-
-    activities.length =
-      50;
-
-  }
-
+  writeExtraTime();
 
   render();
+}
 
-  return true;
+
+/* =========================================================
+   BUTTON BIND
+   ========================================================= */
+
+function bindButton(
+  ids,
+  handler
+) {
+
+  ids.forEach(
+    (id) => {
+
+      const el =
+        $(id);
+
+      if (!el) return;
+
+      el.addEventListener(
+        "click",
+        handler
+      );
+
+    }
+  );
 
 }
 
 
 /* =========================================================
-   PUBLIC ADD GIFT
+   INPUT BIND
    ========================================================= */
 
-window.addGift = (
-  name,
-  gift,
-  coins,
-  avatar = "",
-  extra = {}
-) => {
+function bindInputs() {
 
-  if (
-    !running ||
-    auctionFinished
-  ) {
+  const ids = [
+    "duration",
+    "auctionDuration",
+    "timeDuration",
+    "drawDuration",
+    "drawTime",
+    "drawTimeInput",
+    "extraTime",
+    "extraTimeInput",
+    "additionalTime",
+    "tambahanTime",
+    "auctionExtraTime",
+    "auctionTitle",
+    "titleInput",
+    "auctionName",
+    "topLimit",
+    "participantLimit"
+  ];
 
-    return false;
+  ids.forEach(
+    (id) => {
 
-  }
+      const el =
+        $(id);
 
+      if (!el) return;
 
-  const data = {
+      el.addEventListener(
+        "change",
+        () => {
 
-    userId:
-      extra.userId ||
-      extra.user_id ||
-      "",
+          readSettings();
 
-    username:
-      extra.username ||
-      extra.uniqueId ||
-      name ||
-      "",
+          toast("⚙️ Pengaturan disimpan");
 
-    nickname:
-      extra.nickname ||
-      name ||
-      "Viewer",
+        }
+      );
 
-    avatar:
-      avatar ||
-      extra.avatar ||
-      extra.profilePictureUrl ||
-      extra.profilePicture ||
-      "",
-
-    giftName:
-      gift ||
-      "TikTok Gift",
-
-    coinValue:
-      Number(coins) || 0
-
-  };
-
-
-  return processGift(
-    data
+    }
   );
 
-};
+}
 
 
 /* =========================================================
-   SOCKET.IO SETUP
+   BUTTONS
    ========================================================= */
 
-function setupSocket() {
+function bindButtons() {
 
-  if (socket) {
-    return socket;
-  }
+  bindButton(
+    [
+      "startBtn",
+      "startAuction",
+      "btnStart",
+      "mulaiBtn"
+    ],
+    startAuction
+  );
 
+
+  bindButton(
+    [
+      "pauseBtn",
+      "pauseAuction",
+      "btnPause",
+      "jedaBtn"
+    ],
+    pauseAuction
+  );
+
+
+  bindButton(
+    [
+      "resetBtn",
+      "resetAuction",
+      "btnReset",
+      "resetBtnAuction"
+    ],
+    resetAuction
+  );
+
+
+  bindButton(
+    [
+      "finishBtn",
+      "finishAuction",
+      "btnFinish",
+      "selesaiBtn"
+    ],
+    finishButton
+  );
+
+}
+
+
+/* =========================================================
+   SOCKET
+   ========================================================= */
+
+function connectSocket() {
 
   if (
-    typeof io ===
-    "undefined"
+    typeof io !== "function"
   ) {
 
-    updateConnectionLog(
-      "Socket TikTok belum termuat. Refresh halaman dari server Node.js.",
-      "error"
+    console.warn(
+      "Socket.IO tidak ditemukan."
     );
 
-    return null;
+    return;
 
   }
 
 
   socket =
-    io({
+    io();
 
-      transports: [
-        "websocket",
-        "polling"
-      ]
-
-    });
-
-
-  /* =======================================================
-     CONNECT
-     ======================================================= */
 
   socket.on(
     "connect",
     () => {
 
-      updateConnectionLog(
-        "server terhubung ✓",
-        "ok"
-      );
+      liveConnected = true;
+
+      const status =
+        $("connectionStatus");
+
+      if (status) {
+
+        status.textContent =
+          "Terhubung";
+
+      }
 
       syncAuctionState();
 
+      render();
+
     }
   );
 
-
-  /* =======================================================
-     DISCONNECT
-     ======================================================= */
 
   socket.on(
     "disconnect",
-    (reason) => {
+    () => {
 
-      updateConnectionLog(
-        "server terputus: " +
-        reason,
-        "error"
-      );
+      liveConnected = false;
 
-      setLiveUi(false);
+      const status =
+        $("connectionStatus");
 
-    }
-  );
+      if (status) {
 
+        status.textContent =
+          "Terputus";
 
-  /* =======================================================
-     CONNECTION ERROR
-     ======================================================= */
+      }
 
-  socket.on(
-    "connect_error",
-    (error) => {
-
-      updateConnectionLog(
-        "server gagal: " +
-        (
-          error?.message ||
-          "tidak dapat terhubung"
-        ),
-        "error"
-      );
+      render();
 
     }
   );
 
 
-  /* =======================================================
-     LIVE STATUS
-     ======================================================= */
+  /* ==========================================
+     STATUS LIVE
+     ========================================== */
 
   socket.on(
     "live:status",
-    (data) => {
+    (data = {}) => {
 
-      const message =
-        data?.message ||
-        "status LIVE diperbarui";
-
-
-      updateConnectionLog(
-        message,
-        data?.ok
-          ? "ok"
-          : "error"
-      );
-
-
-      if (
-        data?.ok
-      ) {
-
-        let username =
-          data?.username ||
-          data?.uniqueId ||
-          connectedUsername ||
-          "";
-
-
-        if (!username) {
-
-          const match =
-            message.match(
-              /@([^\s•]+)/
-            );
-
-          if (match) {
-            username =
-              match[1];
-          }
-
-        }
-
-
-        setLiveUi(
-          true,
-          username ||
-            "TikTokLive"
+      liveConnected =
+        Boolean(
+          data.connected ??
+          data.active ??
+          true
         );
 
+      connectedUsername =
+        data.username ||
+        data.uniqueId ||
+        data.user ||
+        "";
 
-      } else if (
-        /diputus|belum terhubung|gagal|error/i
-          .test(message)
-      ) {
-
-        setLiveUi(false);
-
-      }
+      render();
 
     }
   );
 
 
-  /* =======================================================
-     TIKTOK GIFT
-     ======================================================= */
+  /* ==========================================
+     PARTICIPANT LIST
+     ========================================== */
 
   socket.on(
-    "live:gift",
-    (data) => {
+    "participants",
+    (list) => {
 
-      if (
-        !running ||
-        auctionFinished
-      ) {
-
+      if (!Array.isArray(list)) {
         return;
-
       }
 
-
-      const userId =
-        data?.userId ||
-        data?.user_id ||
-        "";
-
-
-      const username =
-        data?.username ||
-        data?.uniqueId ||
-        "";
-
-
-      const nickname =
-        data?.nickname ||
-        username ||
-        "Viewer";
-
-
-      const giftName =
-        data?.giftName ||
-        "TikTok Gift";
-
-
-      /*
-       * NILAI COIN ASLI DARI SERVER.
-       *
-       * APP TIDAK MENGALIHKAN / MENGGANDAKAN.
-       */
-
-      const coin =
-        Number(
-          data?.coinValue
-        ) || 0;
-
-
-      const avatar =
-        getAvatar(data);
-
-
-      if (
-        coin <= 0
-      ) {
-
-        updateConnectionLog(
-          `Gift ${giftName} diterima tetapi nilai coin tidak valid.`,
-          "error"
+      users =
+        list.map(
+          normalizeUser
         );
 
-        return;
-
-      }
-
-
-      const processed =
-        processGift({
-
-          userId,
-
-          username,
-
-          nickname,
-
-          avatar,
-
-          giftName,
-
-          coinValue:
-            coin
-
-        });
-
-
-      if (!processed) {
-        return;
-      }
-
-
-      liveEventCount++;
-
-
-      const heroViewer =
-        $("heroViewer");
-
-      if (heroViewer) {
-
-        heroViewer.textContent =
-          liveEventCount;
-
-      }
-
-
-      updateConnectionLog(
-        `Gift masuk: ${nickname} • ${giftName} • +${coin.toLocaleString("id-ID")} coin`,
-        "ok"
-      );
+      render();
 
     }
   );
 
 
-  /* =======================================================
-     GIFT DEBUG
-     ======================================================= */
+  socket.on(
+    "auction:participants",
+    (list) => {
+
+      if (!Array.isArray(list)) {
+        return;
+      }
+
+      users =
+        list.map(
+          normalizeUser
+        );
+
+      render();
+
+    }
+  );
+
+
+  /* ==========================================
+     USER UPDATE
+     ========================================== */
 
   socket.on(
-    "live:gift-debug",
+    "user:update",
     (data) => {
 
-      updateConnectionLog(
-        data?.message ||
-        "Gift diterima tetapi data coin belum terbaca.",
-        "error"
-      );
-
-
-      console.warn(
-        "TikTok gift debug:",
-        data?.debug ||
+      updateUser(
         data
       );
 
@@ -2196,180 +1894,143 @@ function setupSocket() {
   );
 
 
-  /* =======================================================
-     LIVE ERROR
-     ======================================================= */
-
   socket.on(
-    "live:error",
+    "participant:update",
     (data) => {
 
-      const message =
-        data?.message ||
-        "koneksi gagal";
-
-
-      updateConnectionLog(
-        message,
-        "error"
+      updateUser(
+        data
       );
-
-
-      toast(message);
-
-      setLiveUi(false);
 
     }
   );
 
 
-  return socket;
+  /* ==========================================
+     GIFT
+     ========================================== */
 
-}
-
-
-/* =========================================================
-   CONNECT BUTTON
-   ========================================================= */
-
-if ($("connectBtn")) {
-
-  $("connectBtn").onclick =
-    () => {
-
-      const input =
-        $("tiktokUsername");
+  socket.on(
+    "gift",
+    handleGift
+  );
 
 
-      const username =
-        (
-          input?.value ||
-          ""
-        )
-          .trim()
-          .replace(
-            /^@/,
-            ""
-          );
+  socket.on(
+    "tiktok:gift",
+    handleGift
+  );
 
 
-      if (!username) {
-
-        toast(
-          "Masukkan username TikTok yang sedang LIVE"
-        );
-
-        return;
-
-      }
+  socket.on(
+    "gift:event",
+    handleGift
+  );
 
 
-      const s =
-        setupSocket();
+  socket.on(
+    "live:gift",
+    handleGift
+  );
 
 
-      if (!s) {
-        return;
-      }
+  /* ==========================================
+     SERVER STATE
+     ========================================== */
 
+  socket.on(
+    "auction:state",
+    (data = {}) => {
 
-      updateConnectionLog(
-        "menghubungkan ke @" +
-        username +
-        " ..."
-      );
+      if (
+        typeof data.duration ===
+        "number"
+      ) {
 
-
-      s.emit(
-        "live:connect",
-        {
-          username
-        }
-      );
-
-    };
-
-}
-
-
-/* =========================================================
-   DISCONNECT BUTTON
-   ========================================================= */
-
-if ($("disconnectBtn")) {
-
-  $("disconnectBtn").onclick =
-    () => {
-
-      if (socket) {
-
-        socket.emit(
-          "live:disconnect"
-        );
+        duration =
+          data.duration;
 
       }
 
+      if (
+        typeof data.remaining ===
+        "number"
+      ) {
 
-      setLiveUi(false);
+        remaining =
+          data.remaining;
 
+      }
 
-      updateConnectionLog(
-        "koneksi diputus"
-      );
+      if (
+        typeof data.running ===
+        "boolean"
+      ) {
 
-    };
+        running =
+          data.running;
 
-}
+      }
 
+      if (
+        typeof data.extraTime ===
+        "number"
+      ) {
 
-/* =========================================================
-   SOUND
-   ========================================================= */
+        extraTime =
+          data.extraTime;
 
-let soundEnabled =
-  true;
+      }
 
+      if (
+        typeof data.extraRemaining ===
+        "number"
+      ) {
 
-if ($("soundBtn")) {
+        extraRemaining =
+          data.extraRemaining;
 
-  $("soundBtn").onclick =
-    () => {
+      }
 
-      soundEnabled =
-        !soundEnabled;
+      if (
+        typeof data.extraActive ===
+        "boolean"
+      ) {
 
+        extraActive =
+          data.extraActive;
 
-      $("soundBtn").textContent =
-        soundEnabled
-          ? "🔊"
-          : "🔇";
+      }
 
+      if (
+        typeof data.drawDuration ===
+        "number"
+      ) {
 
-      toast(
-        soundEnabled
-          ? "Suara diaktifkan"
-          : "Suara dimatikan"
-      );
+        drawDuration =
+          data.drawDuration;
 
-    };
+      }
 
-}
+      if (
+        typeof data.drawRemaining ===
+        "number"
+      ) {
 
+        drawRemaining =
+          data.drawRemaining;
 
-/* =========================================================
-   TOP LIMIT
-   ========================================================= */
+      }
 
-if ($("topInput")) {
+      if (
+        typeof data.inDraw ===
+        "boolean"
+      ) {
 
-  $("topInput").addEventListener(
-    "change",
-    () => {
+        inDraw =
+          data.inDraw;
 
-      topLimit =
-        Number(
-          $("topInput").value
-        ) || 5;
+      }
 
       render();
 
@@ -2380,168 +2041,403 @@ if ($("topInput")) {
 
 
 /* =========================================================
-   TITLE PREVIEW
+   NORMALIZE USER
    ========================================================= */
 
-if ($("titleInput")) {
+function normalizeUser(data = {}) {
 
-  $("titleInput").addEventListener(
-    "input",
-    () => {
+  return {
 
-      const value =
+    key:
+      getUserKey(data),
+
+    userId:
+      data.userId ||
+      data.user_id ||
+      data.uid ||
+      "",
+
+    username:
+      data.username ||
+      data.uniqueId ||
+      data.unique_id ||
+      "",
+
+    name:
+      data.name ||
+      data.nickname ||
+      data.displayName ||
+      data.username ||
+      data.uniqueId ||
+      "Viewer",
+
+    coins:
+      Math.max(
+        0,
+        Number(
+          data.coins ??
+          data.coin ??
+          data.diamonds ??
+          data.diamond ??
+          0
+        ) || 0
+      ),
+
+    avatar:
+      getAvatar(data)
+
+  };
+
+}
+
+
+/* =========================================================
+   UPDATE USER
+   ========================================================= */
+
+function updateUser(data = {}) {
+
+  const normalized =
+    normalizeUser(data);
+
+  const key =
+    normalized.key;
+
+  let user =
+    users.find(
+      (u) =>
+        u.key === key ||
         (
-          $("titleInput").value ||
-          ""
-        ).trim();
-
-
-      const titleDisplay =
-        $("auctionTitleDisplay");
-
-
-      if (titleDisplay) {
-
-        titleDisplay.textContent =
-          value ||
-          "LIVE COIN AUCTION";
-
-      }
-
-    }
-  );
-
-}
-
-
-/* =========================================================
-   INITIAL UI
-   ========================================================= */
-
-setLiveUi(false);
-
-
-if ($("disconnectBtn")) {
-
-  $("disconnectBtn").style.display =
-    "none";
-
-}
-
-
-/* =========================================================
-   INITIAL RENDER
-   ========================================================= */
-
-render();
-
-
-/* =========================================================
-   CONNECT SOCKET
-   ========================================================= */
-
-setupSocket();
-
-
-/* =========================================================
-   TEST GIFT
-   =========================================================
-
-   Contoh:
-
-   addTestGift(
-     "uciha hamm",
-     "Jari Hati",
-     5
-   )
-
-   HASIL:
-   uciha hamm = 5 coin
-
-   Contoh:
-
-   addTestGift(
-     "Zaskizy",
-     "Mawar",
-     1
-   )
-
-   HASIL:
-   Zaskizy = 1 coin
-   ========================================================= */
-
-window.addTestGift = (
-  name,
-  gift = "Test Gift",
-  coins = 10,
-  avatar = "",
-  userId = ""
-) => {
-
-  if (!running) {
-
-    console.warn(
-      "Mulai lelang terlebih dahulu."
+          normalized.userId &&
+          u.userId &&
+          String(u.userId) ===
+            String(normalized.userId)
+        ) ||
+        (
+          normalized.username &&
+          u.username &&
+          normalizeUserId(
+            u.username
+          ) ===
+          normalizeUserId(
+            normalized.username
+          )
+        )
     );
 
-    return;
+
+  if (!user) {
+
+    users.push(
+      normalized
+    );
+
+  } else {
+
+    if (normalized.name) {
+      user.name =
+        normalized.name;
+    }
+
+    if (normalized.username) {
+      user.username =
+        normalized.username;
+    }
+
+    if (normalized.avatar) {
+      user.avatar =
+        normalized.avatar;
+    }
+
+    if (
+      Number.isFinite(
+        normalized.coins
+      )
+    ) {
+
+      user.coins =
+        normalized.coins;
+
+    }
 
   }
 
 
-  processGift({
+  render();
+}
 
-    userId:
-      userId ||
-      "test-" +
-      String(name)
-        .toLowerCase()
-        .replace(
-          /\s+/g,
-          "-"
-        ),
 
-    username:
-      String(name)
-        .toLowerCase()
-        .replace(
-          /\s+/g,
-          "_"
-        ),
+/* =========================================================
+   HANDLE GIFT
+   ========================================================= */
 
-    nickname:
-      String(name),
+function handleGift(data = {}) {
 
-    avatar,
+  const user =
+    normalizeUser(data);
 
-    giftName:
-      gift,
 
-    /*
-     * 1:1
-     */
-    coinValue:
-      Number(coins) || 0
+  /*
+   * PENTING:
+   * Coin dipakai 1:1.
+   *
+   * Tidak ada:
+   * coins * 2
+   * coins * repeat
+   * coins * streak
+   */
 
-  });
+
+  let coins =
+    Number(
+      data.coins ??
+      data.coinCount ??
+      data.coinValue ??
+      data.diamondCount ??
+      data.diamonds ??
+      0
+    );
+
+
+  if (
+    !Number.isFinite(coins) ||
+    coins < 0
+  ) {
+
+    coins = 0;
+
+  }
+
+
+  coins =
+    Math.floor(coins);
+
+
+  const key =
+    getUserKey(data);
+
+
+  let existing =
+    users.find(
+      (u) =>
+        u.key === key ||
+        (
+          user.username &&
+          u.username &&
+          normalizeUserId(
+            u.username
+          ) ===
+          normalizeUserId(
+            user.username
+          )
+        )
+    );
+
+
+  if (!existing) {
+
+    existing = {
+      ...user,
+      coins: 0
+    };
+
+    users.push(
+      existing
+    );
+
+  }
+
+
+  /*
+   * COIN 1:1
+   */
+
+  existing.coins =
+    Number(
+      existing.coins || 0
+    ) + coins;
+
+
+  if (user.name) {
+    existing.name =
+      user.name;
+  }
+
+  if (user.username) {
+    existing.username =
+      user.username;
+  }
+
+  if (user.avatar) {
+    existing.avatar =
+      user.avatar;
+  }
 
 
   liveEventCount++;
 
 
-  const heroViewer =
-    $("heroViewer");
+  activities.unshift({
 
-  if (heroViewer) {
+    name:
+      user.name ||
+      existing.name ||
+      "Viewer",
 
-    heroViewer.textContent =
-      liveEventCount;
+    username:
+      user.username ||
+      existing.username ||
+      "",
 
-  }
+    avatar:
+      user.avatar ||
+      existing.avatar ||
+      "",
 
-};
+    gift:
+      data.giftName ||
+      data.gift ||
+      data.name ||
+      "Gift",
+
+    coins
+
+  });
+
+
+  activities =
+    activities.slice(
+      0,
+      50
+    );
+
+
+  render();
+
+}
 
 
 /* =========================================================
-   END
+   GLOBAL FUNCTIONS
+   =========================================================
+
+   Membuat tombol HTML lama tetap bekerja
+   apabila menggunakan onclick.
    ========================================================= */
+
+window.startAuction =
+  startAuction;
+
+window.pauseAuction =
+  pauseAuction;
+
+window.resetAuction =
+  resetAuction;
+
+window.finishAuction =
+  finishButton;
+
+window.setRunning =
+  setRunning;
+
+window.startDrawTime =
+  startDrawTime;
+
+
+/* =========================================================
+   INIT
+   ========================================================= */
+
+function init() {
+
+  readSettings();
+
+  bindButtons();
+
+  bindInputs();
+
+  render();
+
+  connectSocket();
+
+}
+
+
+/* =========================================================
+   DOM READY
+   ========================================================= */
+
+if (
+  document.readyState ===
+  "loading"
+) {
+
+  document.addEventListener(
+    "DOMContentLoaded",
+    init
+  );
+
+} else {
+
+  init();
+
+}
+
+
+/* =========================================================
+   DEBUG
+   ========================================================= */
+
+window.auctionDebug = {
+
+  getUsers:
+    () => users,
+
+  getState:
+    () => ({
+      duration,
+      remaining,
+      running,
+      extraTime,
+      extraRemaining,
+      extraActive,
+      drawDuration,
+      drawRemaining,
+      inDraw,
+      auctionFinished
+    }),
+
+  addTestCoin:
+    (username = "Test User", coins = 10) => {
+
+      handleGift({
+
+        username,
+
+        uniqueId:
+          username,
+
+        nickname:
+          username,
+
+        gift:
+          "Test Gift",
+
+        giftName:
+          "Test Gift",
+
+        coins:
+          Number(coins) || 0
+
+      });
+
+    },
+
+  reset:
+    resetAuction
+
+};
+
+console.log(
+  "✅ Coin Auction Dashboard V5 siap."
+);

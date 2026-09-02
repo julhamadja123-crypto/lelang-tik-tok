@@ -50,6 +50,17 @@ let auctionFinished = false;
 const participants = new Map();
 
 /* =========================================================
+   GIFT DIAGNOSTIC
+   ========================================================= */
+
+let giftEventsReceived = 0;
+let giftEventsProcessed = 0;
+let giftCoinsAdded = 0;
+
+let lastGift = null;
+let lastGiftAt = null;
+
+/* =========================================================
    DEDUP
    ========================================================= */
 
@@ -93,11 +104,17 @@ function safeNumber(value, fallback = 0) {
   return n;
 }
 
+/* ---------------------------------------------------------
+   USERNAME
+   --------------------------------------------------------- */
+
 function getUsername(event) {
   return (
     event?.user?.uniqueId ||
     event?.user?.unique_id ||
     event?.user?.uniqueIdString ||
+    event?.uniqueId ||
+    event?.unique_id ||
     ""
   )
     .toString()
@@ -105,18 +122,29 @@ function getUsername(event) {
     .trim();
 }
 
+/* ---------------------------------------------------------
+   NICKNAME
+   --------------------------------------------------------- */
+
 function getNickname(event) {
   return (
     event?.user?.nickname ||
     event?.user?.displayName ||
+    event?.nickname ||
     getUsername(event)
   )
     .toString()
     .trim();
 }
 
+/* ---------------------------------------------------------
+   GIFT ID
+   --------------------------------------------------------- */
+
 function getGiftId(event) {
-  const transactionId = event?.transactionId;
+  const transactionId =
+    event?.transactionId ??
+    event?.transaction_id;
 
   if (
     transactionId !== undefined &&
@@ -126,7 +154,9 @@ function getGiftId(event) {
     return `tx:${String(transactionId)}`;
   }
 
-  const msgId = event?.msgId;
+  const msgId =
+    event?.msgId ??
+    event?.msg_id;
 
   if (
     msgId !== undefined &&
@@ -134,6 +164,38 @@ function getGiftId(event) {
     String(msgId).trim() !== ""
   ) {
     return `msg:${String(msgId)}`;
+  }
+
+  /*
+    giftId + user + repeatCount sebagai fallback.
+
+    Ini hanya digunakan apabila API tidak memberikan
+    transactionId maupun msgId.
+  */
+
+  const giftId =
+    event?.giftId ??
+    event?.gift_id;
+
+  const username = getUsername(event);
+
+  const repeatCount = Math.max(
+    1,
+    safeNumber(event?.repeatCount, 1)
+  );
+
+  if (
+    giftId !== undefined &&
+    giftId !== null &&
+    String(giftId).trim() !== "" &&
+    username
+  ) {
+    return (
+      `gift:${username}:` +
+      `${String(giftId)}:` +
+      `${repeatCount}:` +
+      `${event?.repeatEnd === true || event?.repeatEnd === 1 ? "end" : "live"}`
+    );
   }
 
   return null;
@@ -156,8 +218,7 @@ function emitLiveStatus(status, message = "") {
   io.emit("live:status", payload);
 
   /*
-    live:connect dipertahankan agar kompatibel
-    dengan app.js lama.
+    Kompatibilitas dengan app.js lama.
   */
 
   io.emit("live:connect", {
@@ -200,7 +261,10 @@ function getAuctionState() {
 }
 
 function emitAuctionState() {
-  io.emit("auction:state", getAuctionState());
+  io.emit(
+    "auction:state",
+    getAuctionState()
+  );
 }
 
 /* =========================================================
@@ -216,26 +280,164 @@ function resetAuction() {
 
   processedGiftIds.clear();
 
+  giftEventsReceived = 0;
+  giftEventsProcessed = 0;
+  giftCoinsAdded = 0;
+
+  lastGift = null;
+  lastGiftAt = null;
+
   emitAuctionState();
 
   console.log("[Auction] RESET");
 }
 
 /* =========================================================
-   ADD COINS
+   ADD COINS FROM GIFT
    ========================================================= */
 
 function addCoinsFromGift(event) {
-  if (!auctionRunning || auctionPaused || auctionFinished) {
+  /*
+    Jangan menerima coin apabila lelang belum dimulai.
+  */
+
+  if (!auctionRunning) {
+    console.log(
+      "[Gift] DITERIMA tetapi lelang belum START - diabaikan."
+    );
+
     return;
   }
+
+  if (auctionPaused) {
+    console.log(
+      "[Gift] DITERIMA tetapi lelang PAUSE - diabaikan."
+    );
+
+    return;
+  }
+
+  if (auctionFinished) {
+    console.log(
+      "[Gift] DITERIMA tetapi lelang SUDAH SELESAI - diabaikan."
+    );
+
+    return;
+  }
+
+  /* -------------------------------------------------------
+     USER
+     ------------------------------------------------------- */
 
   const username = getUsername(event);
 
   if (!username) {
-    console.log("[Gift] username kosong");
+    console.log(
+      "[Gift] Username kosong - gift tidak dapat dimasukkan."
+    );
+
     return;
   }
+
+  const nickname = getNickname(event);
+
+  /* -------------------------------------------------------
+     GIFT DATA
+     ------------------------------------------------------- */
+
+  const giftName = (
+    event?.giftName ||
+    event?.gift_name ||
+    "Unknown Gift"
+  )
+    .toString();
+
+  const diamondCount = Math.max(
+    0,
+    safeNumber(
+      event?.diamondCount ??
+      event?.diamond_count,
+      0
+    )
+  );
+
+  const repeatCount = Math.max(
+    1,
+    safeNumber(
+      event?.repeatCount ??
+      event?.repeat_count,
+      1
+    )
+  );
+
+  const repeatEnd =
+    event?.repeatEnd ??
+    event?.repeat_end ??
+    null;
+
+  const transactionId =
+    event?.transactionId ??
+    event?.transaction_id ??
+    null;
+
+  const msgId =
+    event?.msgId ??
+    event?.msg_id ??
+    null;
+
+  const giftId =
+    event?.giftId ??
+    event?.gift_id ??
+    null;
+
+  /* -------------------------------------------------------
+     DIAGNOSTIC LOG
+     ------------------------------------------------------- */
+
+  console.log("");
+  console.log(
+    "========== GIFT EVENT RECEIVED =========="
+  );
+
+  console.log(
+    `[Gift] User       : @${username}`
+  );
+
+  console.log(
+    `[Gift] Nickname   : ${nickname}`
+  );
+
+  console.log(
+    `[Gift] Gift       : ${giftName}`
+  );
+
+  console.log(
+    `[Gift] Gift ID    : ${giftId ?? "-"}`
+  );
+
+  console.log(
+    `[Gift] Diamonds   : ${diamondCount}`
+  );
+
+  console.log(
+    `[Gift] Repeat     : ${repeatCount}`
+  );
+
+  console.log(
+    `[Gift] Repeat End : ${repeatEnd ?? "-"}`
+  );
+
+  console.log(
+    `[Gift] Tx ID      : ${transactionId ?? "-"}`
+  );
+
+  console.log(
+    `[Gift] Msg ID     : ${msgId ?? "-"}`
+  );
+
+  console.log(
+    "========================================="
+  );
 
   /* -------------------------------------------------------
      DEDUP
@@ -246,7 +448,7 @@ function addCoinsFromGift(event) {
   if (giftEventId) {
     if (processedGiftIds.has(giftEventId)) {
       console.log(
-        `[Gift] DUPLICATE ignored: ${giftEventId}`
+        `[Gift] DUPLICATE IGNORED: ${giftEventId}`
       );
 
       return;
@@ -259,29 +461,15 @@ function addCoinsFromGift(event) {
   }
 
   /* -------------------------------------------------------
-     GIFT DATA
+     COIN CALCULATION
      ------------------------------------------------------- */
-
-  const giftName = (
-    event?.giftName || "Unknown Gift"
-  ).toString();
-
-  const diamondCount = Math.max(
-    0,
-    safeNumber(event?.diamondCount, 0)
-  );
-
-  const repeatCount = Math.max(
-    1,
-    safeNumber(event?.repeatCount, 1)
-  );
 
   /*
     Contoh:
 
-    1 diamond x 1 = 1
-    1 diamond x 3 = 3
-    5 diamond x 3 = 15
+    1 diamond x 1 = +1
+    1 diamond x 3 = +3
+    5 diamond x 3 = +15
   */
 
   const coinsAdded =
@@ -289,15 +477,19 @@ function addCoinsFromGift(event) {
 
   if (coinsAdded <= 0) {
     console.log(
-      `[Gift] ignored: ${giftName} nilai 0`
+      `[Gift] NILAI 0 - tidak dimasukkan. ` +
+      `diamondCount=${diamondCount}`
     );
 
     return;
   }
 
-  const nickname = getNickname(event);
+  /* -------------------------------------------------------
+     PARTICIPANT
+     ------------------------------------------------------- */
 
-  let participant = participants.get(username);
+  let participant =
+    participants.get(username);
 
   if (!participant) {
     participant = {
@@ -311,23 +503,79 @@ function addCoinsFromGift(event) {
       username,
       participant
     );
+
+    console.log(
+      `[Participant] PESERTA BARU: @${username}`
+    );
   }
 
   participant.nickname =
     nickname || participant.nickname;
 
   participant.coins += coinsAdded;
-  participant.lastGiftAt = Date.now();
+
+  participant.lastGiftAt =
+    Date.now();
+
+  /* -------------------------------------------------------
+     DIAGNOSTIC COUNTERS
+     ------------------------------------------------------- */
+
+  giftEventsProcessed++;
+
+  giftCoinsAdded += coinsAdded;
+
+  lastGiftAt =
+    new Date().toISOString();
+
+  lastGift = {
+    username,
+    nickname,
+    giftName,
+    giftId,
+    diamondCount,
+    repeatCount,
+    coinsAdded,
+    totalCoins: participant.coins,
+    transactionId,
+    msgId,
+    receivedAt: lastGiftAt
+  };
+
+  /* -------------------------------------------------------
+     LOG SUCCESS
+     ------------------------------------------------------- */
+
+  console.log("");
+  console.log(
+    "========== COIN ADDED =========="
+  );
 
   console.log(
-    `[Gift] @${username} | ${giftName} | ` +
-    `${diamondCount} x ${repeatCount} = +${coinsAdded} | ` +
-    `TOTAL=${participant.coins}`
+    `@${username}`
+  );
+
+  console.log(
+    `${giftName}`
+  );
+
+  console.log(
+    `${diamondCount} x ${repeatCount} = +${coinsAdded}`
+  );
+
+  console.log(
+    `TOTAL PESERTA = ${participant.coins}`
+  );
+
+  console.log(
+    "================================"
   );
 
   /*
     Hanya update leaderboard.
-    Tidak ada notif gift.
+
+    Tidak mengirim event gift/notifikasi
+    ke tampilan.
   */
 
   emitAuctionState();
@@ -435,7 +683,15 @@ async function connectToLive() {
   );
 
   console.log(
-    `[TikTok] API Key: CONFIGURED`
+    "[TikTok] API Key: CONFIGURED"
+  );
+
+  console.log(
+    "[TikTok] Package: tiktok-live-api"
+  );
+
+  console.log(
+    "[TikTok] Gift listener: ENABLED"
   );
 
   console.log(
@@ -455,133 +711,227 @@ async function connectToLive() {
     );
 
     /* =====================================================
-       CONNECTED EVENT
+       CONNECTED
        ===================================================== */
 
-    liveClient.on("connected", () => {
-      liveConnected = true;
-      connecting = false;
-      lastLiveError = null;
+    liveClient.on(
+      "connected",
+      () => {
+        liveConnected = true;
+        connecting = false;
+        lastLiveError = null;
 
-      console.log(
-        `\n[TikTok] =================================`
-      );
+        console.log("");
+        console.log(
+          "[TikTok] ================================="
+        );
 
-      console.log(
-        `[TikTok] CONNECTED @${TIKTOK_USERNAME}`
-      );
+        console.log(
+          `[TikTok] CONNECTED @${TIKTOK_USERNAME}`
+        );
 
-      console.log(
-        `[TikTok] LIVE EVENT STREAM AKTIF`
-      );
+        console.log(
+          "[TikTok] LIVE EVENT STREAM AKTIF"
+        );
 
-      console.log(
-        `[TikTok] =================================\n`
-      );
+        console.log(
+          "[TikTok] GIFT LISTENER AKTIF"
+        );
 
-      emitLiveStatus(
-        "connected",
-        `Terhubung ke TikTok LIVE @${TIKTOK_USERNAME}`
-      );
-    });
+        console.log(
+          "[TikTok] ================================="
+        );
+
+        console.log("");
+
+        emitLiveStatus(
+          "connected",
+          `Terhubung ke TikTok LIVE @${TIKTOK_USERNAME}`
+        );
+      }
+    );
 
     /* =====================================================
-       ERROR EVENT
+       ERROR
        ===================================================== */
 
-    liveClient.on("error", (error) => {
-      const message =
-        error?.message ||
-        error?.error ||
-        String(error);
+    liveClient.on(
+      "error",
+      (error) => {
+        const message =
+          error?.message ||
+          error?.error ||
+          String(error);
 
-      lastLiveError = message;
+        lastLiveError = message;
 
-      console.error(
-        "[TikTok] EVENT ERROR:",
-        message
-      );
+        console.error(
+          "[TikTok] EVENT ERROR:",
+          message
+        );
 
-      if (!liveConnected) {
-        connecting = false;
+        if (!liveConnected) {
+          connecting = false;
+        }
+
+        emitLiveStatus(
+          "error",
+          `TikTok error: ${message}`
+        );
       }
-
-      emitLiveStatus(
-        "error",
-        `TikTok error: ${message}`
-      );
-    });
+    );
 
     /* =====================================================
        DISCONNECTED
        ===================================================== */
 
-    liveClient.on("disconnected", () => {
-      liveConnected = false;
-      connecting = false;
+    liveClient.on(
+      "disconnected",
+      () => {
+        liveConnected = false;
+        connecting = false;
 
-      console.log(
-        `[TikTok] DISCONNECTED @${TIKTOK_USERNAME}`
-      );
+        console.log(
+          `[TikTok] DISCONNECTED @${TIKTOK_USERNAME}`
+        );
 
-      emitLiveStatus(
-        "disconnected",
-        `Koneksi TikTok terputus. Mencoba menghubungkan kembali...`
-      );
+        emitLiveStatus(
+          "disconnected",
+          "Koneksi TikTok terputus. Mencoba menghubungkan kembali..."
+        );
 
-      scheduleReconnect();
-    });
+        scheduleReconnect();
+      }
+    );
 
     /* =====================================================
        STREAM END
        ===================================================== */
 
-    liveClient.on("streamEnd", (event) => {
-      liveConnected = false;
-      connecting = false;
+    liveClient.on(
+      "streamEnd",
+      (event) => {
+        liveConnected = false;
+        connecting = false;
 
-      console.log(
-        "[TikTok] LIVE SELESAI:",
-        event?.reason || "unknown"
-      );
+        console.log(
+          "[TikTok] LIVE SELESAI:",
+          event?.reason || "unknown"
+        );
 
-      emitLiveStatus(
-        "ended",
-        "TikTok LIVE telah berakhir."
-      );
-    });
+        emitLiveStatus(
+          "ended",
+          "TikTok LIVE telah berakhir."
+        );
+      }
+    );
 
     /* =====================================================
        GIFT
        ===================================================== */
 
-    liveClient.on("gift", (event) => {
-      try {
+    liveClient.on(
+      "gift",
+      (event) => {
         /*
-          Gift streak:
+          PENTING:
 
-          repeatEnd === false
-          berarti combo belum selesai.
+          Hitung setiap event yang benar-benar
+          diterima dari TikTok.
 
-          Jangan proses dulu.
-
-          Event terakhir akan membawa total
-          repeatCount.
+          Ini membuktikan apakah server
+          benar-benar mendapatkan gift.
         */
 
-        if (event?.repeatEnd === false) {
-          return;
-        }
+        giftEventsReceived++;
 
-        addCoinsFromGift(event);
-
-      } catch (error) {
-        console.error(
-          "[TikTok] Gift handler error:",
-          error
+        console.log("");
+        console.log(
+          "########################################"
         );
+
+        console.log(
+          `[TikTok] GIFT EVENT #${giftEventsReceived} DITERIMA`
+        );
+
+        console.log(
+          `User: @${getUsername(event) || "UNKNOWN"}`
+        );
+
+        console.log(
+          `Gift: ${
+            event?.giftName ||
+            event?.gift_name ||
+            "UNKNOWN"
+          }`
+        );
+
+        console.log(
+          `Diamond: ${
+            event?.diamondCount ??
+            event?.diamond_count ??
+            0
+          }`
+        );
+
+        console.log(
+          `Repeat: ${
+            event?.repeatCount ??
+            event?.repeat_count ??
+            1
+          }`
+        );
+
+        console.log(
+          `RepeatEnd: ${
+            event?.repeatEnd ??
+            event?.repeat_end ??
+            "-"
+          }`
+        );
+
+        console.log(
+          "########################################"
+        );
+
+        try {
+          /*
+            Untuk gift streak:
+
+            repeatEnd === false
+
+            berarti combo masih berjalan.
+
+            Tunggu event terakhir supaya
+            repeatCount bisa digunakan sebagai
+            jumlah total combo.
+
+            Gift biasa biasanya tidak memiliki
+            repeatEnd=false sehingga langsung
+            diproses.
+          */
+
+          if (
+            event?.repeatEnd === false ||
+            event?.repeat_end === false
+          ) {
+            console.log(
+              "[Gift] Combo masih berjalan - menunggu event terakhir."
+            );
+
+            return;
+          }
+
+          addCoinsFromGift(event);
+
+        } catch (error) {
+          console.error(
+            "[TikTok] Gift handler error:",
+            error
+          );
+        }
       }
-    });
+    );
 
     /* =====================================================
        CONNECT WITH TIMEOUT
@@ -609,13 +959,12 @@ async function connectToLive() {
     clearTimeout(timeoutHandle);
 
     /*
-      Jangan langsung menganggap connected hanya
-      karena Promise selesai.
+      Jangan langsung menganggap connected
+      hanya karena Promise selesai.
 
-      Event "connected" adalah penentu utama.
+      Event connected tetap menjadi indikator utama.
 
-      Tetapi untuk kompatibilitas beberapa versi SDK,
-      gunakan property connected sebagai fallback.
+      Property connected digunakan sebagai fallback.
     */
 
     if (liveClient.connected) {
@@ -644,26 +993,21 @@ async function connectToLive() {
 
     lastLiveError = message;
 
+    console.error("");
     console.error(
-      "\n[TikTok] CONNECTION ERROR:"
+      "[TikTok] CONNECTION ERROR:"
     );
 
     console.error(
       message
     );
 
-    console.error(
-      ""
-    );
+    console.error("");
 
     emitLiveStatus(
       "error",
       `Gagal terhubung: ${message}`
     );
-
-    /*
-      Jangan langsung reconnect terlalu cepat.
-    */
 
     scheduleReconnect();
   }
@@ -673,130 +1017,26 @@ async function connectToLive() {
    SOCKET.IO
    ========================================================= */
 
-io.on("connection", (socket) => {
-  console.log(
-    `[Socket] Browser connected: ${socket.id}`
-  );
-
-  /* -------------------------------------------------------
-     AUCTION STATE
-     ------------------------------------------------------- */
-
-  socket.emit(
-    "auction:state",
-    getAuctionState()
-  );
-
-  /* -------------------------------------------------------
-     LIVE STATUS
-     ------------------------------------------------------- */
-
-  socket.emit(
-    "live:status",
-    {
-      connected: liveConnected,
-      connecting,
-      status: liveConnected
-        ? "connected"
-        : connecting
-          ? "connecting"
-          : "disconnected",
-      username: TIKTOK_USERNAME,
-      message: liveConnected
-        ? `Terhubung ke @${TIKTOK_USERNAME}`
-        : lastLiveError || "",
-      error: lastLiveError
-    }
-  );
-
-  /* =======================================================
-     START
-     ======================================================= */
-
-  socket.on("auction:start", () => {
-    auctionRunning = true;
-    auctionPaused = false;
-    auctionFinished = false;
-
-    console.log("[Auction] START");
-
-    emitAuctionState();
-  });
-
-  /* =======================================================
-     PAUSE
-     ======================================================= */
-
-  socket.on("auction:pause", () => {
-    if (!auctionRunning || auctionFinished) {
-      return;
-    }
-
-    auctionPaused = true;
-
-    console.log("[Auction] PAUSE");
-
-    emitAuctionState();
-  });
-
-  /* =======================================================
-     RESUME
-     ======================================================= */
-
-  socket.on("auction:resume", () => {
-    if (!auctionRunning || auctionFinished) {
-      return;
-    }
-
-    auctionPaused = false;
-
-    console.log("[Auction] RESUME");
-
-    emitAuctionState();
-  });
-
-  /* =======================================================
-     RESET
-     ======================================================= */
-
-  socket.on("auction:reset", () => {
-    resetAuction();
-  });
-
-  /* =======================================================
-     FINISH
-     ======================================================= */
-
-  socket.on("auction:finish", () => {
-    if (!auctionRunning) {
-      return;
-    }
-
-    auctionFinished = true;
-    auctionPaused = false;
-
-    console.log("[Auction] FINISH");
-
-    emitAuctionState();
-  });
-
-  /* =======================================================
-     MANUAL TIKTOK CONNECT
-     ======================================================= */
-
-  socket.on("live:connect", async () => {
+io.on(
+  "connection",
+  (socket) => {
     console.log(
-      `[Socket] Manual TikTok connect requested by ${socket.id}`
+      `[Socket] Browser connected: ${socket.id}`
     );
 
-    await connectToLive();
-  });
+    /* -------------------------------------------------------
+       AUCTION STATE
+       ------------------------------------------------------- */
 
-  /* =======================================================
-     MANUAL STATUS
-     ======================================================= */
+    socket.emit(
+      "auction:state",
+      getAuctionState()
+    );
 
-  socket.on("live:status:request", () => {
+    /* -------------------------------------------------------
+       LIVE STATUS
+       ------------------------------------------------------- */
+
     socket.emit(
       "live:status",
       {
@@ -808,57 +1048,241 @@ io.on("connection", (socket) => {
             ? "connecting"
             : "disconnected",
         username: TIKTOK_USERNAME,
-        message:
-          lastLiveError ||
-          (liveConnected
-            ? `Terhubung ke @${TIKTOK_USERNAME}`
-            : "Belum terhubung"),
+        message: liveConnected
+          ? `Terhubung ke @${TIKTOK_USERNAME}`
+          : lastLiveError || "",
         error: lastLiveError
       }
     );
-  });
 
-  /* =======================================================
-     BROWSER DISCONNECT
-     ======================================================= */
+    /* =======================================================
+       START
+       ======================================================= */
 
-  socket.on("disconnect", () => {
-    console.log(
-      `[Socket] Browser disconnected: ${socket.id}`
+    socket.on(
+      "auction:start",
+      () => {
+        auctionRunning = true;
+        auctionPaused = false;
+        auctionFinished = false;
+
+        console.log(
+          "[Auction] START"
+        );
+
+        emitAuctionState();
+      }
     );
-  });
-});
+
+    /* =======================================================
+       PAUSE
+       ======================================================= */
+
+    socket.on(
+      "auction:pause",
+      () => {
+        if (
+          !auctionRunning ||
+          auctionFinished
+        ) {
+          return;
+        }
+
+        auctionPaused = true;
+
+        console.log(
+          "[Auction] PAUSE"
+        );
+
+        emitAuctionState();
+      }
+    );
+
+    /* =======================================================
+       RESUME
+       ======================================================= */
+
+    socket.on(
+      "auction:resume",
+      () => {
+        if (
+          !auctionRunning ||
+          auctionFinished
+        ) {
+          return;
+        }
+
+        auctionPaused = false;
+
+        console.log(
+          "[Auction] RESUME"
+        );
+
+        emitAuctionState();
+      }
+    );
+
+    /* =======================================================
+       RESET
+       ======================================================= */
+
+    socket.on(
+      "auction:reset",
+      () => {
+        resetAuction();
+      }
+    );
+
+    /* =======================================================
+       FINISH
+       ======================================================= */
+
+    socket.on(
+      "auction:finish",
+      () => {
+        if (!auctionRunning) {
+          return;
+        }
+
+        auctionFinished = true;
+        auctionPaused = false;
+
+        console.log(
+          "[Auction] FINISH"
+        );
+
+        emitAuctionState();
+      }
+    );
+
+    /* =======================================================
+       MANUAL TIKTOK CONNECT
+       ======================================================= */
+
+    socket.on(
+      "live:connect",
+      async () => {
+        console.log(
+          `[Socket] Manual TikTok connect requested by ${socket.id}`
+        );
+
+        await connectToLive();
+      }
+    );
+
+    /* =======================================================
+       MANUAL STATUS
+       ======================================================= */
+
+    socket.on(
+      "live:status:request",
+      () => {
+        socket.emit(
+          "live:status",
+          {
+            connected: liveConnected,
+            connecting,
+            status: liveConnected
+              ? "connected"
+              : connecting
+                ? "connecting"
+                : "disconnected",
+            username: TIKTOK_USERNAME,
+            message:
+              lastLiveError ||
+              (
+                liveConnected
+                  ? `Terhubung ke @${TIKTOK_USERNAME}`
+                  : "Belum terhubung"
+              ),
+            error: lastLiveError
+          }
+        );
+      }
+    );
+
+    /* =======================================================
+       BROWSER DISCONNECT
+       ======================================================= */
+
+    socket.on(
+      "disconnect",
+      () => {
+        console.log(
+          `[Socket] Browser disconnected: ${socket.id}`
+        );
+      }
+    );
+  }
+);
 
 /* =========================================================
    HEALTH
    ========================================================= */
 
-app.get("/health", (req, res) => {
-  res.json({
-    ok: true,
-    service: "tiktok-live-coin-auction",
-    version: "21.0.0",
+app.get(
+  "/health",
+  (req, res) => {
+    res.json({
+      ok: true,
 
-    tiktokUsername: TIKTOK_USERNAME,
+      service:
+        "tiktok-live-coin-auction",
 
-    tiktokConnected: liveConnected,
-    tiktokConnecting: connecting,
+      version:
+        "22.0.0",
 
-    tiktokStatus: liveConnected
-      ? "connected"
-      : connecting
-        ? "connecting"
-        : "disconnected",
+      package:
+        "tiktok-live-api@1.4.9",
 
-    tiktokError: lastLiveError,
+      tiktokUsername:
+        TIKTOK_USERNAME,
 
-    auctionRunning,
-    auctionPaused,
-    auctionFinished,
+      tiktokConnected:
+        liveConnected,
 
-    participants: participants.size
-  });
-});
+      tiktokConnecting:
+        connecting,
+
+      tiktokStatus:
+        liveConnected
+          ? "connected"
+          : connecting
+            ? "connecting"
+            : "disconnected",
+
+      tiktokError:
+        lastLiveError,
+
+      /*
+        DIAGNOSTIC GIFT
+      */
+
+      giftEventsReceived,
+
+      giftEventsProcessed,
+
+      giftCoinsAdded,
+
+      lastGiftAt,
+
+      lastGift,
+
+      /*
+        AUCTION
+      */
+
+      auctionRunning,
+
+      auctionPaused,
+
+      auctionFinished,
+
+      participants:
+        participants.size
+    });
+  }
+);
 
 /* =========================================================
    START SERVER
@@ -873,7 +1297,7 @@ server.listen(
     );
 
     console.log(
-      " TIKTOK LIVE COIN AUCTION"
+      " TIKTOK LIVE COIN AUCTION V22"
     );
 
     console.log(
@@ -889,6 +1313,10 @@ server.listen(
     );
 
     console.log(
+      `TikTok Live API: 1.4.9`
+    );
+
+    console.log(
       `TikTool API Key: ${
         TIKTOOL_API_KEY
           ? "CONFIGURED"
@@ -901,16 +1329,23 @@ server.listen(
     );
 
     console.log(
+      "Gift listener: ENABLED"
+    );
+
+    console.log(
       "========================================"
     );
 
     /*
-      Tunggu server siap.
+      Tunggu server siap sebelum koneksi.
     */
 
-    setTimeout(() => {
-      connectToLive();
-    }, 1500);
+    setTimeout(
+      () => {
+        connectToLive();
+      },
+      1500
+    );
   }
 );
 
@@ -948,7 +1383,10 @@ async function shutdown(signal) {
   );
 
   if (reconnectTimer) {
-    clearTimeout(reconnectTimer);
+    clearTimeout(
+      reconnectTimer
+    );
+
     reconnectTimer = null;
   }
 
@@ -963,21 +1401,18 @@ async function shutdown(signal) {
     );
   }
 
-  server.close(() => {
-    console.log(
-      "[Server] Closed."
-    );
+  server.close(
+    () => {
+      console.log(
+        "[Server] Closed."
+      );
 
-    process.exit(0);
-  });
+      process.exit(0);
+    }
+  );
 }
 
 process.on(
   "SIGTERM",
   () => shutdown("SIGTERM")
-);
-
-process.on(
-  "SIGINT",
-  () => shutdown("SIGINT")
 );

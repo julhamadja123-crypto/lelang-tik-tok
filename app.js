@@ -650,10 +650,20 @@
 
       if (el.timer) {
 
-        el.timer.textContent =
-          formatTime(
-            state.timer
-          );
+        // Selalu tampilkan 00:00 saat waktu benar-benar habis.
+        const displayTimer = Math.max(0, Number(state.timer) || 0);
+        el.timer.textContent = formatTime(displayTimer);
+
+        // FINISHED harus berwarna hijau dan hanya muncul setelah
+        // auction benar-benar masuk status finished.
+        if (el.timerNote) {
+          if (state.auction === "finished" && displayTimer === 0) {
+            el.timerNote.textContent = "FINISHED";
+            el.timerNote.classList.add("finished-state");
+          } else {
+            el.timerNote.classList.remove("finished-state");
+          }
+        }
 
         applyExtraTimeColor();
       }
@@ -1169,6 +1179,11 @@
 
         el.timerNote.textContent =
           labels[next] || "";
+
+        el.timerNote.classList.toggle(
+          "finished-state",
+          next === "finished" && Math.max(0, Number(state.timer) || 0) === 0
+        );
       }
 
       if (el.statusBadge) {
@@ -1177,6 +1192,23 @@
           next;
       }
     }
+
+    /* =======================================================
+       FINISHED STATUS - GREEN
+       ======================================================= */
+    (() => {
+      if (document.getElementById("finishedStateStyle")) return;
+      const style = document.createElement("style");
+      style.id = "finishedStateStyle";
+      style.textContent = `
+        #timerNote.finished-state {
+          color: #22c55e !important;
+          font-weight: 700 !important;
+          text-shadow: 0 0 10px rgba(34, 197, 94, 0.25);
+        }
+      `;
+      document.head.appendChild(style);
+    })();
 
     /* =======================================================
        TOAST

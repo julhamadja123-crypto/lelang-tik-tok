@@ -28,18 +28,26 @@ const DEFAULT_TIKTOK_USERNAME =
   process.env.TIKTOK_USERNAME || "hamstillearn";
 
 
-const SIGN_API_KEY =
-  String(process.env.SIGN_API_KEY || "")
-    .trim()
-    .replace(/^["']|["']$/g, "");
+/*
+ * TIDAK ADA:
+ *
+ * SIGN_API_KEY
+ * EULER_API_KEY
+ * signApiKey
+ *
+ * Versi connector 1.2.3 menggunakan
+ * WebcastPushConnection.
+ */
 
 
 /* =========================================================
-   STARTUP CHECK
+   STARTUP
    ========================================================= */
 
 console.log("================================================");
 console.log("[SERVER] TikTok Live Coin Auction");
+console.log("[SERVER] Connector: tiktok-live-connector 1.2.3");
+console.log("[SERVER] MODE: TANPA API KEY");
 console.log("================================================");
 
 console.log(
@@ -47,22 +55,8 @@ console.log(
 );
 
 console.log(
-  `[CONFIG] SIGN_API_KEY: ${
-    SIGN_API_KEY ? "TERSEDIA" : "BELUM DIATUR"
-  }`
+  "[CONFIG] SIGN_API_KEY: TIDAK DIGUNAKAN"
 );
-
-if (!SIGN_API_KEY) {
-
-  console.warn(
-    "[WARNING] SIGN_API_KEY belum tersedia."
-  );
-
-  console.warn(
-    "[WARNING] Atur SIGN_API_KEY di Railway Variables."
-  );
-
-}
 
 console.log("================================================");
 
@@ -71,17 +65,18 @@ console.log("================================================");
    TIKTOK CONNECTOR
    ========================================================= */
 
-let TikTokLiveConnection = null;
+let WebcastPushConnection = null;
 let liveConnection = null;
 
 let activeUsername = null;
+
 let reconnectTimer = null;
 
 let manualDisconnect = false;
 
 
 /* =========================================================
-   AUCTION STATE
+   AUCTION
    ========================================================= */
 
 let auctionActive = false;
@@ -90,6 +85,15 @@ let auctionActive = false;
 /* =========================================================
    GIFT DEDUP
    ========================================================= */
+
+/*
+ * Hanya digunakan jika TikTok menyediakan
+ * transactionId / msgId.
+ *
+ * JANGAN melakukan dedup berdasarkan
+ * username + giftId + waktu karena bisa
+ * membuat 3 gift menjadi 1.
+ */
 
 const processedGiftEvents = new Map();
 
@@ -100,31 +104,30 @@ const GIFT_TTL = 60 * 1000;
    LOAD CONNECTOR
    ========================================================= */
 
-async function loadTikTokConnector() {
+function loadTikTokConnector() {
 
-  if (TikTokLiveConnection) {
-    return TikTokLiveConnection;
+  if (WebcastPushConnection) {
+    return WebcastPushConnection;
   }
 
   const mod =
-    await import("tiktok-live-connector");
+    require("tiktok-live-connector");
 
-  TikTokLiveConnection =
-    mod.TikTokLiveConnection ||
-    mod.default?.TikTokLiveConnection ||
+  WebcastPushConnection =
+    mod.WebcastPushConnection ||
+    mod.default?.WebcastPushConnection ||
     mod.default;
 
   if (
-    typeof TikTokLiveConnection !== "function"
+    typeof WebcastPushConnection !== "function"
   ) {
 
     throw new Error(
-      "TikTokLiveConnection tidak ditemukan. Pastikan tiktok-live-connector 2.4.4 terinstall."
+      "WebcastPushConnection tidak ditemukan. Pastikan tiktok-live-connector 1.2.3 terinstall."
     );
-
   }
 
-  return TikTokLiveConnection;
+  return WebcastPushConnection;
 }
 
 
@@ -204,41 +207,6 @@ function formatError(err) {
     raw.toLowerCase();
 
 
-  /* API KEY */
-
-  if (
-    msg.includes("401") ||
-    msg.includes("403") ||
-    msg.includes("unauthorized") ||
-    msg.includes("forbidden") ||
-    msg.includes("invalid api") ||
-    msg.includes("api key")
-  ) {
-
-    return (
-      "Euler Stream menolak SIGN_API_KEY. " +
-      "Pastikan API key berasal dari Euler Stream Dashboard dan masih aktif."
-    );
-  }
-
-
-  /* RATE LIMIT */
-
-  if (
-    msg.includes("429") ||
-    msg.includes("rate limit") ||
-    msg.includes("too many")
-  ) {
-
-    return (
-      "Euler Stream rate limit. " +
-      "Tunggu beberapa saat lalu coba lagi."
-    );
-  }
-
-
-  /* OFFLINE */
-
   if (
     msg.includes("offline") ||
     msg.includes("not live") ||
@@ -250,22 +218,6 @@ function formatError(err) {
     );
   }
 
-
-  /* TIMEOUT */
-
-  if (
-    msg.includes("timeout") ||
-    msg.includes("timed out") ||
-    msg.includes("connecttimeout")
-  ) {
-
-    return (
-      "Koneksi ke TikTok timeout. Coba lagi beberapa detik."
-    );
-  }
-
-
-  /* ROOM */
 
   if (
     msg.includes("room") &&
@@ -282,20 +234,48 @@ function formatError(err) {
   }
 
 
-  /* SIGN */
-
   if (
-    msg.includes("sign") ||
-    msg.includes("signature") ||
-    msg.includes("euler")
+    msg.includes("timeout") ||
+    msg.includes("timed out") ||
+    msg.includes("etimedout")
   ) {
 
     return (
-      "Euler Stream menolak proses signing. " +
-      "Periksa SIGN_API_KEY."
+      "Koneksi ke TikTok timeout. Coba lagi beberapa detik."
     );
   }
 
+
+  if (
+    msg.includes("403") ||
+    msg.includes("forbidden")
+  ) {
+
+    return (
+      "TikTok menolak koneksi dari server. " +
+      "Coba reconnect beberapa saat lagi."
+    );
+  }
+
+
+  if (
+    msg.includes("429") ||
+    msg.includes("rate limit") ||
+    msg.includes("too many")
+  ) {
+
+    return (
+      "TikTok sedang membatasi koneksi. " +
+      "Tunggu beberapa saat lalu coba lagi."
+    );
+  }
+
+
+  /*
+   * Jika masih ada pesan Euler/sign,
+   * tampilkan pesan apa adanya supaya
+   * mudah diketahui.
+   */
 
   return raw;
 }
@@ -314,11 +294,14 @@ function numberPositive(...values) {
       value === undefined ||
       value === ""
     ) {
+
       continue;
     }
 
+
     const n =
       Number(value);
+
 
     if (
       Number.isFinite(n) &&
@@ -328,6 +311,7 @@ function numberPositive(...values) {
       return n;
     }
   }
+
 
   return 0;
 }
@@ -342,29 +326,37 @@ function userData(event) {
   const user =
     event?.user || {};
 
+
   return {
 
     userId:
+
       user.userId ||
       user.id ||
       event?.userId ||
       event?.user_id ||
       "unknown",
 
+
     uniqueId:
+
       user.uniqueId ||
       event?.uniqueId ||
-      event?.nickname ||
+      event?.unique_id ||
       "Viewer",
 
+
     nickname:
+
       user.nickname ||
       event?.nickname ||
       user.uniqueId ||
       event?.uniqueId ||
       "Viewer",
 
+
     avatar:
+
       user.profilePictureUrl ||
       user.profilePicture?.url ||
       user.profilePicture?.urls?.[0] ||
@@ -373,6 +365,70 @@ function userData(event) {
       null
 
   };
+}
+
+
+/* =========================================================
+   GET GIFT DIAMOND COUNT
+   ========================================================= */
+
+function getGiftDiamondCount(event) {
+
+  /*
+   * v1.x biasanya menyediakan diamondCount
+   * langsung pada event.
+   */
+
+  let value =
+    numberPositive(
+
+      event?.diamondCount,
+      event?.diamond_count,
+
+      event?.giftDetails?.diamondCount,
+      event?.giftDetails?.diamond_count,
+
+      event?.giftDetails?.diamondCost,
+      event?.giftDetails?.diamond_cost,
+
+      event?.gift?.diamondCount,
+      event?.gift?.diamond_count,
+
+      event?.extendedGiftInfo?.diamondCount,
+      event?.extendedGiftInfo?.diamond_count,
+
+      event?.extendedGiftInfo?.diamondCost,
+      event?.extendedGiftInfo?.diamond_cost
+
+    );
+
+
+  /*
+   * Beberapa event lama bisa hanya memiliki
+   * giftDetails.
+   */
+
+  if (
+    value <= 0 &&
+    event?.extendedGiftInfo
+  ) {
+
+    value =
+      numberPositive(
+
+        event.extendedGiftInfo.diamondCount,
+
+        event.extendedGiftInfo.diamond_count,
+
+        event.extendedGiftInfo.diamondCost,
+
+        event.extendedGiftInfo.diamond_cost
+
+      );
+  }
+
+
+  return value;
 }
 
 
@@ -401,11 +457,11 @@ function giftData(event) {
       event.giftId ??
       event.gift_id ??
 
-      event.gift?.giftId ??
-      event.gift?.gift_id ??
-
       event.giftDetails?.giftId ??
       event.giftDetails?.gift_id ??
+
+      event.gift?.giftId ??
+      event.gift?.gift_id ??
 
       ""
 
@@ -413,6 +469,11 @@ function giftData(event) {
 
 
   if (!giftId) {
+
+    console.warn(
+      "[GIFT] Gift ID tidak ditemukan."
+    );
+
     return null;
   }
 
@@ -424,49 +485,36 @@ function giftData(event) {
   const giftName =
 
     event.giftName ||
+
     event.gift_name ||
 
-    event.gift?.giftName ||
-    event.gift?.name ||
-
     event.giftDetails?.giftName ||
+
     event.giftDetails?.name ||
+
+    event.gift?.giftName ||
+
+    event.gift?.name ||
 
     `Gift #${giftId}`;
 
 
   /* =======================================================
-     DIAMOND VALUE
+     DIAMOND
      ======================================================= */
 
   const diamondCount =
-    numberPositive(
+    getGiftDiamondCount(event);
 
-      event.diamondCount,
-      event.diamond_count,
 
-      event.gift?.diamondCount,
-      event.gift?.diamond_count,
+  if (
+    diamondCount <= 0
+  ) {
 
-      event.gift?.diamondCost,
-      event.gift?.diamond_cost,
-
-      event.giftDetails?.diamondCount,
-      event.giftDetails?.diamond_count,
-
-      event.giftDetails?.diamondCost,
-      event.giftDetails?.diamond_cost,
-
-      event.extendedGiftInfo?.diamondCount,
-      event.extendedGiftInfo?.diamond_count,
-
-      event.extendedGiftInfo?.diamondCost,
-      event.extendedGiftInfo?.diamond_cost
-
+    console.warn(
+      `[GIFT] Diamond tidak ditemukan untuk ${giftName}`
     );
 
-
-  if (diamondCount <= 0) {
     return null;
   }
 
@@ -485,10 +533,12 @@ function giftData(event) {
         numberPositive(
 
           event.repeatCount,
+
           event.repeat_count,
 
-          event.gift?.repeatCount,
-          event.gift?.repeat_count
+          event.giftDetails?.repeatCount,
+
+          event.giftDetails?.repeat_count
 
         )
 
@@ -505,12 +555,11 @@ function giftData(event) {
     Number(
 
       event.giftType ??
+
       event.gift_type ??
 
-      event.gift?.giftType ??
-      event.gift?.gift_type ??
-
       event.giftDetails?.giftType ??
+
       event.giftDetails?.gift_type ??
 
       0
@@ -525,10 +574,12 @@ function giftData(event) {
   const repeatValue =
 
     event.repeatEnd ??
+
     event.repeat_end ??
 
-    event.gift?.repeatEnd ??
-    event.gift?.repeat_end;
+    event.giftDetails?.repeatEnd ??
+
+    event.giftDetails?.repeat_end;
 
 
   const repeatEnd =
@@ -540,16 +591,21 @@ function giftData(event) {
 
 
   /*
-   * TikTok gift type 1 = streak.
+   * TikTok giftType 1 = streak.
    *
-   * Tunggu sampai streak selesai supaya
-   * tidak menghitung event sementara.
+   * Jangan proses event sementara.
+   *
+   * Tunggu repeatEnd=true.
    */
 
   if (
     giftType === 1 &&
     !repeatEnd
   ) {
+
+    console.log(
+      `[GIFT] Streak sementara diabaikan: @${user.uniqueId} ${giftName} x${repeatCount}`
+    );
 
     return null;
   }
@@ -574,19 +630,38 @@ function giftData(event) {
 
 
   /* =======================================================
-     EVENT IDENTIFIER
+     EVENT ID
      ======================================================= */
 
   const msgId =
+
     event.msgId ??
+
     event.msg_id ??
+
+    event.messageId ??
+
+    event.message_id ??
+
     null;
+
 
   const transactionId =
+
     event.transactionId ??
+
     event.transaction_id ??
+
+    event.giftDetails?.transactionId ??
+
+    event.giftDetails?.transaction_id ??
+
     null;
 
+
+  /*
+   * Hanya gunakan ID asli TikTok.
+   */
 
   let eventKey = null;
 
@@ -600,12 +675,11 @@ function giftData(event) {
 
     eventKey =
       `msg:${String(msgId)}`;
-
   }
 
 
   /* =======================================================
-     CLEAN OLD EVENTS
+     CLEAN OLD DEDUP
      ======================================================= */
 
   const now =
@@ -625,7 +699,6 @@ function giftData(event) {
       processedGiftEvents.delete(
         key
       );
-
     }
   }
 
@@ -664,7 +737,8 @@ function giftData(event) {
   console.log(
     `[GIFT] @${user.uniqueId} | ` +
     `${giftName} | ` +
-    `${diamondCount} x ${repeatCount} = ${coinValue}`
+    `${diamondCount} coin x ${repeatCount} = ` +
+    `${coinValue} coin`
   );
 
 
@@ -679,6 +753,9 @@ function giftData(event) {
 
     nickname:
       user.nickname,
+
+    userId:
+      user.userId,
 
     giftName,
 
@@ -700,6 +777,11 @@ function giftData(event) {
 
     avatar:
       user.avatar,
+
+    /*
+     * Frontend tidak perlu
+     * menampilkan notifikasi.
+     */
 
     silent:
       true,
@@ -770,22 +852,16 @@ async function connectToLive(
   rawUsername
 ) {
 
-  if (!SIGN_API_KEY) {
-
-    throw new Error(
-      "SIGN_API_KEY belum diatur di Railway."
-    );
-  }
-
-
   const Connector =
-    await loadTikTokConnector();
+    loadTikTokConnector();
 
 
   const username =
     cleanUsername(
+
       rawUsername ||
       DEFAULT_TIKTOK_USERNAME
+
     );
 
 
@@ -813,12 +889,15 @@ async function connectToLive(
 
 
   console.log("================================================");
+
   console.log(
     `[TikTok] Mencoba koneksi @${username}`
   );
+
   console.log(
-    "[TikTok] SIGN_API_KEY tersedia"
+    "[TikTok] API KEY: TIDAK DIGUNAKAN"
   );
+
   console.log("================================================");
 
 
@@ -828,24 +907,13 @@ async function connectToLive(
 
 
   /* =======================================================
-     CONNECTION OPTIONS
+     CONNECTION OPTIONS V1.2.3
      ======================================================= */
 
   const connectionOptions = {
 
     /*
-     * API KEY EULER STREAM
-     *
-     * tiktok-live-connector 2.4.4
-     * mendukung ini secara langsung.
-     */
-
-    signApiKey:
-      SIGN_API_KEY,
-
-
-    /*
-     * Jangan mengambil event lama.
+     * Jangan mengambil data lama.
      */
 
     processInitialData:
@@ -853,7 +921,7 @@ async function connectToLive(
 
 
     /*
-     * Informasi gift lengkap.
+     * Ambil informasi gift.
      */
 
     enableExtendedGiftInfo:
@@ -861,7 +929,7 @@ async function connectToLive(
 
 
     /*
-     * Ambil room info.
+     * Pastikan room diperiksa ketika connect.
      */
 
     fetchRoomInfoOnConnect:
@@ -869,25 +937,40 @@ async function connectToLive(
 
 
     /*
-     * HTTP timeout.
+     * Gunakan WebSocket jika tersedia.
      */
 
-    webClientOptions: {
+    enableWebsocketUpgrade:
+      true,
 
-      timeout: {
-        request: 15000
-      }
+
+    /*
+     * Polling fallback.
+     */
+
+    requestPollingIntervalMs:
+      1000,
+
+
+    /*
+     * Timeout HTTP.
+     */
+
+    requestOptions: {
+
+      timeout:
+        15000
 
     },
 
 
     /*
-     * WebSocket timeout.
+     * Timeout WebSocket.
      */
 
-    wsClientOptions: {
+    websocketOptions: {
 
-      handshakeTimeout:
+      timeout:
         15000
 
     }
@@ -919,11 +1002,12 @@ async function connectToLive(
     (event) => {
 
       /*
-       * Gift hanya diproses ketika
-       * lelang sedang aktif.
+       * Jangan proses gift kalau
+       * lelang sedang tidak aktif.
        */
 
       if (!auctionActive) {
+
         return;
       }
 
@@ -933,12 +1017,13 @@ async function connectToLive(
 
 
       if (!gift) {
+
         return;
       }
 
 
       /*
-       * HANYA SATU EVENT.
+       * Hanya SATU event live:gift.
        *
        * Tidak ada event notification.
        */
@@ -959,7 +1044,60 @@ async function connectToLive(
   conn.on(
     "chat",
     () => {
-      // Sengaja tidak diteruskan ke frontend.
+
+      /*
+       * Sengaja tidak diteruskan
+       * ke frontend.
+       */
+
+    }
+  );
+
+
+  /* =======================================================
+     MEMBER
+     ======================================================= */
+
+  conn.on(
+    "member",
+    () => {
+
+      /*
+       * Tidak diteruskan.
+       */
+
+    }
+  );
+
+
+  /* =======================================================
+     LIKE
+     ======================================================= */
+
+  conn.on(
+    "like",
+    () => {
+
+      /*
+       * Tidak diteruskan.
+       */
+
+    }
+  );
+
+
+  /* =======================================================
+     SOCIAL
+     ======================================================= */
+
+  conn.on(
+    "social",
+    () => {
+
+      /*
+       * Tidak diteruskan.
+       */
+
     }
   );
 
@@ -975,6 +1113,43 @@ async function connectToLive(
       console.log(
         "[TikTok] connected:",
         state
+      );
+
+    }
+  );
+
+
+  /* =======================================================
+     WEBSOCKET CONNECTED
+     ======================================================= */
+
+  conn.on(
+    "websocketConnected",
+    () => {
+
+      console.log(
+        "[TikTok] WebSocket berhasil terhubung."
+      );
+
+    }
+  );
+
+
+  /* =======================================================
+     STREAM END
+     ======================================================= */
+
+  conn.on(
+    "streamEnd",
+    () => {
+
+      console.warn(
+        `[TikTok] LIVE @${activeUsername} selesai.`
+      );
+
+
+      emitStatus(
+        `LIVE @${activeUsername} telah selesai.`
       );
 
     }
@@ -1065,6 +1240,7 @@ async function connectToLive(
                 err
               );
 
+
               emitStatus(
                 `Reconnect gagal: ${formatError(err)}`
               );
@@ -1106,9 +1282,33 @@ async function connectToLive(
     }
 
 
+    /*
+     * v1.2.3 menggunakan getState().
+     */
+
+    let currentState =
+      state;
+
+
+    if (
+      !currentState &&
+      typeof conn.getState === "function"
+    ) {
+
+      currentState =
+        conn.getState();
+
+    }
+
+
     const roomId =
-      state?.roomId ||
+
+      currentState?.roomId ||
+
+      currentState?.roomInfo?.room_id ||
+
       conn.roomId ||
+
       "aktif";
 
 
@@ -1119,16 +1319,23 @@ async function connectToLive(
 
 
     console.log("================================================");
+
     console.log(
       `[TikTok] BERHASIL TERHUBUNG @${username}`
     );
+
     console.log(
       `[TikTok] ROOM ID: ${roomId}`
     );
+
+    console.log(
+      "[TikTok] MODE: TANPA API KEY"
+    );
+
     console.log("================================================");
 
 
-    return state;
+    return currentState;
 
   } catch (err) {
 
@@ -1148,6 +1355,7 @@ async function connectToLive(
     console.error(
       "[TikTok] Gagal connect:"
     );
+
 
     console.error(
       err
@@ -1183,11 +1391,45 @@ io.on(
        STATUS AWAL
        ===================================================== */
 
-    const connected =
-      Boolean(
-        liveConnection?.isConnected ||
-        liveConnection?.state?.isConnected
-      );
+    let connected =
+      false;
+
+
+    if (liveConnection) {
+
+      try {
+
+        if (
+          typeof liveConnection.getState ===
+          "function"
+        ) {
+
+          const state =
+            liveConnection.getState();
+
+
+          connected =
+            Boolean(
+              state?.isConnected
+            );
+
+        } else {
+
+          connected =
+            Boolean(
+              liveConnection.isConnected
+            );
+
+        }
+
+      } catch (_) {
+
+        connected =
+          false;
+
+      }
+
+    }
 
 
     socket.emit(
@@ -1360,11 +1602,45 @@ app.get(
   "/health",
   (req, res) => {
 
-    const connected =
-      Boolean(
-        liveConnection?.isConnected ||
-        liveConnection?.state?.isConnected
-      );
+    let connected =
+      false;
+
+
+    if (liveConnection) {
+
+      try {
+
+        if (
+          typeof liveConnection.getState ===
+          "function"
+        ) {
+
+          const state =
+            liveConnection.getState();
+
+
+          connected =
+            Boolean(
+              state?.isConnected
+            );
+
+        } else {
+
+          connected =
+            Boolean(
+              liveConnection.isConnected
+            );
+
+        }
+
+      } catch (_) {
+
+        connected =
+          false;
+
+      }
+
+    }
 
 
     res.status(200).json({
@@ -1374,6 +1650,9 @@ app.get(
 
       service:
         "tiktok-live-coin-auction",
+
+      connector:
+        "tiktok-live-connector@1.2.3",
 
       connected,
 
@@ -1386,12 +1665,10 @@ app.get(
       auctionActive,
 
       apiKeyRequired:
-        true,
+        false,
 
       apiKeyConfigured:
-        Boolean(
-          SIGN_API_KEY
-        )
+        false
 
     });
 
@@ -1443,11 +1720,11 @@ server.listen(
     );
 
     console.log(
-      `SIGN_API_KEY: ${
-        SIGN_API_KEY
-          ? "TERSEDIA"
-          : "BELUM DIATUR"
-      }`
+      "SIGN_API_KEY: TIDAK DIGUNAKAN"
+    );
+
+    console.log(
+      "Euler API: TIDAK DIGUNAKAN"
     );
 
     console.log("================================================");

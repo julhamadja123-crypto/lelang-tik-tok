@@ -209,7 +209,12 @@
       </div>
       <div class="coin-target-draw-value">20 detik</div>
     `;
-    note.insertAdjacentElement("afterend", draw);
+    const ranking = document.getElementById("rankingList");
+    if (ranking) {
+      ranking.insertAdjacentElement("afterend", draw);
+    } else {
+      note.insertAdjacentElement("afterend", draw);
+    }
   }
   function init() {
 
@@ -287,6 +292,8 @@
       version: 0,
 
       timerInterval: null,
+      timerDeadline: null,
+      lastTimerPaint: null,
 
       connected: false,
       connecting: false
@@ -536,6 +543,9 @@
         state.timer =
           state.initialTimer;
 
+        state.timerDeadline = null;
+        state.lastTimerPaint = null;
+
         state.extraUsed =
           false;
 
@@ -676,18 +686,29 @@
         `${percent}%`;
     }
 
+    function syncTimerNow(forceRender = false) {
+
+      if (state.auction !== "running" || !state.timerDeadline) {
+        return state.timer;
+      }
+
+      const remainingMs = Math.max(0, state.timerDeadline - Date.now());
+      const remaining = Math.max(0, Math.ceil(remainingMs / 1000));
+
+      if (forceRender || remaining !== state.timer || state.lastTimerPaint !== remaining) {
+        state.timer = remaining;
+        state.lastTimerPaint = remaining;
+        renderTimer();
+      }
+
+      return remaining;
+    }
+
     function stopTimer() {
 
-      if (
-        state.timerInterval
-      ) {
-
-        clearInterval(
-          state.timerInterval
-        );
-
-        state.timerInterval =
-          null;
+      if (state.timerInterval) {
+        clearInterval(state.timerInterval);
+        state.timerInterval = null;
       }
     }
 
@@ -695,43 +716,48 @@
 
       stopTimer();
 
-      if (
-        state.auction !==
-        "running"
-      ) {
+      if (state.auction !== "running") {
         return;
       }
 
+      // Gunakan deadline absolut agar countdown tidak melambat/jeda
+      // ketika browser HP menunda callback JavaScript.
+      state.timerDeadline = Date.now() + Math.max(0, state.timer) * 1000;
+      state.lastTimerPaint = null;
+      syncTimerNow(true);
       applyExtraTimeColor();
 
-      state.timerInterval =
-        setInterval(() => {
+      state.timerInterval = setInterval(() => {
+        if (state.auction !== "running") {
+          return;
+        }
 
-          if (
-            state.auction !==
-            "running"
-          ) {
-            return;
-          }
+        const remaining = syncTimerNow(false);
 
-          if (
-            state.timer > 0
-          ) {
-
-            state.timer--;
-
-            renderTimer();
-          }
-
-          if (
-            state.timer <= 0
-          ) {
-
-            timerFinished();
-          }
-
-        }, 1000);
+        if (remaining <= 0) {
+          // Pastikan layar selalu 00:00 SEBELUM status FINISHED.
+          state.timer = 0;
+          state.lastTimerPaint = 0;
+          renderTimer();
+          stopTimer();
+          timerFinished();
+        }
+      }, 100);
     }
+
+    /* =====================================================
+       MOBILE / BACKGROUND TIMER SYNC
+       Saat browser HP menunda JavaScript, jangan membuat
+       countdown kembali dari angka lama. Begitu halaman aktif
+       lagi, langsung hitung dari deadline absolut.
+       ===================================================== */
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") {
+        if (state.auction === "running" && state.timerDeadline) {
+          syncTimerNow(true);
+        }
+      }
+    });
 
     function timerFinished() {
 
@@ -756,6 +782,10 @@
 
         state.timer =
           state.extraTime;
+
+        state.timerDeadline =
+          Date.now() + state.extraTime * 1000;
+        state.lastTimerPaint = null;
 
         if (el.extraStatus) {
 
@@ -848,6 +878,9 @@
         state.timer =
           state.initialTimer;
 
+        state.timerDeadline = null;
+        state.lastTimerPaint = null;
+
         state.extraUsed =
           false;
 
@@ -898,7 +931,9 @@
         return;
       }
 
+      syncTimerNow(true);
       stopTimer();
+      state.timerDeadline = null;
 
       state.auction =
         "paused";
@@ -943,6 +978,9 @@
 
       state.timer =
         state.initialTimer;
+
+      state.timerDeadline = null;
+      state.lastTimerPaint = null;
 
       /*
        * HAPUS WARNA MERAH
@@ -999,7 +1037,14 @@
         return;
       }
 
+      if (fromTimer) {
+        state.timer = 0;
+        state.lastTimerPaint = 0;
+        renderTimer();
+      }
+
       stopTimer();
+      state.timerDeadline = null;
 
       state.auction =
         "finished";
@@ -1815,6 +1860,13 @@
         state.auction =
           next;
 
+        if (next === "finished") {
+          state.timer = 0;
+          state.lastTimerPaint = 0;
+          state.timerDeadline = null;
+          renderTimer();
+        }
+
         if (
           next === "running"
         ) {
@@ -1839,11 +1891,28 @@
             removeExtraTimeColor();
           }
 
-          startTimer();
+          /*
+           * PENTING: jangan restart deadline setiap kali
+           * server mengirim auction:state.
+           * Server biasanya mengirim update berkala dengan
+           * nilai remaining yang sudah dibulatkan. Jika deadline
+           * dibuat ulang pada setiap update, countdown di HP bisa
+           * terlihat macet/jeda. Deadline lokal hanya dibuat saat
+           * benar-benar masuk ke status running atau deadline belum ada.
+           */
+          if (
+            previous !== "running" ||
+            !state.timerDeadline
+          ) {
+            startTimer();
+          } else {
+            syncTimerNow(true);
+          }
 
         } else {
 
           stopTimer();
+          state.timerDeadline = null;
 
           /*
            * FINISH / IDLE
@@ -2111,6 +2180,9 @@
               state.timer =
                 state.initialTimer;
 
+              state.timerDeadline = null;
+              state.lastTimerPaint = null;
+
               state.extraUsed =
                 false;
 
@@ -2177,6 +2249,9 @@
 
     state.timer =
       state.initialTimer;
+
+    state.timerDeadline = null;
+    state.lastTimerPaint = null;
 
     state.extraTime =
       getExtraTime();

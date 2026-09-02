@@ -1,22 +1,5 @@
 /* =========================================================
    COIN AUCTION DASHBOARD - FINAL APP.JS
-   Cocok dengan index (1).html
-
-   FUNGSI:
-   - Hubungkan TikTok LIVE
-   - Putuskan koneksi TikTok LIVE
-   - Mulai
-   - Pause
-   - Reset
-   - Selesai
-   - Timer countdown
-   - Extra Time
-   - Peserta realtime
-   - Coin realtime
-   - Anti double render
-   - Simpan pengaturan
-   - LocalStorage
-   - Tidak ada popup gift yang mengganggu
    ========================================================= */
 
 (() => {
@@ -34,7 +17,6 @@
 
     /* =======================================================
        ELEMENT HTML
-       SEMUA ID DISESUAIKAN DENGAN index (1).html
        ======================================================= */
 
     const el = {
@@ -79,8 +61,6 @@
        ======================================================= */
 
     const state = {
-
-      // idle | running | paused | finished
       auction: "idle",
 
       participants: new Map(),
@@ -101,14 +81,11 @@
       connecting: false
     };
 
-    /* =======================================================
-       STORAGE
-       ======================================================= */
-
-    const STORAGE_KEY = "coinAuctionSettingsVFinal";
+    const STORAGE_KEY =
+      "coinAuctionSettingsVFinal";
 
     /* =======================================================
-       BASIC HELPERS
+       HELPERS
        ======================================================= */
 
     function num(value, fallback = 0) {
@@ -126,7 +103,9 @@
         min,
         Math.min(
           max,
-          Math.floor(num(value, min))
+          Math.floor(
+            num(value, min)
+          )
         )
       );
     }
@@ -215,7 +194,9 @@
       try {
 
         const raw =
-          localStorage.getItem(STORAGE_KEY);
+          localStorage.getItem(
+            STORAGE_KEY
+          );
 
         if (!raw) return;
 
@@ -305,15 +286,10 @@
     function saveSettings() {
 
       const settings = {
-
         title: getTitle(),
-
         minutes: getMinutes(),
-
         seconds: getSeconds(),
-
         extra: getExtraTime(),
-
         top: getTop()
       };
 
@@ -351,6 +327,8 @@
 
         state.extraUsed =
           false;
+
+        removeExtraTimeColor();
 
         renderTimer();
       }
@@ -419,6 +397,34 @@
       );
     }
 
+    /* =======================================================
+       EXTRA TIME COLOR
+       ======================================================= */
+
+    function applyExtraTimeColor() {
+
+      if (!el.timer) return;
+
+      const active =
+        state.extraUsed === true &&
+        state.extraTime > 0 &&
+        state.auction === "running";
+
+      el.timer.classList.toggle(
+        "extra-time-active",
+        active
+      );
+    }
+
+    function removeExtraTimeColor() {
+
+      if (!el.timer) return;
+
+      el.timer.classList.remove(
+        "extra-time-active"
+      );
+    }
+
     function renderTimer() {
 
       if (el.timer) {
@@ -427,6 +433,8 @@
           formatTime(
             state.timer
           );
+
+        applyExtraTimeColor();
       }
 
       updateProgress();
@@ -483,6 +491,8 @@
         return;
       }
 
+      applyExtraTimeColor();
+
       state.timerInterval =
         setInterval(() => {
 
@@ -521,9 +531,9 @@
         return;
       }
 
-      /*
-       * EXTRA TIME
-       */
+      /* =====================================================
+         EXTRA TIME AKTIF
+         ===================================================== */
 
       if (
         !state.extraUsed &&
@@ -544,6 +554,17 @@
             )}`;
         }
 
+        /*
+         * LANGSUNG UBAH TIMER MENJADI MERAH
+         */
+
+        if (el.timer) {
+
+          el.timer.classList.add(
+            "extra-time-active"
+          );
+        }
+
         renderTimer();
 
         showToast(
@@ -553,9 +574,9 @@
         return;
       }
 
-      /*
-       * WAKTU BENAR-BENAR HABIS
-       */
+      /* =====================================================
+         WAKTU BENAR-BENAR HABIS
+         ===================================================== */
 
       finishAuction(true);
     }
@@ -604,9 +625,7 @@
         state.timer > 0
       ) {
 
-        /*
-         * Pertahankan timer.
-         */
+        /* Pertahankan timer */
       }
 
       /*
@@ -620,6 +639,8 @@
 
         state.extraUsed =
           false;
+
+        removeExtraTimeColor();
 
         if (el.extraStatus) {
 
@@ -671,6 +692,14 @@
       state.auction =
         "paused";
 
+      /*
+       * Saat pause, warna Extra Time
+       * tetap merah jika memang sedang
+       * berada di Extra Time.
+       */
+
+      applyExtraTimeColor();
+
       setAuctionUI(
         "paused"
       );
@@ -705,6 +734,12 @@
         state.initialTimer;
 
       /*
+       * HAPUS WARNA MERAH
+       */
+
+      removeExtraTimeColor();
+
+      /*
        * HAPUS SEMUA PESERTA
        */
 
@@ -727,10 +762,6 @@
       );
 
       updateButtons();
-
-      /*
-       * SERVER JUGA RESET
-       */
 
       if (socket) {
 
@@ -763,11 +794,15 @@
         "finished";
 
       /*
-       * PENTING:
-       *
-       * FINISH TIDAK MENGHAPUS
-       * PESERTA.
+       * FINISH TIDAK MENGHAPUS PESERTA
        */
+
+      /*
+       * HILANGKAN WARNA EXTRA TIME
+       * KARENA LELANG SUDAH SELESAI
+       */
+
+      removeExtraTimeColor();
 
       setAuctionUI(
         "finished"
@@ -830,10 +865,6 @@
           state.auction !==
           "running";
       }
-
-      /*
-       * RESET SELALU BISA DITEKAN
-       */
 
       if (el.reset) {
 
@@ -1073,22 +1104,16 @@
                 0
               );
 
-            const gifts =
-              num(
-                p.gifts,
-                0
-              );
-
             return `
               <div
-                class="participant-row rank-card"
+                class="participant-row rank-card rank-box"
                 data-user-id="${escapeAttr(
                   participantKey(p)
                 )}"
               >
 
                 <div
-                  class="participant-rank rank-number"
+                  class="participant-rank rank-number rank-no"
                 >
                   ${index + 1}
                 </div>
@@ -1096,7 +1121,7 @@
                 ${avatarHtml(p)}
 
                 <div
-                  class="participant-info"
+                  class="participant-info rank-info"
                 >
 
                   <div
@@ -1114,9 +1139,10 @@
                 </div>
 
                 <div
-                  class="participant-coins"
+                  class="participant-coins coin"
                 >
-                  🪙 ${coins}
+                  <span class="coin-icon">🪙</span>
+                  <strong>${coins}</strong>
                 </div>
 
               </div>
@@ -1127,8 +1153,6 @@
 
     /* =======================================================
        ACTIVITY
-       Gift tidak membuat popup.
-       Hanya ditampilkan secara ringan di activity list.
        ======================================================= */
 
     function addActivity(gift) {
@@ -1155,7 +1179,7 @@
         );
 
       item.className =
-        "activity-item";
+        "activity";
 
       const username =
         gift.nickname ||
@@ -1173,8 +1197,21 @@
         );
 
       item.innerHTML = `
-        <div class="activity-main">
+        <div class="activity-avatar">
+          ${
+            gift.avatar
+              ? `
+                <img
+                  src="${escapeAttr(gift.avatar)}"
+                  alt=""
+                  loading="lazy"
+                >
+              `
+              : "🧑"
+          }
+        </div>
 
+        <div>
           <strong>
             ${escapeHtml(username)}
           </strong>
@@ -1182,10 +1219,9 @@
           <span>
             ${escapeHtml(giftName)}
           </span>
-
         </div>
 
-        <div class="activity-coins">
+        <div class="event-coin">
           +${coins} 🪙
         </div>
       `;
@@ -1193,10 +1229,6 @@
       el.activityList.prepend(
         item
       );
-
-      /*
-       * Maksimal 10 activity.
-       */
 
       while (
         el.activityList.children
@@ -1306,7 +1338,7 @@
     }
 
     /* =======================================================
-       DISCONNECT TIKTOK
+       DISCONNECT
        ======================================================= */
 
     function disconnectTikTok() {
@@ -1371,7 +1403,7 @@
     }
 
     /* =======================================================
-       SOCKET.IO EVENTS
+       SOCKET
        ======================================================= */
 
     if (!socket) {
@@ -1389,10 +1421,6 @@
       return;
     }
 
-    /*
-     * SERVER SOCKET CONNECTED
-     */
-
     socket.on(
       "connect",
       () => {
@@ -1408,10 +1436,6 @@
         updateButtons();
       }
     );
-
-    /*
-     * SERVER SOCKET DISCONNECTED
-     */
 
     socket.on(
       "disconnect",
@@ -1435,10 +1459,6 @@
         updateButtons();
       }
     );
-
-    /*
-     * SOCKET ERROR
-     */
 
     socket.on(
       "connect_error",
@@ -1501,10 +1521,6 @@
       }
     );
 
-    /* =======================================================
-       TIKTOK ERROR
-       ======================================================= */
-
     socket.on(
       "live:error",
       data => {
@@ -1540,7 +1556,7 @@
     );
 
     /* =======================================================
-       AUCTION STATE DARI SERVER
+       AUCTION STATE
        ======================================================= */
 
     socket.on(
@@ -1559,10 +1575,6 @@
           Number(
             data?.version
           );
-
-        /*
-         * Abaikan state lama.
-         */
 
         if (
           Number.isFinite(
@@ -1601,19 +1613,9 @@
         state.auction =
           next;
 
-        /*
-         * SERVER RUNNING
-         */
-
         if (
           next === "running"
         ) {
-
-          /*
-           * Jangan reset timer ketika
-           * server hanya mengirim ulang
-           * state yang sama.
-           */
 
           if (
             previous !== "running" &&
@@ -1631,18 +1633,28 @@
 
             state.extraUsed =
               false;
+
+            removeExtraTimeColor();
           }
 
           startTimer();
-        }
 
-        /*
-         * PAUSED / IDLE / FINISHED
-         */
-
-        else {
+        } else {
 
           stopTimer();
+
+          /*
+           * FINISH / IDLE
+           * HILANGKAN WARNA MERAH
+           */
+
+          if (
+            next === "idle" ||
+            next === "finished"
+          ) {
+
+            removeExtraTimeColor();
+          }
         }
 
         setAuctionUI(
@@ -1656,7 +1668,7 @@
     );
 
     /* =======================================================
-       PARTICIPANT SNAPSHOT
+       PARTICIPANTS
        ======================================================= */
 
     socket.on(
@@ -1715,20 +1727,12 @@
     );
 
     /* =======================================================
-       GIFT EVENT
+       GIFT
        ======================================================= */
 
     socket.on(
       "live:gift",
       gift => {
-
-        /*
-         * SERVER HANYA MENGIRIM EVENT
-         * SETELAH GIFT DITERIMA.
-         *
-         * Jadi tidak perlu menghitung
-         * coin di frontend lagi.
-         */
 
         if (
           !gift?.participant
@@ -1749,7 +1753,7 @@
         renderParticipants();
 
         /*
-         * Tidak ada popup.
+         * Tidak ada popup gift.
          */
 
         addActivity(
@@ -1776,11 +1780,6 @@
       "live:event",
       event => {
 
-        /*
-         * Chat sengaja tidak
-         * dibuat popup.
-         */
-
         if (
           event?.type ===
           "chat"
@@ -1797,12 +1796,7 @@
     );
 
     /* =======================================================
-       BUTTON EVENT DELEGATION
-       =======================================================
-
-       Menggunakan document delegation supaya
-       tombol tetap berfungsi walaupun ada
-       perubahan/re-render elemen.
+       BUTTON DELEGATION
        ======================================================= */
 
     document.addEventListener(
@@ -1828,7 +1822,6 @@
 
             break;
 
-
           case "disconnectBtn":
 
             event.preventDefault();
@@ -1836,7 +1829,6 @@
             disconnectTikTok();
 
             break;
-
 
           case "startBtn":
 
@@ -1846,7 +1838,6 @@
 
             break;
 
-
           case "pauseBtn":
 
             event.preventDefault();
@@ -1854,7 +1845,6 @@
             pauseAuction();
 
             break;
-
 
           case "resetBtn":
 
@@ -1864,7 +1854,6 @@
 
             break;
 
-
           case "finishBtn":
 
             event.preventDefault();
@@ -1872,7 +1861,6 @@
             finishAuction(false);
 
             break;
-
 
           case "saveSettings":
 
@@ -1924,6 +1912,8 @@
               state.extraUsed =
                 false;
 
+              removeExtraTimeColor();
+
               renderTimer();
             }
 
@@ -1952,7 +1942,7 @@
     }
 
     /* =======================================================
-       ENTER PADA USERNAME
+       ENTER USERNAME
        ======================================================= */
 
     if (el.username) {
@@ -1994,6 +1984,8 @@
 
     state.extraUsed =
       false;
+
+    removeExtraTimeColor();
 
     if (el.titleDisplay) {
 

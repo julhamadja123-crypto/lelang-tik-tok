@@ -180,97 +180,6 @@
         font-size: 16px;
       }
 
-      /* Kartu ringkasan pengaturan */
-      .coin-target-settings {
-        margin-top: 16px;
-        padding: 16px;
-        border: 1px solid rgba(255,255,255,.12);
-        border-radius: 14px;
-        background: rgba(20,20,24,.72);
-        box-sizing: border-box;
-      }
-
-      .coin-target-settings-label {
-        margin-bottom: 5px;
-        color: #a9a4ae;
-        font-size: 12px;
-        font-weight: 800;
-        letter-spacing: 1px;
-      }
-
-      .coin-target-settings-title {
-        margin-bottom: 14px;
-        color: #f2f0f4;
-        font-size: 22px;
-        font-weight: 800;
-      }
-
-      .coin-target-settings-grid {
-        display: grid;
-        grid-template-columns: repeat(4, minmax(0, 1fr));
-        gap: 8px;
-      }
-
-      .coin-target-setting-card {
-        min-width: 0;
-        padding: 11px 9px;
-        border: 1px solid rgba(255,255,255,.08);
-        border-radius: 10px;
-        background: rgba(0,0,0,.13);
-        text-align: center;
-      }
-
-      .coin-target-setting-icon {
-        font-size: 18px;
-        line-height: 1.1;
-      }
-
-      .coin-target-setting-name {
-        margin-top: 4px;
-        color: #aaa5af;
-        font-size: 10px;
-        font-weight: 700;
-        line-height: 1.2;
-      }
-
-      .coin-target-setting-value {
-        margin-top: 4px;
-        color: #f2f0f4;
-        font-size: 17px;
-        font-weight: 900;
-        line-height: 1.1;
-      }
-
-      .coin-target-setting-note {
-        margin-top: 9px;
-        padding: 10px;
-        border-radius: 9px;
-        background: rgba(0,25,45,.22);
-        color: #aaa5af;
-        font-size: 11px;
-        line-height: 1.35;
-        text-align: left;
-      }
-
-      @media (max-width: 700px) {
-        .coin-target-settings {
-          padding: 14px;
-        }
-
-        .coin-target-settings-grid {
-          grid-template-columns: repeat(2, minmax(0, 1fr));
-        }
-
-        .coin-target-setting-value {
-          font-size: 16px;
-        }
-      }
-
-      @media (min-width: 701px) {
-        .coin-target-settings-grid {
-          grid-template-columns: repeat(4, minmax(0, 1fr));
-        }
-      }
     `;
     document.head.appendChild(style);
 
@@ -285,107 +194,22 @@
 
     /* Draw Time: panel visual saja. Logika lelang tetap milik server/app yang ada. */
     const note = document.getElementById("timerNote");
-    if (note) {
-      const draw = document.createElement("div");
-      draw.id = "coin-target-draw-card";
-      draw.className = "coin-target-draw-card";
-      draw.innerHTML = `
-        <div class="coin-target-draw-left">
-          <div class="coin-target-draw-icon">⌛</div>
-          <div>
-            <div class="coin-target-draw-title">DRAW TIME</div>
-            <div class="coin-target-draw-sub">Jika hasil seri, Draw Time berlangsung 20 detik.</div>
-          </div>
-        </div>
-        <div class="coin-target-draw-value">20 detik</div>
-      `;
-      note.insertAdjacentElement("afterend", draw);
-    }
+    if (!note) return;
 
-    /* Ringkasan setting ditambahkan setelah kartu peserta. */
-    const list = document.getElementById("rankingList");
-    if (!list) return;
-
-    let host = list;
-    for (let i = 0; i < 5 && host.parentElement; i++) {
-      host = host.parentElement;
-      if (
-        host.querySelector &&
-        host.querySelector("#participantCount") &&
-        host.querySelector("#rankingList")
-      ) break;
-    }
-
-    const settings = document.createElement("div");
-    settings.id = "coin-target-settings";
-    settings.className = "coin-target-settings";
-
-    const minutes = document.getElementById("minuteInput");
-    const seconds = document.getElementById("secondInput");
-    const extra = document.getElementById("extraTimeInput");
-    const top = document.getElementById("topInput");
-
-    const getVal = node => node ? String(node.value ?? "0") : "0";
-
-    settings.innerHTML = `
-      <div class="coin-target-settings-label">PENGATURAN LELANG</div>
-      <div class="coin-target-settings-title">Waktu & Peserta</div>
-      <div class="coin-target-settings-grid">
-        <div class="coin-target-setting-card">
-          <div class="coin-target-setting-icon">◷</div>
-          <div class="coin-target-setting-name">Waktu Utama</div>
-          <div class="coin-target-setting-value" data-target-main>00:00</div>
-        </div>
-        <div class="coin-target-setting-card">
-          <div class="coin-target-setting-icon">➕</div>
-          <div class="coin-target-setting-name">Extra Time</div>
-          <div class="coin-target-setting-value" data-target-extra>+00:00</div>
-        </div>
-        <div class="coin-target-setting-card">
-          <div class="coin-target-setting-icon">⌛</div>
-          <div class="coin-target-setting-name">Draw Time</div>
-          <div class="coin-target-setting-value">20 detik</div>
-        </div>
-        <div class="coin-target-setting-card">
-          <div class="coin-target-setting-icon">🏆</div>
-          <div class="coin-target-setting-name">Tampilkan Top</div>
-          <div class="coin-target-setting-value" data-target-top>5</div>
+    const draw = document.createElement("div");
+    draw.id = "coin-target-draw-card";
+    draw.className = "coin-target-draw-card";
+    draw.innerHTML = `
+      <div class="coin-target-draw-left">
+        <div class="coin-target-draw-icon">⌛</div>
+        <div>
+          <div class="coin-target-draw-title">DRAW TIME</div>
+          <div class="coin-target-draw-sub">Jika hasil seri, Draw Time berlangsung 20 detik.</div>
         </div>
       </div>
-      <div class="coin-target-setting-note">ⓘ &nbsp;Update participant ditampilkan berkala agar performa HP tetap ringan.</div>
+      <div class="coin-target-draw-value">20 detik</div>
     `;
-
-    /* Masukkan setelah panel peserta, bukan di dalam daftar peserta. */
-    const participantPanel = list.closest(".card, .panel, section") || list.parentElement;
-    if (participantPanel && participantPanel.parentElement) {
-      participantPanel.insertAdjacentElement("afterend", settings);
-    } else {
-      list.insertAdjacentElement("afterend", settings);
-    }
-
-    function refresh() {
-      const m = clampInt(minutes ? minutes.value : 0, 0, 999);
-      const sec = clampInt(seconds ? seconds.value : 0, 0, 59);
-      const ex = clampInt(extra ? extra.value : 0, 0, 3600);
-      const topN = clampInt(top ? top.value : 5, 1, 100);
-      const mm = String(m).padStart(2, "0");
-      const ss = String(sec).padStart(2, "0");
-      const em = String(Math.floor(ex / 60)).padStart(2, "0");
-      const es = String(ex % 60).padStart(2, "0");
-      const a = settings.querySelector("[data-target-main]");
-      const b = settings.querySelector("[data-target-extra]");
-      const c = settings.querySelector("[data-target-top]");
-      if (a) a.textContent = `${mm}:${ss}`;
-      if (b) b.textContent = `+${em}:${es}`;
-      if (c) c.textContent = String(topN);
-    }
-
-    [minutes, seconds, extra, top].forEach(node => {
-      if (node) node.addEventListener("input", refresh);
-      if (node) node.addEventListener("change", refresh);
-    });
-
-    refresh();
+    note.insertAdjacentElement("afterend", draw);
   }
   function init() {
 
@@ -1293,7 +1117,7 @@
           "Lelang dijeda",
 
         finished:
-          "Lelang selesai"
+          "FINISHED"
       };
 
       if (el.timerNote) {

@@ -1,424 +1,1625 @@
 /* =========================================================
-   COIN AUCTION - CLIENT / APP.JS
-   FINAL
+   COIN AUCTION - APP.JS
+   FINAL VERSION
    ========================================================= */
 
 (() => {
   "use strict";
 
-  const socket = window.io();
+  function initAuctionApp() {
 
-  const state = {
-    auction: "idle",
-    participants: new Map(),
-    timer: 0,
-    initialTimer: 0,
-    timerInterval: null,
-    extraTime: 0,
-    extraUsed: 0,
-    version: 0
-  };
+    console.log("[APP] Coin Auction App dimulai");
 
-  const $ = (selectors) => {
-    for (const selector of selectors) {
-      const el = document.querySelector(selector);
-      if (el) return el;
-    }
-    return null;
-  };
+    /* =======================================================
+       SOCKET.IO
+       ======================================================= */
 
-  const $$ = (selectors) => {
-    for (const selector of selectors) {
-      const els = document.querySelectorAll(selector);
-      if (els.length) return Array.from(els);
-    }
-    return [];
-  };
+    const socket = window.io();
 
-  const usernameInput = $([
-    "#username",
-    "#tiktokUsername",
-    "#tiktok-username",
-    "input[name='username']",
-    "input[placeholder*='username' i]"
-  ]);
+    /* =======================================================
+       STATE
+       ======================================================= */
 
-  const connectButton = $([
-    "#connectTikTok",
-    "#connectBtn",
-    "#btnConnect",
-    "button[data-action='connect']"
-  ]);
+    const state = {
+      auction: "idle",
+      participants: new Map(),
+      timer: 0,
+      initialTimer: 0,
+      timerInterval: null,
+      extraTime: 0,
+      extraUsed: 0,
+      version: 0
+    };
 
-  const startButton = $([
-    "#startAuction",
-    "#startBtn",
-    "#btnStart",
-    "button[data-action='start']"
-  ]);
+    /* =======================================================
+       HELPERS
+       ======================================================= */
 
-  const pauseButton = $([
-    "#pauseAuction",
-    "#pauseBtn",
-    "#btnPause",
-    "button[data-action='pause']"
-  ]);
+    const $ = (selectors) => {
 
-  const resetButton = $([
-    "#resetAuction",
-    "#resetBtn",
-    "#btnReset",
-    "button[data-action='reset']"
-  ]);
+      for (const selector of selectors) {
 
-  const finishButton = $([
-    "#finishAuction",
-    "#finishBtn",
-    "#btnFinish",
-    "button[data-action='finish']"
-  ]);
+        const el =
+          document.querySelector(selector);
 
-  const saveSettingsButton = $([
-    "#saveSettings",
-    "#saveSettingsBtn",
-    "#btnSaveSettings",
-    "#simpanPengaturan",
-    "#btnSimpanPengaturan",
-    "button[data-action='save-settings']"
-  ]);
+        if (el) {
+          return el;
+        }
+      }
 
-  const timerEl = $([
-    "#timer",
-    "#auctionTimer",
-    "#countdown",
-    "[data-role='timer']"
-  ]);
+      return null;
+    };
 
-  const participantCountEl = $([
-    "#participantCount",
-    "#participantsCount",
-    "[data-role='participant-count']"
-  ]);
+    const $$ = (selectors) => {
 
-  const participantList = $([
-    "#participants",
-    "#participantList",
-    "#participantsList",
-    ".participants-list",
-    "[data-role='participants']"
-  ]);
+      for (const selector of selectors) {
 
-  const extraTimeEl = $([
-    "#extraTime",
-    "#extraTimeAvailable",
-    "[data-role='extra-time']"
-  ]);
+        const els =
+          document.querySelectorAll(selector);
 
-  const titleInput = $([
-    "#auctionTitle",
-    "#titleAuction",
-    "#judulLelang",
-    "input[name='auctionTitle']",
-    "input[name='title']"
-  ]);
+        if (els.length) {
+          return Array.from(els);
+        }
+      }
 
-  const minutesInput = $([
-    "#minutes",
-    "#auctionMinutes",
-    "#menit",
-    "input[name='minutes']"
-  ]);
+      return [];
+    };
 
-  const secondsInput = $([
-    "#seconds",
-    "#auctionSeconds",
-    "#detik",
-    "input[name='seconds']"
-  ]);
+    function num(value, fallback = 0) {
 
-  const extraInput = $([
-    "#extraSeconds",
-    "#extraTimeSeconds",
-    "#extraTimeInput",
-    "input[name='extraTime']"
-  ]);
+      const n =
+        Number(value);
 
-  function textButton(label) {
-    const wanted = label.toLowerCase();
-
-    return $$(["button", "[role='button']"]).find(el =>
-      (el.textContent || "")
-        .trim()
-        .toLowerCase()
-        .includes(wanted)
-    );
-  }
-
-  const btnStart = startButton || textButton("mulai");
-  const btnPause = pauseButton || textButton("pause");
-  const btnReset = resetButton || textButton("reset");
-  const btnFinish = finishButton || textButton("selesai");
-  const btnConnect = connectButton || textButton("hubungkan tiktok");
-
-  function num(v, fallback = 0) {
-    const n = Number(v);
-    return Number.isFinite(n) ? n : fallback;
-  }
-
-  function parseTimerText(text) {
-    const match = String(text).match(/(\d+)\s*:\s*(\d+)/);
-
-    if (!match) return 0;
-
-    return Number(match[1]) * 60 + Number(match[2]);
-  }
-
-  function readInitialTimer() {
-    const m = num(minutesInput?.value, 0);
-    const s = num(secondsInput?.value, 0);
-
-    const total = Math.max(
-      0,
-      Math.floor(m * 60 + s)
-    );
-
-    if (total > 0) return total;
-
-    const current = parseTimerText(
-      timerEl?.textContent || ""
-    );
-
-    return current > 0 ? current : 300;
-  }
-
-  function readExtraTime() {
-    const v = num(extraInput?.value, 0);
-
-    if (v > 0) return Math.floor(v);
-
-    const text = extraTimeEl?.textContent || "";
-
-    const match = text.match(
-      /(\d+)\s*:?\s*(\d+)?/
-    );
-
-    if (!match) return 0;
-
-    if (match[2]) {
-      return Number(match[1]) * 60 +
-        Number(match[2]);
+      return Number.isFinite(n)
+        ? n
+        : fallback;
     }
 
-    return Number(match[1]);
-  }
+    function escapeHtml(value) {
 
-  function formatTime(total) {
-    total = Math.max(
-      0,
-      Math.floor(total)
+      return String(value ?? "")
+        .replace(
+          /[&<>'"]/g,
+          char => ({
+            "&": "&amp;",
+            "<": "&lt;",
+            ">": "&gt;",
+            "'": "&#39;",
+            '"': "&quot;"
+          })[char]
+        );
+    }
+
+    function escapeAttr(value) {
+      return escapeHtml(value);
+    }
+
+    /* =======================================================
+       FIND ELEMENTS
+       ======================================================= */
+
+    const usernameInput = $([
+      "#username",
+      "#tiktokUsername",
+      "#tiktok-username",
+      "input[name='username']",
+      "input[placeholder*='username' i]"
+    ]);
+
+    const connectButton = $([
+      "#connectTikTok",
+      "#connectBtn",
+      "#btnConnect",
+      "button[data-action='connect']"
+    ]);
+
+    const startButton = $([
+      "#startAuction",
+      "#startBtn",
+      "#btnStart",
+      "button[data-action='start']"
+    ]);
+
+    const pauseButton = $([
+      "#pauseAuction",
+      "#pauseBtn",
+      "#btnPause",
+      "button[data-action='pause']"
+    ]);
+
+    const resetButton = $([
+      "#resetAuction",
+      "#resetBtn",
+      "#btnReset",
+      "button[data-action='reset']"
+    ]);
+
+    const finishButton = $([
+      "#finishAuction",
+      "#finishBtn",
+      "#btnFinish",
+      "button[data-action='finish']"
+    ]);
+
+    const saveSettingsButton = $([
+      "#saveSettings",
+      "#saveSettingsBtn",
+      "#btnSaveSettings",
+      "#simpanPengaturan",
+      "#btnSimpanPengaturan",
+      "button[data-action='save-settings']"
+    ]);
+
+    const timerEl = $([
+      "#timer",
+      "#auctionTimer",
+      "#countdown",
+      "[data-role='timer']"
+    ]);
+
+    const participantCountEl = $([
+      "#participantCount",
+      "#participantsCount",
+      "#jumlahPeserta",
+      "[data-role='participant-count']"
+    ]);
+
+    const participantList = $([
+      "#participants",
+      "#participantList",
+      "#participantsList",
+      ".participants-list",
+      "[data-role='participants']"
+    ]);
+
+    const extraTimeEl = $([
+      "#extraTime",
+      "#extraTimeAvailable",
+      "[data-role='extra-time']"
+    ]);
+
+    const titleInput = $([
+      "#auctionTitle",
+      "#titleAuction",
+      "#judulLelang",
+      "input[name='auctionTitle']",
+      "input[name='title']"
+    ]);
+
+    const minutesInput = $([
+      "#minutes",
+      "#auctionMinutes",
+      "#menit",
+      "input[name='minutes']"
+    ]);
+
+    const secondsInput = $([
+      "#seconds",
+      "#auctionSeconds",
+      "#detik",
+      "input[name='seconds']"
+    ]);
+
+    const extraInput = $([
+      "#extraSeconds",
+      "#extraTimeSeconds",
+      "#extraTimeInput",
+      "input[name='extraTime']"
+    ]);
+
+    function findButtonByText(label) {
+
+      const wanted =
+        label.toLowerCase();
+
+      return $$([
+        "button",
+        "[role='button']"
+      ]).find(el => {
+
+        return (
+          el.textContent ||
+          ""
+        )
+          .trim()
+          .toLowerCase()
+          .includes(wanted);
+      }) || null;
+    }
+
+    const btnStart =
+      startButton ||
+      findButtonByText("mulai");
+
+    const btnPause =
+      pauseButton ||
+      findButtonByText("pause");
+
+    const btnReset =
+      resetButton ||
+      findButtonByText("reset");
+
+    const btnFinish =
+      finishButton ||
+      findButtonByText("selesai");
+
+    const btnConnect =
+      connectButton ||
+      findButtonByText("hubungkan");
+
+    /* =======================================================
+       DEBUG ELEMENTS
+       ======================================================= */
+
+    console.log(
+      "[BUTTON] Connect:",
+      btnConnect
     );
 
-    const h = Math.floor(total / 3600);
-    const m = Math.floor(
-      (total % 3600) / 60
+    console.log(
+      "[BUTTON] Start:",
+      btnStart
     );
-    const s = total % 60;
 
-    if (h > 0) {
+    console.log(
+      "[BUTTON] Pause:",
+      btnPause
+    );
+
+    console.log(
+      "[BUTTON] Reset:",
+      btnReset
+    );
+
+    console.log(
+      "[BUTTON] Finish:",
+      btnFinish
+    );
+
+    console.log(
+      "[BUTTON] Save:",
+      saveSettingsButton
+    );
+
+    /* =======================================================
+       TIMER
+       ======================================================= */
+
+    function parseTimerText(text) {
+
+      const match =
+        String(text || "")
+          .match(
+            /(\d+)\s*:\s*(\d+)/
+          );
+
+      if (!match) {
+        return 0;
+      }
+
       return (
-        String(h).padStart(2, "0") +
-        ":" +
-        String(m).padStart(2, "0") +
-        ":" +
-        String(s).padStart(2, "0")
+        Number(match[1]) * 60 +
+        Number(match[2])
       );
     }
 
-    return (
-      String(m).padStart(2, "0") +
-      ":" +
-      String(s).padStart(2, "0")
-    );
-  }
+    function readInitialTimer() {
 
-  function renderTimer() {
-    if (timerEl) {
-      timerEl.textContent =
-        formatTime(state.timer);
+      const minutes =
+        num(
+          minutesInput?.value,
+          0
+        );
+
+      const seconds =
+        num(
+          secondsInput?.value,
+          0
+        );
+
+      const total =
+        Math.max(
+          0,
+          Math.floor(
+            minutes * 60 +
+            seconds
+          )
+        );
+
+      if (total > 0) {
+        return total;
+      }
+
+      const current =
+        parseTimerText(
+          timerEl?.textContent ||
+          ""
+        );
+
+      return current > 0
+        ? current
+        : 300;
     }
-  }
 
-  function clearTimer() {
-    if (state.timerInterval) {
-      clearInterval(state.timerInterval);
+    function readExtraTime() {
+
+      const value =
+        num(
+          extraInput?.value,
+          0
+        );
+
+      if (value > 0) {
+        return Math.floor(value);
+      }
+
+      return 0;
     }
 
-    state.timerInterval = null;
-  }
+    function formatTime(total) {
 
-  function setAuctionState(next, options = {}) {
-    state.auction = next;
+      total =
+        Math.max(
+          0,
+          Math.floor(
+            total || 0
+          )
+        );
 
-    if (typeof options.timer === "number") {
-      state.timer = Math.max(
-        0,
-        Math.floor(options.timer)
+      const hours =
+        Math.floor(
+          total / 3600
+        );
+
+      const minutes =
+        Math.floor(
+          (total % 3600) / 60
+        );
+
+      const seconds =
+        total % 60;
+
+      if (hours > 0) {
+
+        return (
+          String(hours)
+            .padStart(2, "0") +
+          ":" +
+          String(minutes)
+            .padStart(2, "0") +
+          ":" +
+          String(seconds)
+            .padStart(2, "0")
+        );
+      }
+
+      return (
+        String(minutes)
+          .padStart(2, "0") +
+        ":" +
+        String(seconds)
+          .padStart(2, "0")
       );
     }
 
-    renderTimer();
-    updateButtons();
-  }
+    function renderTimer() {
 
-  function startLocalTimer() {
-    clearTimer();
-
-    if (state.auction !== "running") {
-      return;
-    }
-
-    state.timerInterval = setInterval(() => {
-
-      if (state.auction !== "running") {
+      if (!timerEl) {
         return;
       }
 
-      if (state.timer > 0) {
+      timerEl.textContent =
+        formatTime(
+          state.timer
+        );
+    }
 
-        state.timer--;
+    function clearTimer() {
 
-        renderTimer();
+      if (
+        state.timerInterval
+      ) {
 
-        if (state.timer <= 0) {
+        clearInterval(
+          state.timerInterval
+        );
+      }
+
+      state.timerInterval =
+        null;
+    }
+
+    /* =======================================================
+       LOCAL TIMER
+       ======================================================= */
+
+    function startLocalTimer() {
+
+      clearTimer();
+
+      if (
+        state.auction !==
+        "running"
+      ) {
+        return;
+      }
+
+      state.timerInterval =
+        setInterval(() => {
+
+          if (
+            state.auction !==
+            "running"
+          ) {
+            return;
+          }
+
+          if (
+            state.timer > 0
+          ) {
+
+            state.timer--;
+
+            renderTimer();
+
+            return;
+          }
+
+          /*
+            Timer habis.
+          */
 
           if (
             state.extraTime >
             state.extraUsed
           ) {
 
-            const available =
+            const remainingExtra =
               state.extraTime -
               state.extraUsed;
 
-            state.timer = available;
+            state.timer =
+              remainingExtra;
 
-            state.extraUsed += available;
+            state.extraUsed +=
+              remainingExtra;
 
             renderTimer();
 
-          } else {
+            return;
+          }
 
-            clearTimer();
+          clearTimer();
 
-            state.auction = "finished";
+          state.auction =
+            "finished";
 
-            updateButtons();
+          updateButtons();
 
-            socket.emit(
-              "auction:state",
-              {
-                state: "finished"
-              }
+          socket.emit(
+            "auction:state",
+            {
+              state: "finished"
+            }
+          );
+
+          console.log(
+            "[AUCTION] Timer habis -> FINISHED"
+          );
+
+        }, 1000);
+    }
+
+    /* =======================================================
+       PARTICIPANT KEY
+       ======================================================= */
+
+    function participantKey(participant) {
+
+      return String(
+        participant?.userId ||
+        participant?.username ||
+        participant?.uniqueId ||
+        "unknown"
+      );
+    }
+
+    /* =======================================================
+       RENDER PARTICIPANTS
+       ======================================================= */
+
+    function renderParticipants() {
+
+      if (
+        participantCountEl
+      ) {
+
+        participantCountEl.textContent =
+          `${state.participants.size} peserta`;
+      }
+
+      if (
+        !participantList
+      ) {
+        return;
+      }
+
+      const list =
+        Array.from(
+          state.participants.values()
+        ).sort(
+          (a, b) => {
+
+            const coinDifference =
+              num(b.coins) -
+              num(a.coins);
+
+            if (
+              coinDifference !== 0
+            ) {
+              return coinDifference;
+            }
+
+            return (
+              num(a.joinedAt) -
+              num(b.joinedAt)
             );
           }
-        }
+        );
+
+      if (
+        list.length === 0
+      ) {
+
+        participantList.innerHTML =
+          `
+          <div class="empty-participants">
+            Menunggu peserta
+          </div>
+          `;
+
+        return;
       }
 
-    }, 1000);
-  }
+      participantList.innerHTML =
+        list.map(
+          (participant, index) => {
 
-  function sendAuctionState(next) {
-    socket.emit(
-      "auction:state",
-      {
-        state: next
-      }
-    );
-  }
+            const nickname =
+              escapeHtml(
+                participant.nickname ||
+                participant.username ||
+                "Viewer"
+              );
 
-  /* =========================================================
-     START
-     ========================================================= */
+            const username =
+              escapeHtml(
+                participant.username ||
+                participant.uniqueId ||
+                "viewer"
+              );
 
-  function startAuction() {
+            let avatar;
 
-    console.log("[BUTTON] START");
+            if (
+              participant.avatar
+            ) {
 
-    if (state.auction === "running") {
-      return;
+              avatar =
+                `
+                <img
+                  src="${escapeAttr(
+                    participant.avatar
+                  )}"
+                  alt=""
+                  class="participant-avatar"
+                  loading="lazy"
+                >
+                `;
+
+            } else {
+
+              const first =
+                (
+                  participant.nickname ||
+                  participant.username ||
+                  "V"
+                )
+                  .charAt(0)
+                  .toUpperCase();
+
+              avatar =
+                `
+                <div
+                  class="participant-avatar participant-initial"
+                >
+                  ${escapeHtml(first)}
+                </div>
+                `;
+            }
+
+            return `
+              <div
+                class="participant-row"
+                data-user-id="${escapeAttr(
+                  participantKey(
+                    participant
+                  )
+                )}"
+              >
+
+                <div class="participant-rank">
+                  ${index + 1}
+                </div>
+
+                ${avatar}
+
+                <div class="participant-info">
+
+                  <div class="participant-name">
+                    ${nickname}
+                  </div>
+
+                  <div class="participant-username">
+                    @${username}
+                  </div>
+
+                </div>
+
+                <div class="participant-coins">
+                  🪙 ${num(
+                    participant.coins,
+                    0
+                  )}
+                </div>
+
+              </div>
+            `;
+          }
+        ).join("");
     }
 
-    state.initialTimer =
-      readInitialTimer();
+    /* =======================================================
+       BUTTON STATE
+       ======================================================= */
 
-    if (
-      state.auction === "paused" &&
-      state.timer > 0
-    ) {
-      // lanjut dari waktu pause
-    } else {
+    function updateButtons() {
+
+      /*
+        SEMUA TOMBOL SELALU AKTIF.
+        Jangan menggunakan disabled karena
+        beberapa layout mobile dapat membuat
+        tombol tidak menerima touch.
+      */
+
+      [
+        btnStart,
+        btnPause,
+        btnReset,
+        btnFinish,
+        btnConnect,
+        saveSettingsButton
+      ]
+        .filter(Boolean)
+        .forEach(button => {
+
+          button.disabled =
+            false;
+
+          button.removeAttribute(
+            "disabled"
+          );
+
+          button.style.pointerEvents =
+            "auto";
+
+          button.style.touchAction =
+            "manipulation";
+
+          button.style.cursor =
+            "pointer";
+
+          button.style.userSelect =
+            "none";
+
+          button.style.webkitTapHighlightColor =
+            "transparent";
+        });
+    }
+
+    /* =======================================================
+       START AUCTION
+       ======================================================= */
+
+    function startAuction() {
+
+      console.log(
+        "[BUTTON] START ditekan"
+      );
+
+      if (
+        state.auction ===
+        "running"
+      ) {
+        return;
+      }
+
+      /*
+        Kalau mulai dari idle/finished,
+        timer kembali ke awal.
+
+        Kalau pause,
+        lanjut dari timer terakhir.
+      */
+
+      if (
+        state.auction ===
+        "paused" &&
+        state.timer > 0
+      ) {
+
+        // lanjut timer
+
+      } else {
+
+        state.initialTimer =
+          readInitialTimer();
+
+        state.timer =
+          state.initialTimer;
+
+        state.extraUsed =
+          0;
+      }
+
+      state.extraTime =
+        readExtraTime();
+
+      state.auction =
+        "running";
+
+      renderTimer();
+
+      updateButtons();
+
+      startLocalTimer();
+
+      socket.emit(
+        "auction:state",
+        {
+          state: "running"
+        }
+      );
+
+      console.log(
+        "[AUCTION] RUNNING"
+      );
+    }
+
+    /* =======================================================
+       PAUSE AUCTION
+       ======================================================= */
+
+    function pauseAuction() {
+
+      console.log(
+        "[BUTTON] PAUSE ditekan"
+      );
+
+      if (
+        state.auction !==
+        "running"
+      ) {
+        return;
+      }
+
+      clearTimer();
+
+      state.auction =
+        "paused";
+
+      updateButtons();
+
+      socket.emit(
+        "auction:state",
+        {
+          state: "paused"
+        }
+      );
+
+      console.log(
+        "[AUCTION] PAUSED"
+      );
+    }
+
+    /* =======================================================
+       RESET AUCTION
+       ======================================================= */
+
+    function resetAuction() {
+
+      console.log(
+        "[BUTTON] RESET ditekan"
+      );
+
+      /*
+        Hentikan timer.
+      */
+
+      clearTimer();
+
+      /*
+        Hapus peserta lokal.
+      */
+
+      state.participants.clear();
+
+      /*
+        Reset timer.
+      */
+
+      state.initialTimer =
+        readInitialTimer();
+
       state.timer =
         state.initialTimer;
+
+      /*
+        Reset extra time.
+      */
+
+      state.extraTime =
+        readExtraTime();
+
+      state.extraUsed =
+        0;
+
+      /*
+        Status idle.
+      */
+
+      state.auction =
+        "idle";
+
+      /*
+        Naikkan version lokal.
+      */
+
+      state.version++;
+
+      /*
+        Render langsung.
+      */
+
+      renderTimer();
+
+      renderParticipants();
+
+      updateButtons();
+
+      /*
+        Reset server.
+      */
+
+      socket.emit(
+        "auction:reset"
+      );
+
+      console.log(
+        "[AUCTION] RESET selesai"
+      );
     }
 
-    state.extraTime =
-      readExtraTime();
+    /* =======================================================
+       FINISH AUCTION
+       ======================================================= */
 
-    state.extraUsed = 0;
+    function finishAuction() {
 
-    state.auction = "running";
+      console.log(
+        "[BUTTON] SELESAI ditekan"
+      );
 
-    renderTimer();
+      /*
+        Hentikan timer.
+      */
 
-    startLocalTimer();
+      clearTimer();
 
-    sendAuctionState("running");
+      /*
+        Status finished.
+      */
 
-    updateButtons();
-  }
+      state.auction =
+        "finished";
 
-  /* =========================================================
-     PAUSE
-     ========================================================= */
+      /*
+        JANGAN clear participants.
+      */
 
-  function pauseAuction() {
+      renderParticipants();
 
-    console.log("[BUTTON] PAUSE");
+      updateButtons();
 
-    if (state.auction !== "running") {
-      return;
+      /*
+        Beritahu server.
+      */
+
+      socket.emit(
+        "auction:state",
+        {
+          state: "finished"
+        }
+      );
+
+      console.log(
+        "[AUCTION] FINISHED - peserta tetap"
+      );
     }
 
-    clearTimer();
+    /* =======================================================
+       TIKTOK CONNECT
+       ======================================================= */
 
-    state.auction = "paused";
+    function connectTikTok() {
 
-    sendAuctionState("paused");
+      console.log(
+        "[BUTTON] CONNECT TIKTOK ditekan"
+      );
 
-    updateButtons();
-  }
+      const username =
+        String(
+          usernameInput?.value ||
+          ""
+        )
+          .trim()
+          .replace(
+            /^@/,
+            ""
+          );
 
-  /* =========================================================
-     RESET
-     ========================================================= */
+      if (!username) {
 
-  function resetAuction() {
+        console.warn(
+          "[TikTok] Username kosong"
+        );
 
-    console.log(
-      "[BUTTON] RESET - mulai"
+        return;
+      }
+
+      socket.emit(
+        "live:connect",
+        {
+          username
+        }
+      );
+
+      console.log(
+        "[TikTok] Meminta koneksi:",
+        username
+      );
+    }
+
+    /* =======================================================
+       SAVE SETTINGS
+       ======================================================= */
+
+    const SETTINGS_KEY =
+      "coinAuctionSettings";
+
+    function saveSettings() {
+
+      console.log(
+        "[BUTTON] SAVE SETTINGS ditekan"
+      );
+
+      const title =
+        String(
+          titleInput?.value ||
+          ""
+        ).trim();
+
+      const minutes =
+        Math.max(
+          0,
+          Math.floor(
+            num(
+              minutesInput?.value,
+              0
+            )
+          )
+        );
+
+      const seconds =
+        Math.max(
+          0,
+          Math.floor(
+            num(
+              secondsInput?.value,
+              0
+            )
+          )
+        );
+
+      const extraTime =
+        Math.max(
+          0,
+          Math.floor(
+            num(
+              extraInput?.value,
+              0
+            )
+          )
+        );
+
+      const settings = {
+        title,
+        minutes,
+        seconds,
+        extraTime
+      };
+
+      try {
+
+        localStorage.setItem(
+          SETTINGS_KEY,
+          JSON.stringify(
+            settings
+          )
+        );
+
+      } catch (error) {
+
+        console.warn(
+          "[SETTINGS] localStorage gagal",
+          error
+        );
+      }
+
+      state.initialTimer =
+        minutes * 60 +
+        seconds;
+
+      state.extraTime =
+        extraTime;
+
+      state.extraUsed =
+        0;
+
+      if (
+        state.auction === "idle" ||
+        state.auction === "finished"
+      ) {
+
+        state.timer =
+          state.initialTimer;
+      }
+
+      renderTimer();
+
+      const titleDisplay =
+        $([
+          "#auctionTitleDisplay",
+          "#displayAuctionTitle",
+          "#auctionTitleText",
+          "#displayTitle",
+          "[data-role='auction-title']"
+        ]);
+
+      if (
+        titleDisplay &&
+        title
+      ) {
+
+        titleDisplay.textContent =
+          title;
+      }
+
+      if (
+        saveSettingsButton
+      ) {
+
+        const oldText =
+          saveSettingsButton
+            .textContent;
+
+        saveSettingsButton.textContent =
+          "✓ Pengaturan Tersimpan";
+
+        setTimeout(() => {
+
+          saveSettingsButton.textContent =
+            oldText ||
+            "Simpan Pengaturan";
+
+        }, 1500);
+      }
+
+      console.log(
+        "[SETTINGS] Tersimpan:",
+        settings
+      );
+    }
+
+    /* =======================================================
+       LOAD SETTINGS
+       ======================================================= */
+
+    function loadSettings() {
+
+      try {
+
+        const raw =
+          localStorage.getItem(
+            SETTINGS_KEY
+          );
+
+        if (!raw) {
+          return;
+        }
+
+        const settings =
+          JSON.parse(raw);
+
+        if (
+          titleInput &&
+          settings.title !==
+            undefined
+        ) {
+
+          titleInput.value =
+            settings.title;
+        }
+
+        if (
+          minutesInput &&
+          settings.minutes !==
+            undefined
+        ) {
+
+          minutesInput.value =
+            settings.minutes;
+        }
+
+        if (
+          secondsInput &&
+          settings.seconds !==
+            undefined
+        ) {
+
+          secondsInput.value =
+            settings.seconds;
+        }
+
+        if (
+          extraInput &&
+          settings.extraTime !==
+            undefined
+        ) {
+
+          extraInput.value =
+            settings.extraTime;
+        }
+
+      } catch (error) {
+
+        console.warn(
+          "[SETTINGS] Gagal membaca settings",
+          error
+        );
+      }
+    }
+
+    /* =======================================================
+       BUTTON BIND
+       ======================================================= */
+
+    function bindButton(
+      button,
+      handler,
+      name
+    ) {
+
+      if (!button) {
+
+        console.warn(
+          `[BUTTON] ${name} tidak ditemukan`
+        );
+
+        return;
+      }
+
+      /*
+        Pastikan tombol benar-benar aktif.
+      */
+
+      button.disabled =
+        false;
+
+      button.removeAttribute(
+        "disabled"
+      );
+
+      button.style.pointerEvents =
+        "auto";
+
+      button.style.touchAction =
+        "manipulation";
+
+      button.style.cursor =
+        "pointer";
+
+      button.style.userSelect =
+        "none";
+
+      /*
+        Animasi tekan.
+      */
+
+      button.addEventListener(
+        "pointerdown",
+        () => {
+
+          button.style.transform =
+            "scale(.96)";
+
+          button.style.opacity =
+            ".78";
+
+        },
+        {
+          passive: true
+        }
+      );
+
+      function releaseButton() {
+
+        button.style.transform =
+          "scale(1)";
+
+        button.style.opacity =
+          "1";
+      }
+
+      button.addEventListener(
+        "pointerup",
+        releaseButton,
+        {
+          passive: true
+        }
+      );
+
+      button.addEventListener(
+        "pointercancel",
+        releaseButton,
+        {
+          passive: true
+        }
+      );
+
+      button.addEventListener(
+        "pointerleave",
+        releaseButton,
+        {
+          passive: true
+        }
+      );
+
+      /*
+        CLICK.
+      */
+
+      button.addEventListener(
+        "click",
+        event => {
+
+          event.preventDefault();
+
+          event.stopPropagation();
+
+          console.log(
+            `[BUTTON] ${name} CLICK`
+          );
+
+          handler();
+
+        }
+      );
+
+      console.log(
+        `[BUTTON] ${name} berhasil di-bind`
+      );
+    }
+
+    /* =======================================================
+       SOCKET CONNECT
+       ======================================================= */
+
+    socket.on(
+      "connect",
+      () => {
+
+        console.log(
+          "[SOCKET] Terhubung:",
+          socket.id
+        );
+
+        updateButtons();
+      }
     );
 
-    clearTimer();
+    socket.on(
+      "disconnect",
+      reason => {
 
-    /*
-      RESET:
-      - peserta dihapus
-      - coin dihapus
-      - timer kembali ke awal
-      - status idle
-    */
+        console.warn(
+          "[SOCKET] Terputus:",
+          reason
+        );
+      }
+    );
 
-    state.participants.clear();
+    /* =======================================================
+       TIKTOK STATUS
+       ======================================================= */
+
+    socket.on(
+      "live:status",
+      data => {
+
+        console.log(
+          "[TIKTOK STATUS]",
+          data
+        );
+
+        const statusEl =
+          $([
+            "#connectionStatus",
+            "#liveStatus",
+            "#status",
+            "[data-role='live-status']"
+          ]);
+
+        if (
+          statusEl &&
+          data?.message
+        ) {
+
+          statusEl.textContent =
+            data.message;
+        }
+      }
+    );
+
+    socket.on(
+      "live:error",
+      data => {
+
+        console.error(
+          "[TIKTOK ERROR]",
+          data
+        );
+      }
+    );
+
+    /* =======================================================
+       SERVER AUCTION STATE
+       ======================================================= */
+
+    socket.on(
+      "auction:state",
+      data => {
+
+        if (!data) {
+          return;
+        }
+
+        const nextState =
+          data.state ||
+          (
+            data.active
+              ? "running"
+              : "idle"
+          );
+
+        if (
+          data.version !==
+            undefined &&
+          Number(data.version) <
+            Number(state.version)
+        ) {
+
+          return;
+        }
+
+        if (
+          data.version !==
+            undefined
+        ) {
+
+          state.version =
+            Number(data.version);
+        }
+
+        state.auction =
+          nextState;
+
+        console.log(
+          "[AUCTION STATE FROM SERVER]",
+          nextState
+        );
+
+        if (
+          nextState ===
+          "running"
+        ) {
+
+          startLocalTimer();
+
+        } else {
+
+          clearTimer();
+        }
+
+        updateButtons();
+      }
+    );
+
+    /* =======================================================
+       SERVER PARTICIPANTS
+       ======================================================= */
+
+    socket.on(
+      "auction:participants",
+      data => {
+
+        if (!data) {
+          return;
+        }
+
+        if (
+          data.version !==
+            undefined &&
+          Number(data.version) <
+            Number(state.version)
+        ) {
+
+          console.log(
+            "[PARTICIPANTS] Snapshot lama diabaikan"
+          );
+
+          return;
+        }
+
+        if (
+          data.version !==
+            undefined
+        ) {
+
+          state.version =
+            Number(data.version);
+        }
+
+        state.participants.clear();
+
+        const list =
+          Array.isArray(
+            data.participants
+          )
+            ? data.participants
+            : [];
+
+        list.forEach(
+          participant => {
+
+            state.participants.set(
+              participantKey(
+                participant
+              ),
+              participant
+            );
+          }
+        );
+
+        renderParticipants();
+
+        console.log(
+          "[PARTICIPANTS] Update:",
+          state.participants.size
+        );
+      }
+    );
+
+    /* =======================================================
+       LIVE GIFT
+       ======================================================= */
+
+    socket.on(
+      "live:gift",
+      gift => {
+
+        /*
+          Jangan proses gift kalau
+          lelang tidak running.
+        */
+
+        if (
+          state.auction !==
+          "running"
+        ) {
+
+          return;
+        }
+
+        if (
+          gift?.participant
+        ) {
+
+          state.participants.set(
+            participantKey(
+              gift.participant
+            ),
+            gift.participant
+          );
+
+          renderParticipants();
+        }
+
+        console.log(
+          "[GIFT]",
+          gift?.username,
+          "+",
+          gift?.coinValue,
+          "coin"
+        );
+      }
+    );
+
+    /* =======================================================
+       BIND ALL BUTTONS
+       ======================================================= */
+
+    bindButton(
+      btnConnect,
+      connectTikTok,
+      "CONNECT"
+    );
+
+    bindButton(
+      btnStart,
+      startAuction,
+      "START"
+    );
+
+    bindButton(
+      btnPause,
+      pauseAuction,
+      "PAUSE"
+    );
+
+    bindButton(
+      btnReset,
+      resetAuction,
+      "RESET"
+    );
+
+    bindButton(
+      btnFinish,
+      finishAuction,
+      "FINISH"
+    );
+
+    bindButton(
+      saveSettingsButton,
+      saveSettings,
+      "SAVE SETTINGS"
+    );
+
+    /* =======================================================
+       INITIALIZE
+       ======================================================= */
+
+    loadSettings();
 
     state.initialTimer =
       readInitialTimer();
@@ -429,556 +1630,94 @@
     state.extraTime =
       readExtraTime();
 
-    state.extraUsed = 0;
-
-    state.auction = "idle";
-
-    /*
-      Naikkan versi agar snapshot
-      lama tidak bisa mengembalikan peserta.
-    */
-
-    state.version++;
-
     renderTimer();
 
     renderParticipants();
 
     updateButtons();
 
-    /*
-      Perintahkan SERVER melakukan reset.
-    */
+    /* =======================================================
+       PUBLIC API
+       ======================================================= */
 
-    socket.emit(
-      "auction:reset"
-    );
+    window.coinAuction = {
 
-    /*
-      Kirim juga state idle.
-    */
+      socket,
 
-    socket.emit(
-      "auction:state",
-      {
-        state: "idle"
+      start:
+        startAuction,
+
+      pause:
+        pauseAuction,
+
+      reset:
+        resetAuction,
+
+      finish:
+        finishAuction,
+
+      connect:
+        connectTikTok,
+
+      saveSettings,
+
+      getState() {
+
+        return {
+
+          auction:
+            state.auction,
+
+          timer:
+            state.timer,
+
+          initialTimer:
+            state.initialTimer,
+
+          extraTime:
+            state.extraTime,
+
+          extraUsed:
+            state.extraUsed,
+
+          version:
+            state.version,
+
+          participants:
+            Array.from(
+              state.participants.values()
+            )
+        };
       }
-    );
-
-    console.log(
-      "[AUCTION] RESET selesai - peserta dan coin dikosongkan"
-    );
-  }
-
-  /* =========================================================
-     FINISH
-     ========================================================= */
-
-  function finishAuction() {
-
-    console.log(
-      "[BUTTON] FINISH / SELESAI"
-    );
-
-    clearTimer();
-
-    /*
-      FINISH:
-      - lelang berhenti
-      - gift baru ditolak
-      - peserta TIDAK dihapus
-      - coin TIDAK dihapus
-    */
-
-    state.auction = "finished";
-
-    renderParticipants();
-
-    updateButtons();
-
-    socket.emit(
-      "auction:state",
-      {
-        state: "finished"
-      }
-    );
-
-    console.log(
-      "[AUCTION] SELESAI - peserta tetap terlihat"
-    );
-  }
-
-  /* =========================================================
-     BUTTON STATE
-     ========================================================= */
-
-  function updateButtons() {
-
-    [
-      btnStart,
-      btnPause,
-      btnReset,
-      btnFinish,
-      btnConnect,
-      saveSettingsButton
-    ]
-      .filter(Boolean)
-      .forEach(btn => {
-
-        /*
-          Jangan disable tombol.
-          Semua tombol harus tetap bisa ditekan.
-        */
-
-        btn.disabled = false;
-
-        btn.removeAttribute(
-          "disabled"
-        );
-
-        btn.style.pointerEvents =
-          "auto";
-
-        btn.style.touchAction =
-          "manipulation";
-
-        btn.style.cursor =
-          "pointer";
-      });
-  }
-
-  /* =========================================================
-     PARTICIPANTS
-     ========================================================= */
-
-  function participantKey(p) {
-
-    return String(
-      p.userId ||
-      p.username ||
-      p.nickname ||
-      "unknown"
-    );
-  }
-
-  function renderParticipants() {
-
-    if (participantCountEl) {
-
-      participantCountEl.textContent =
-        `${state.participants.size} peserta`;
-    }
-
-    if (!participantList) {
-      return;
-    }
-
-    const list =
-      Array.from(
-        state.participants.values()
-      ).sort(
-        (a, b) =>
-          b.coins - a.coins ||
-          a.joinedAt - b.joinedAt
-      );
-
-    if (!list.length) {
-
-      participantList.innerHTML =
-        `<div class="empty-participants">
-          Menunggu peserta
-        </div>`;
-
-      return;
-    }
-
-    participantList.innerHTML =
-      list.map((p, index) => {
-
-        const name =
-          escapeHtml(
-            p.nickname ||
-            p.username ||
-            "Viewer"
-          );
-
-        const user =
-          escapeHtml(
-            p.username ||
-            "viewer"
-          );
-
-        const avatar =
-          p.avatar
-
-            ? `<img
-                 src="${escapeAttr(p.avatar)}"
-                 alt=""
-                 class="participant-avatar"
-                 loading="lazy"
-               >`
-
-            : `<div
-                 class="participant-avatar participant-initial"
-               >
-                 ${escapeHtml(
-                   (
-                     p.nickname ||
-                     p.username ||
-                     "V"
-                   )
-                     .charAt(0)
-                     .toUpperCase()
-                 )}
-               </div>`;
-
-        return `
-          <div
-            class="participant-row"
-            data-user-id="${escapeAttr(
-              participantKey(p)
-            )}"
-          >
-
-            <div class="participant-rank">
-              ${index + 1}
-            </div>
-
-            ${avatar}
-
-            <div class="participant-info">
-
-              <div class="participant-name">
-                ${name}
-              </div>
-
-              <div class="participant-username">
-                @${user}
-              </div>
-
-            </div>
-
-            <div class="participant-coins">
-              🪙 ${num(p.coins, 0)}
-            </div>
-
-          </div>
-        `;
-
-      }).join("");
-  }
-
-  function escapeHtml(v) {
-
-    return String(v ?? "")
-      .replace(
-        /[&<>'"]/g,
-        c =>
-          ({
-            "&": "&amp;",
-            "<": "&lt;",
-            ">": "&gt;",
-            "'": "&#39;",
-            '"': "&quot;"
-          })[c]
-      );
-  }
-
-  function escapeAttr(v) {
-    return escapeHtml(v);
-  }
-
-  /* =========================================================
-     SETTINGS
-     ========================================================= */
-
-  const SETTINGS_KEY =
-    "coinAuctionSettings";
-
-  function saveSettings() {
-
-    console.log(
-      "[BUTTON] SAVE SETTINGS"
-    );
-
-    const title =
-      String(
-        titleInput?.value || ""
-      ).trim();
-
-    const minutes =
-      Math.max(
-        0,
-        Math.floor(
-          num(
-            minutesInput?.value,
-            0
-          )
-        )
-      );
-
-    const seconds =
-      Math.max(
-        0,
-        Math.floor(
-          num(
-            secondsInput?.value,
-            0
-          )
-        )
-      );
-
-    const extraTime =
-      Math.max(
-        0,
-        Math.floor(
-          num(
-            extraInput?.value,
-            0
-          )
-        )
-      );
-
-    const settings = {
-      title,
-      minutes,
-      seconds,
-      extraTime
     };
 
-    try {
-
-      localStorage.setItem(
-        SETTINGS_KEY,
-        JSON.stringify(settings)
-      );
-
-    } catch (_) {}
-
-    state.initialTimer =
-      minutes * 60 + seconds;
-
-    state.extraTime =
-      extraTime;
-
-    state.extraUsed = 0;
-
-    if (
-      state.auction === "idle" ||
-      state.auction === "finished"
-    ) {
-      state.timer =
-        state.initialTimer;
-    }
-
-    renderTimer();
-
-    const titleDisplay = $([
-      "#auctionTitleDisplay",
-      "#displayAuctionTitle",
-      "#auctionTitleText",
-      "#displayTitle",
-      "[data-role='auction-title']"
-    ]);
-
-    if (
-      titleDisplay &&
-      title
-    ) {
-      titleDisplay.textContent =
-        title;
-    }
-
-    if (saveSettingsButton) {
-
-      const old =
-        saveSettingsButton.textContent;
-
-      saveSettingsButton.textContent =
-        "✓ Pengaturan Tersimpan";
-
-      setTimeout(() => {
-
-        saveSettingsButton.textContent =
-          old ||
-          "Simpan Pengaturan";
-
-      }, 1500);
-    }
-
     console.log(
-      "[SETTINGS] Tersimpan",
-      settings
+      "[APP] Coin Auction siap."
     );
-  }
 
-  function loadSettings() {
+  } // END initAuctionApp
 
-    try {
-
-      const raw =
-        localStorage.getItem(
-          SETTINGS_KEY
-        );
-
-      if (!raw) {
-        return;
-      }
-
-      const settings =
-        JSON.parse(raw);
-
-      if (
-        titleInput &&
-        settings.title !== undefined
-      ) {
-        titleInput.value =
-          settings.title;
-      }
-
-      if (
-        minutesInput &&
-        settings.minutes !== undefined
-      ) {
-        minutesInput.value =
-          settings.minutes;
-      }
-
-      if (
-        secondsInput &&
-        settings.seconds !== undefined
-      ) {
-        secondsInput.value =
-          settings.seconds;
-      }
-
-      if (
-        extraInput &&
-        settings.extraTime !== undefined
-      ) {
-        extraInput.value =
-          settings.extraTime;
-      }
-
-    } catch (_) {}
-  }
 
   /* =========================================================
-     TIKTOK CONNECT
+     DOM READY
      ========================================================= */
 
-  function connectTikTok() {
+  if (
+    document.readyState ===
+    "loading"
+  ) {
 
-    console.log(
-      "[BUTTON] CONNECT TIKTOK"
-    );
-
-    const username =
-      String(
-        usernameInput?.value || ""
-      )
-        .trim()
-        .replace(/^@/, "");
-
-    if (!username) {
-
-      console.warn(
-        "Username TikTok kosong."
-      );
-
-      return;
-    }
-
-    socket.emit(
-      "live:connect",
+    document.addEventListener(
+      "DOMContentLoaded",
+      initAuctionApp,
       {
-        username
+        once: true
       }
     );
+
+  } else {
+
+    initAuctionApp();
   }
 
-  /* =========================================================
-     SOCKET
-     ========================================================= */
-
-  socket.on("connect", () => {
-
-    console.log(
-      "[Socket] terhubung",
-      socket.id
-    );
-
-    updateButtons();
-  });
-
-  socket.on(
-    "live:status",
-    data => {
-
-      console.log(
-        "[TikTok]",
-        data?.message || data
-      );
-
-      const statusEl = $([
-        "#connectionStatus",
-        "#liveStatus",
-        "#status",
-        "[data-role='live-status']"
-      ]);
-
-      if (
-        statusEl &&
-        data?.message
-      ) {
-        statusEl.textContent =
-          data.message;
-      }
-    }
-  );
-
-  socket.on(
-    "live:error",
-    data => {
-
-      console.error(
-        "[TikTok]",
-        data?.message || data
-      );
-    }
-  );
-
-  /* =========================================================
-     AUCTION STATE FROM SERVER
-     ========================================================= */
-
-  socket.on(
-    "auction:state",
-    data => {
-
-      const next =
-        data?.state ||
-        (
-          data?.active
-            ? "running"
-            : "idle"
-        );
-
-      if (
-        data?.version !== undefined &&
-        data.version < state.version
-      ) {
-        return;
-      }
-
-      if (
-        data?.version !== undefined
-      ) {
-        state.version =
-          data.version;
-      }
-
-      setAuctionState(next);
-
-      if (
-       
+})();

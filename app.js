@@ -75,6 +75,12 @@
         display: none !important;
       }
 
+      /* DRAW TIME: timer kuning */
+      #timer.draw-time-active {
+        color: #facc15 !important;
+        text-shadow: 0 0 12px rgba(250, 204, 21, 0.35) !important;
+      }
+
       /* Sembunyikan panel aktivitas pada layar HP agar fokus ke peserta */
       @media (max-width: 700px) {
         #activityList,
@@ -172,6 +178,11 @@
 
       extraTime: 0,
       extraUsed: false,
+
+      // DRAW TIME
+      drawTime: false,
+      drawTimeSeconds: 20,
+      drawTimeRunId: 0,
 
       top: 5,
 
@@ -433,7 +444,13 @@
         state.extraUsed =
           false;
 
+        state.drawTime = false;
+        state.drawTimeRunId =
+          (state.drawTimeRunId || 0) + 1;
+        state.drawTimeSeconds = 20;
+
         removeExtraTimeColor();
+        removeDrawTimeColor();
 
         renderTimer();
       }
@@ -503,6 +520,139 @@
     }
 
     /* =======================================================
+       DRAW TIME
+       ======================================================= */
+
+    function hasCoinTie() {
+      const coins = Array.from(
+        state.participants.values()
+      ).map(
+        participant => num(participant?.coins, 0)
+      );
+
+      if (coins.length < 2) return false;
+
+      const seen = new Set();
+
+      for (const coin of coins) {
+        if (seen.has(coin)) return true;
+        seen.add(coin);
+      }
+
+      return false;
+    }
+
+    function applyDrawTimeColor() {
+      if (!el.timer) return;
+
+      el.timer.classList.toggle(
+        "draw-time-active",
+        state.drawTime === true &&
+        state.auction === "running"
+      );
+    }
+
+    function removeDrawTimeColor() {
+      if (!el.timer) return;
+      el.timer.classList.remove("draw-time-active");
+    }
+
+    function startDrawTime() {
+      if (state.auction !== "running") return false;
+      if (!hasCoinTie()) return false;
+
+      stopTimer();
+
+      state.drawTime = true;
+      state.drawTimeSeconds = 20;
+      state.drawTimeRunId =
+        (state.drawTimeRunId || 0) + 1;
+
+      const runId = state.drawTimeRunId;
+      const deadline = Date.now() + 20000;
+
+      state.timerDeadline = deadline;
+      state.timer = 20;
+
+      removeExtraTimeColor();
+      applyDrawTimeColor();
+      setAuctionUI("draw");
+      renderTimer();
+
+      showToast("DRAW TIME dimulai — 20 detik");
+
+      const tick = () => {
+        if (
+          runId !== state.drawTimeRunId ||
+          !state.drawTime ||
+          state.auction !== "running" ||
+          state.timerDeadline !== deadline
+        ) {
+          return;
+        }
+
+        const remaining =
+          Math.max(
+            0,
+            Math.ceil(
+              (deadline - Date.now()) / 1000
+            )
+          );
+
+        state.drawTimeSeconds = remaining;
+        state.timer = remaining;
+
+        renderTimer();
+
+        if (remaining <= 0) {
+          clearInterval(state.timerInterval);
+          state.timerInterval = null;
+
+          state.timer = 0;
+          renderTimer();
+
+          finishDrawTime();
+        }
+      };
+
+      tick();
+      state.timerInterval = setInterval(tick, 100);
+
+      return true;
+    }
+
+    function finishDrawTime() {
+      if (
+        !state.drawTime ||
+        state.auction !== "running"
+      ) {
+        return;
+      }
+
+      // Coin berubah sebelum 00:00 tidak langsung finish.
+      state.drawTime = false;
+      state.drawTimeRunId =
+        (state.drawTimeRunId || 0) + 1;
+
+      if (hasCoinTie()) {
+        // Masih seri -> ulangi Draw Time 20 detik.
+        state.timer = 20;
+        state.timerDeadline = null;
+        removeDrawTimeColor();
+        startDrawTime();
+        return;
+      }
+
+      // Coin sudah berbeda -> FINISHED.
+      state.timer = 0;
+      state.timerDeadline = null;
+      removeDrawTimeColor();
+      renderTimer();
+
+      finishAuction(true);
+    }
+
+    /* =======================================================
        EXTRA TIME COLOR
        ======================================================= */
 
@@ -548,6 +698,7 @@
         );
 
         applyExtraTimeColor();
+        applyDrawTimeColor();
       }
 
       updateProgress();
@@ -699,6 +850,21 @@
         // Do not reuse the expired main-timer callback.
         startTimer();
 
+        return;
+      }
+
+      /* =====================================================
+         DRAW TIME
+         ===================================================== */
+
+      // Setelah timer utama + Extra Time habis, jika masih ada
+      // peserta dengan jumlah coin yang sama, masuk Draw Time.
+      if (hasCoinTie()) {
+        state.timer = 0;
+        state.timerDeadline = null;
+        renderTimer();
+
+        startDrawTime();
         return;
       }
 
@@ -882,6 +1048,11 @@
       state.extraUsed =
         false;
 
+      state.drawTime = false;
+      state.drawTimeRunId =
+        (state.drawTimeRunId || 0) + 1;
+      state.drawTimeSeconds = 20;
+
       state.timer =
         state.initialTimer;
 
@@ -945,6 +1116,10 @@
 
       stopTimer();
 
+      state.drawTime = false;
+      state.drawTimeRunId =
+        (state.drawTimeRunId || 0) + 1;
+
       state.timer = 0;
       state.timerDeadline = null;
 
@@ -961,6 +1136,7 @@
        */
 
       removeExtraTimeColor();
+      removeDrawTimeColor();
 
       setAuctionUI(
         "finished"
@@ -1063,6 +1239,9 @@
         paused:
           "Lelang dijeda",
 
+        draw:
+          "DRAW TIME",
+
         finished:
           "Lelang selesai"
       };
@@ -1077,6 +1256,11 @@
         el.timerNote.classList.toggle(
           "finished-note",
           next === "finished"
+        );
+
+        el.timerNote.classList.toggle(
+          "draw-time-note",
+          next === "draw"
         );
       }
 
@@ -2167,6 +2351,7 @@
       false;
 
     removeExtraTimeColor();
+    removeDrawTimeColor();
 
     if (el.titleDisplay) {
 

@@ -160,6 +160,7 @@
       participants: new Map(),
 
       timer: 0,
+      timerDeadline: null,
       timerRunId: 0,
       initialTimer: 300,
 
@@ -598,8 +599,15 @@
       }
 
       // Create ONE immutable deadline for this timer run.
-      if (!Number.isFinite(state.timerDeadline) || state.timerDeadline <= 0) {
-        state.timerDeadline = Date.now() + Math.max(0, Number(state.timer) || 0) * 1000;
+      // A deadline is only reusable when it is still in the future.
+      // This prevents an expired deadline from forcing the timer to 00:00.
+      if (
+        !Number.isFinite(state.timerDeadline) ||
+        state.timerDeadline <= Date.now()
+      ) {
+        state.timerDeadline =
+          Date.now() +
+          Math.max(0, Number(state.timer) || 0) * 1000;
       }
 
       const runId = state.timerRunId;
@@ -1760,11 +1768,12 @@
         const previous =
           state.auction;
 
-        // Extra Time is owned by this countdown. A delayed/stale FINISHED
-        // broadcast must not cancel Extra Time while it is still running.
+        // The dashboard timer is authoritative while it is actively counting.
+        // Ignore stale/duplicate FINISHED broadcasts from Socket.IO; otherwise
+        // a server echo can change the UI to 00:00 before the local deadline.
         if (
           next === "finished" &&
-          state.extraUsed &&
+          state.auction === "running" &&
           Number(state.timer) > 0 &&
           Number.isFinite(state.timerDeadline)
         ) {

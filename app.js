@@ -1130,13 +1130,22 @@
 
     function participantKey(p) {
 
-      return String(
-        p?.userId ||
-        p?.username ||
+      // Jangan gunakan userId="unknown" sebagai key. Jika TikTool tidak
+      // mengirim userId, peserta harus tetap dibedakan dengan uniqueId.
+      const userId = String(p?.userId || "").trim();
+
+      if (userId && userId.toLowerCase() !== "unknown") {
+        return `id:${userId}`;
+      }
+
+      const uniqueId = String(
         p?.uniqueId ||
+        p?.username ||
         p?.nickname ||
         "unknown"
-      );
+      ).trim();
+
+      return `user:${uniqueId.toLowerCase()}`;
     }
 
     /* =======================================================
@@ -1908,6 +1917,7 @@
         if (
           !gift?.participant
         ) {
+          console.warn("[GIFT] live:gift diterima tanpa participant:", gift);
           return;
         }
 

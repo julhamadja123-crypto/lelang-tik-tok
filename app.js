@@ -722,6 +722,15 @@
           "Extra Time dimulai"
         );
 
+        /*
+         * PENTING:
+         * Interval timer utama sudah dihentikan ketika mencapai 00:00.
+         * Karena itu Extra Time wajib memulai interval baru di sini.
+         * Tanpa ini, deadline lama dapat terbaca oleh event lain dan
+         * timer bisa terlihat meloncat langsung ke 00:00.
+         */
+        startTimer();
+
         return;
       }
 

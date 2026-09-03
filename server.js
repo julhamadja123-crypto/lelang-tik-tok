@@ -257,27 +257,49 @@ function giftData(event) {
      DIAMOND COUNT
      ------------------------------------------------------- */
 
+  // TikTool dapat mengirim nilai gift di beberapa bentuk payload.
+  // Prioritaskan diamond/value gift, lalu fallback ke field coin yang
+  // memang dikirim oleh sebagian transport TikTok/TikTool.
   const diamondCount = numberPositive(
     event.diamondCount,
     event.diamond_count,
+    event.diamondCost,
+    event.diamond_cost,
+    event.coinValue,
+    event.coin_value,
+    event.coinCount,
+    event.coin_count,
+    event.coins,
 
     event.gift?.diamondCount,
     event.gift?.diamond_count,
-
     event.gift?.diamondCost,
     event.gift?.diamond_cost,
+    event.gift?.coinValue,
+    event.gift?.coin_value,
+    event.gift?.coinCount,
+    event.gift?.coin_count,
+    event.gift?.coins,
 
     event.giftDetails?.diamondCount,
     event.giftDetails?.diamond_count,
-
     event.giftDetails?.diamondCost,
     event.giftDetails?.diamond_cost,
+    event.giftDetails?.coinValue,
+    event.giftDetails?.coin_value,
+    event.giftDetails?.coinCount,
+    event.giftDetails?.coin_count,
+    event.giftDetails?.coins,
 
     event.extendedGiftInfo?.diamondCount,
     event.extendedGiftInfo?.diamond_count,
-
     event.extendedGiftInfo?.diamondCost,
-    event.extendedGiftInfo?.diamond_cost
+    event.extendedGiftInfo?.diamond_cost,
+    event.extendedGiftInfo?.coinValue,
+    event.extendedGiftInfo?.coin_value,
+    event.extendedGiftInfo?.coinCount,
+    event.extendedGiftInfo?.coin_count,
+    event.extendedGiftInfo?.coins
   );
 
   /* -------------------------------------------------------
@@ -287,8 +309,12 @@ function giftData(event) {
   const rawRepeatCount =
     event.repeatCount ??
     event.repeat_count ??
+    event.repeat ??
     event.gift?.repeatCount ??
     event.gift?.repeat_count ??
+    event.gift?.repeat ??
+    event.giftDetails?.repeatCount ??
+    event.giftDetails?.repeat_count ??
     1;
 
   let repeatCount = Number(rawRepeatCount);
@@ -427,8 +453,9 @@ function giftData(event) {
     eventKey =
       `group:${groupId}|${user.userId}|${giftId || "unknown"}|${repeatCount}|${repeatEnd}`;
   } else {
+    const fallbackTime = createTime || Math.floor(Date.now() / 1000);
     eventKey =
-      `fallback:${user.userId}|${user.uniqueId}|${giftId || "unknown"}|${repeatCount}|${createTime}|${repeatEnd}`;
+      `fallback:${user.userId}|${user.uniqueId}|${giftId || giftName}|${repeatCount}|${fallbackTime}|${repeatEnd}`;
   }
 
   /* -------------------------------------------------------

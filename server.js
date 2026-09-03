@@ -45,23 +45,25 @@ const GIFT_TTL = 60 * 1000;
    LOAD TIKTOK CONNECTOR
    ========================================================= */
 
-function loadTikTokConnector() {
+async function loadTikTokConnector() {
   if (TikTokLiveConnection) {
     return TikTokLiveConnection;
   }
 
-  // TikTool SDK:
-  // @tiktool/live -> TikTokLive
+  // OLD-STYLE API: WebcastPushConnection
+  // Provider: TikTool
   const mod = require("@tiktool/live");
 
   TikTokLiveConnection =
-    mod.TikTokLive ||
-    mod.default?.TikTokLive ||
+    mod.WebcastPushConnection ||
+    mod.TikTokLiveConnection ||
+    mod.default?.WebcastPushConnection ||
+    mod.default?.TikTokLiveConnection ||
     mod.default;
 
   if (typeof TikTokLiveConnection !== "function") {
     throw new Error(
-      "TikTokLive dari @tiktool/live tidak ditemukan. Pastikan package @tiktool/live terinstall dengan benar."
+      "WebcastPushConnection TikTool tidak ditemukan. Pastikan @tiktool/live terinstall."
     );
   }
 
@@ -164,7 +166,17 @@ function numberPositive(...values) {
    USER DATA
    ========================================================= */
 
+function unwrapTikTokEvent(event) {
+  // TikTool old-style normally emits a flat event, but newer
+  // transports may wrap it as { event: "gift", data: {...} }.
+  if (event?.data && typeof event.data === "object") {
+    return event.data;
+  }
+  return event || {};
+}
+
 function userData(event) {
+  event = unwrapTikTokEvent(event);
   const user = event?.user || {};
 
   const userId =
@@ -208,6 +220,8 @@ function userData(event) {
    ========================================================= */
 
 function giftData(event) {
+  event = unwrapTikTokEvent(event);
+
   if (!event) {
     return null;
   }
@@ -325,12 +339,12 @@ function giftData(event) {
      VALIDASI DASAR
      ------------------------------------------------------- */
 
+  // giftId is useful for deduplication, but it is not required
+  // to accept a valid gift. Some TikTool payloads can omit it.
   if (!giftId) {
     console.log(
-      "[GIFT] Diabaikan: giftId tidak ditemukan."
+      `[GIFT] giftId tidak ada, tetap diproses karena diamondCount=${diamondCount}.`
     );
-
-    return null;
   }
 
   if (diamondCount <= 0) {
@@ -349,7 +363,7 @@ function giftData(event) {
      berkali-kali.
      ------------------------------------------------------- */
 
-  if (giftType === 1 && !repeatEnd) {
+  if (giftType === 1 && repeatValue !== undefined && repeatValue !== null && !repeatEnd) {
     console.log(
       `[GIFT] Streak sementara diabaikan: @${user.uniqueId} | ${giftName} | x${repeatCount}`
     );
@@ -413,10 +427,10 @@ function giftData(event) {
     eventKey = `msg:${msgId}`;
   } else if (groupId) {
     eventKey =
-      `group:${groupId}|${user.userId}|${giftId}|${repeatCount}|${repeatEnd}`;
+      `group:${groupId}|${user.userId}|${giftId || "unknown"}|${repeatCount}|${repeatEnd}`;
   } else {
     eventKey =
-      `fallback:${user.userId}|${user.uniqueId}|${giftId}|${repeatCount}|${createTime}|${repeatEnd}`;
+      `fallback:${user.userId}|${user.uniqueId}|${giftId || "unknown"}|${repeatCount}|${createTime}|${repeatEnd}`;
   }
 
   /* -------------------------------------------------------
@@ -519,7 +533,7 @@ async function stopConnection() {
 
 async function connectToLive(rawUsername) {
   const Connector =
-    loadTikTokConnector();
+    await loadTikTokConnector();
 
   const username =
     cleanUsername(rawUsername);
@@ -573,18 +587,13 @@ async function connectToLive(rawUsername) {
      OLD-STYLE WebcastPushConnection + TikTool
      ------------------------------------------------------- */
 
-  // API resmi SDK TikTool:
-  // new TikTokLive({ uniqueId, apiKey })
-  const conn = new Connector({
-    uniqueId: username,
-    apiKey: TIKTOOL_API_KEY,
+  const conn = new Connector(username, {
+    processInitialData: false,
+    fetchRoomInfoOnConnect: true,
+    enableExtendedGiftInfo: true,
 
-    // TikTool SDK menangani reconnect internal.
-    autoReconnect: true,
-    maxReconnectAttempts: 5,
-
-    // Direct = WebSocket langsung dari Railway ke TikTok
-    mode: "direct"
+    // TikTool API key untuk signing TikTok
+    signApiKey: TIKTOOL_API_KEY
   });
 
   liveConnection = conn;
@@ -593,7 +602,14 @@ async function connectToLive(rawUsername) {
      GIFT EVENT
      ======================================================= */
 
-  conn.on("gift", (event) => {
+  const handleGiftEvent = (incomingEvent) => {
+    const event = unwrapTikTokEvent(incomingEvent);
+
+    console.log(
+      "[TikTok Gift Event] RAW:",
+      JSON.stringify(event)
+    );
+
     console.log(
       `[TikTok Gift Event] @${userData(event).uniqueId}`
     );
@@ -809,6 +825,16 @@ async function connectToLive(rawUsername) {
         gift
       }
     );
+  };
+
+  // Standard TikTool event.
+  conn.on("gift", handleGiftEvent);
+
+  // Compatibility with transports that expose all events via `event`.
+  conn.on("event", (incomingEvent) => {
+    const event = unwrapTikTokEvent(incomingEvent);
+    const type = String(incomingEvent?.event || incomingEvent?.type || event?.type || "").toLowerCase();
+    if (type === "gift") handleGiftEvent(event);
   });
 
   /* =======================================================
@@ -833,9 +859,10 @@ async function connectToLive(rawUsername) {
      CONNECTED
      ======================================================= */
 
-  conn.on("connected", () => {
+  conn.on("connected", (state) => {
     console.log(
-      `[TikTok] connected @${activeUsername}`
+      "[TikTok] connected:",
+      state
     );
   });
 
@@ -858,9 +885,9 @@ async function connectToLive(rawUsername) {
      DISCONNECTED
      ======================================================= */
 
-  conn.on("disconnected", (code, reason) => {
+  conn.on("disconnected", () => {
     console.warn(
-      `[TikTok] @${activeUsername} terputus. code=${code ?? "-"} reason=${reason ?? "-"}`
+      `[TikTok] @${activeUsername} terputus.`
     );
 
     if (
@@ -971,7 +998,10 @@ io.on("connection", (socket) => {
      ======================================================= */
 
   const connected =
-    Boolean(liveConnection?.connected === true);
+    Boolean(
+      liveConnection?.isConnected === true ||
+      liveConnection?.state?.isConnected === true
+    );
 
   socket.emit(
     "live:status",
@@ -1223,7 +1253,7 @@ app.get(
       participantVersion,
 
       apiKeyRequired:
-        true
+        false
     });
   }
 );
@@ -1265,7 +1295,7 @@ server.listen(
     );
 
     console.log(
-      "MODE: TIKTOOL API KEY + TikTokLive SDK"
+      "MODE: TANPA API KEY"
     );
 
     console.log(

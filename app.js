@@ -524,22 +524,31 @@
        ======================================================= */
 
     function hasCoinTie() {
-      const coins = Array.from(
+      // DRAW hanya berlaku untuk peserta dengan coin tertinggi.
+      // Jangan memicu DRAW hanya karena ada peserta lain di posisi bawah
+      // yang kebetulan memiliki jumlah coin sama.
+      const participants = Array.from(
         state.participants.values()
-      ).map(
-        participant => num(participant?.coins, 0)
       );
 
-      if (coins.length < 2) return false;
+      if (participants.length < 2) return false;
 
-      const seen = new Set();
+      participants.sort(
+        (a, b) =>
+          num(b?.coins, 0) -
+          num(a?.coins, 0)
+      );
 
-      for (const coin of coins) {
-        if (seen.has(coin)) return true;
-        seen.add(coin);
-      }
+      const topCoin = num(
+        participants[0]?.coins,
+        0
+      );
+      const secondCoin = num(
+        participants[1]?.coins,
+        0
+      );
 
-      return false;
+      return topCoin === secondCoin;
     }
 
     function applyDrawTimeColor() {

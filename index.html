@@ -347,7 +347,14 @@
 
 #rankingList .coin-icon {
 
-  font-size: 12px !important;
+  font-size: 10px !important;
+  line-height: 1 !important;
+  width: 14px !important;
+  height: 14px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  flex: 0 0 14px !important;
 }
 
 #rankingList .coin strong {
@@ -405,11 +412,6 @@
   color: #ffd43b !important;
 }
 
-
-.draw-time-settings { display:grid; grid-template-columns:1fr; gap:8px; margin-top:10px; }
-.draw-time-settings label { display:flex; flex-direction:column; gap:5px; font-size:11px; color:rgba(255,255,255,.65); }
-.draw-time-settings select, .draw-time-settings input { width:100%; min-height:40px; padding:0 10px; border-radius:9px; border:1px solid rgba(255,255,255,.10); background:rgba(255,255,255,.06); color:#fff; outline:none; box-sizing:border-box; }
-.draw-time-settings option { color:#111; background:#fff; }
 
 /* =========================================================
    MOBILE
@@ -1022,33 +1024,28 @@
 
 
   <!-- DRAW -->
+
   <div class="draw-info">
 
-    <span>⚡ DRAW TIME</span>
 
-    <strong id="drawTimeDisplay">20 DETIK</strong>
+    <span>
+      ⚡ DRAW TIME
+    </span>
+
+
+    <strong>
+      20 DETIK
+    </strong>
+
 
     <small>
-      Aktif otomatis jika Coin peringkat 1 dan 2 sama setelah waktu tambahan selesai.
+      Aktif otomatis jika Coin peringkat 1
+      dan 2 sama setelah waktu tambahan selesai.
     </small>
 
-    <div class="draw-time-settings">
-      <label>
-        Durasi Draw Time
-        <select id="drawTimeInput">
-          <option value="10">10 Detik</option>
-          <option value="20" selected>20 Detik</option>
-          <option value="30">30 Detik</option>
-          <option value="custom">Custom</option>
-        </select>
-      </label>
 
-      <label id="drawCustomWrap" style="display:none;">
-        Custom (detik)
-        <input id="drawCustomInput" type="number" min="1" max="3600" value="20" inputmode="numeric">
-      </label>
-    </div>
   </div>
+
 
   <button
     class="save-settings"

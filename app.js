@@ -160,6 +160,7 @@
       participants: new Map(),
 
       timer: 0,
+      timerRunId: 0,
       initialTimer: 300,
 
       extraTime: 0,
@@ -572,6 +573,10 @@
 
     function stopTimer() {
 
+      // Invalidate every previously scheduled timer callback.
+      // This prevents an old callback from finishing Extra Time.
+      state.timerRunId = (state.timerRunId || 0) + 1;
+
       if (state.timerInterval) {
 
         clearInterval(
@@ -585,87 +590,48 @@
 
     function startTimer() {
 
+      // Stop/invalidate the previous timer first.
       stopTimer();
 
-      if (
-        state.auction !==
-        "running"
-      ) {
+      if (state.auction !== "running") {
         return;
       }
 
-      /*
-       * Gunakan deadline absolut, bukan timer-- setiap 1 detik.
-       * Ini membuat countdown tetap akurat walaupun browser/HP
-       * sempat menunda callback JavaScript.
-       */
-      if (
-        !Number.isFinite(state.timerDeadline) ||
-        state.timerDeadline <= 0
-      ) {
-        state.timerDeadline =
-          Date.now() +
-          Math.max(0, state.timer) * 1000;
+      // Create ONE immutable deadline for this timer run.
+      if (!Number.isFinite(state.timerDeadline) || state.timerDeadline <= 0) {
+        state.timerDeadline = Date.now() + Math.max(0, Number(state.timer) || 0) * 1000;
       }
+
+      const runId = state.timerRunId;
+      const deadline = state.timerDeadline;
 
       applyExtraTimeColor();
 
       const tick = () => {
+        // Ignore callbacks belonging to an older timer run.
+        if (runId !== state.timerRunId) return;
+        if (state.auction !== "running") return;
+        if (state.timerDeadline !== deadline) return;
 
-        if (
-          state.auction !==
-          "running"
-        ) {
-          return;
-        }
+        const remainingMs = deadline - Date.now();
+        const remaining = Math.max(0, Math.ceil(remainingMs / 1000));
 
-        const remainingMs =
-          state.timerDeadline -
-          Date.now();
+        state.timer = remaining;
+        renderTimer();
 
-        const remaining =
-          Math.max(
-            0,
-            Math.ceil(
-              remainingMs / 1000
-            )
-          );
-
-        if (
-          remaining !==
-          state.timer
-        ) {
-          state.timer =
-            remaining;
-
-          renderTimer();
-        }
-
-        if (
-          remaining <= 0
-        ) {
+        if (remaining <= 0) {
+          // Invalidate this run BEFORE switching to Extra Time.
           stopTimer();
-
-          state.timer =
-            0;
-
+          state.timer = 0;
           renderTimer();
-
           timerFinished();
         }
       };
 
       tick();
 
-      if (
-        state.auction ===
-        "running"
-      ) {
-        state.timerInterval =
-          setInterval(
-            tick,
-            100
-          );
+      if (runId === state.timerRunId && state.auction === "running" && state.timerDeadline === deadline) {
+        state.timerInterval = setInterval(tick, 100);
       }
     }
 
@@ -722,13 +688,8 @@
           "Extra Time dimulai"
         );
 
-        /*
-         * PENTING:
-         * Interval timer utama sudah dihentikan ketika mencapai 00:00.
-         * Karena itu Extra Time wajib memulai interval baru di sini.
-         * Tanpa ini, deadline lama dapat terbaca oleh event lain dan
-         * timer bisa terlihat meloncat langsung ke 00:00.
-         */
+        // Start a completely new timer run using the NEW Extra Time deadline.
+        // Do not reuse the expired main-timer callback.
         startTimer();
 
         return;
@@ -1798,6 +1759,17 @@
 
         const previous =
           state.auction;
+
+        // Extra Time is owned by this countdown. A delayed/stale FINISHED
+        // broadcast must not cancel Extra Time while it is still running.
+        if (
+          next === "finished" &&
+          state.extraUsed &&
+          Number(state.timer) > 0 &&
+          Number.isFinite(state.timerDeadline)
+        ) {
+          return;
+        }
 
         state.auction =
           next;

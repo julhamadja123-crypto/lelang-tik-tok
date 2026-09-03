@@ -558,26 +558,14 @@ async function connectToLive(rawUsername) {
      TETAP SEPERTI VERSI SEBELUMNYA
      ------------------------------------------------------- */
 
-  const conn = new Connector(
-    username,
-    {
-      processInitialData: false,
-
-      fetchRoomInfoOnConnect: true,
-
-      enableExtendedGiftInfo: true,
-
-      webClientOptions: {
-        timeout: {
-          request: 15000
-        }
-      },
-
-      wsClientOptions: {
-        handshakeTimeout: 15000
-      }
-    }
-  );
+  // Gunakan constructor/options yang kompatibel dengan tiktok-live-connector 2.4.4.
+  // Hindari override HTTP/WebSocket yang tidak diperlukan agar koneksi standar
+  // connector + signing fallback tetap digunakan.
+  const conn = new Connector(username, {
+    processInitialData: false,
+    fetchRoomInfoOnConnect: true,
+    enableExtendedGiftInfo: true
+  });
 
   liveConnection = conn;
 
@@ -965,8 +953,8 @@ io.on("connection", (socket) => {
 
   const connected =
     Boolean(
-      liveConnection?.isConnected ||
-      liveConnection?.state?.isConnected
+      liveConnection?.isConnected === true ||
+      liveConnection?.state?.isConnected === true
     );
 
   socket.emit(

@@ -52,6 +52,8 @@ async function loadTikTokConnector() {
 
   const mod = await import("tiktok-live-connector");
 
+  // tiktok-live-connector 2.4.4 is ESM-only.
+  // The official export is the named TikTokLiveConnection export.
   TikTokLiveConnection =
     mod.TikTokLiveConnection ||
     mod.default?.TikTokLiveConnection ||
@@ -126,9 +128,12 @@ function formatError(err) {
     s.includes("signature") ||
     s.includes("euler") ||
     s.includes("business plan") ||
+    s.includes("api key") ||
+    s.includes("401") ||
+    s.includes("403") ||
     s.includes("404")
   ) {
-    return "TikTok/signing provider menolak koneksi tanpa API key.";
+    return "Server signing TikTok tidak dapat membuat token WebSocket. Coba lagi; jika berulang, gunakan SIGN_API_KEY di environment.";
   }
 
   return msg;
@@ -561,11 +566,31 @@ async function connectToLive(rawUsername) {
   // Gunakan constructor/options yang kompatibel dengan tiktok-live-connector 2.4.4.
   // Hindari override HTTP/WebSocket yang tidak diperlukan agar koneksi standar
   // connector + signing fallback tetap digunakan.
-  const conn = new Connector(username, {
+  const signApiKey =
+    String(process.env.SIGN_API_KEY || "").trim() || undefined;
+
+  const connOptions = {
     processInitialData: false,
     fetchRoomInfoOnConnect: true,
-    enableExtendedGiftInfo: true
-  });
+    enableExtendedGiftInfo: true,
+
+    // tiktok-live-connector 2.4.4 supports the free signing route
+    // without a key. If SIGN_API_KEY exists, use it automatically.
+    ...(signApiKey ? { signApiKey } : {}),
+
+    webClientOptions: {
+      timeout: {
+        request: Number(process.env.TIKTOK_CLIENT_TIMEOUT) || 15000
+      }
+    },
+
+    wsClientOptions: {
+      handshakeTimeout:
+        Number(process.env.WS_CONNECT_TIMEOUT_MS) || 20000
+    }
+  };
+
+  const conn = new Connector(username, connOptions);
 
   liveConnection = conn;
 
@@ -813,6 +838,12 @@ async function connectToLive(rawUsername) {
      CONNECTED
      ======================================================= */
 
+  conn.on("websocketConnected", () => {
+    console.log(
+      `[TikTok] WebSocket connected @${username}`
+    );
+  });
+
   conn.on("connected", (state) => {
     console.log(
       "[TikTok] connected:",
@@ -882,8 +913,36 @@ async function connectToLive(rawUsername) {
      ======================================================= */
 
   try {
+    // Resolve the room first. This makes failures much clearer and
+    // avoids relying on connect() to do both room lookup + websocket setup.
+    let resolvedRoomId = "";
+
+    try {
+      resolvedRoomId = String(
+        await conn.fetchRoomId(username)
+      );
+    } catch (roomErr) {
+      console.error(
+        "[TikTok] gagal mencari Room ID:",
+        roomErr
+      );
+      throw new Error(
+        `Tidak dapat menemukan LIVE @${username}: ${formatError(roomErr)}`
+      );
+    }
+
+    if (!resolvedRoomId) {
+      throw new Error(
+        `Room ID @${username} tidak ditemukan. Pastikan akun sedang LIVE.`
+      );
+    }
+
+    console.log(
+      `[TikTok] Room ID ditemukan: ${resolvedRoomId}`
+    );
+
     const state =
-      await conn.connect();
+      await conn.connect(resolvedRoomId);
 
     if (
       liveConnection !== conn
@@ -1194,7 +1253,10 @@ app.get(
         "tiktok-live-coin-auction",
 
       connected:
-        Boolean(liveConnection),
+        Boolean(liveConnection?.isConnected === true),
+
+      connecting:
+        Boolean(liveConnection?.isConnecting === true),
 
       username:
         activeUsername,
@@ -1249,7 +1311,7 @@ server.listen(
     );
 
     console.log(
-      "MODE: TANPA API KEY"
+      `MODE: ${process.env.SIGN_API_KEY ? "SIGN_API_KEY AKTIF" : "SIGNING GRATIS / TANPA API KEY"}`
     );
 
     console.log(

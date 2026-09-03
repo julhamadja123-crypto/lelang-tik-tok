@@ -60,7 +60,14 @@
       }
 
       #rankingList .coin-icon {
-        display: none !important;
+        display: inline-flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        width: 18px !important;
+        height: 18px !important;
+        font-size: 15px !important;
+        line-height: 1 !important;
+        flex: 0 0 18px !important;
       }
 
       /* Jangan tampilkan progress bar yang berat/menyita ruang */
@@ -160,7 +167,6 @@
       participants: new Map(),
 
       timer: 0,
-      timerDeadline: null,
       timerRunId: 0,
       initialTimer: 300,
 
@@ -599,15 +605,8 @@
       }
 
       // Create ONE immutable deadline for this timer run.
-      // A deadline is only reusable when it is still in the future.
-      // This prevents an expired deadline from forcing the timer to 00:00.
-      if (
-        !Number.isFinite(state.timerDeadline) ||
-        state.timerDeadline <= Date.now()
-      ) {
-        state.timerDeadline =
-          Date.now() +
-          Math.max(0, Number(state.timer) || 0) * 1000;
+      if (!Number.isFinite(state.timerDeadline) || state.timerDeadline <= 0) {
+        state.timerDeadline = Date.now() + Math.max(0, Number(state.timer) || 0) * 1000;
       }
 
       const runId = state.timerRunId;
@@ -1768,12 +1767,11 @@
         const previous =
           state.auction;
 
-        // The dashboard timer is authoritative while it is actively counting.
-        // Ignore stale/duplicate FINISHED broadcasts from Socket.IO; otherwise
-        // a server echo can change the UI to 00:00 before the local deadline.
+        // Extra Time is owned by this countdown. A delayed/stale FINISHED
+        // broadcast must not cancel Extra Time while it is still running.
         if (
           next === "finished" &&
-          state.auction === "running" &&
+          state.extraUsed &&
           Number(state.timer) > 0 &&
           Number.isFinite(state.timerDeadline)
         ) {

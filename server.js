@@ -638,8 +638,7 @@ async function connectToLive(rawUsername) {
   const handleGiftEvent = (incomingEvent) => {
     const event = unwrapTikTokEvent(incomingEvent);
 
-    // FAST PATH: avoid JSON.stringify on every gift.
-    // This reduces CPU/logging overhead while keeping gift processing immediate.
+    // FAST PATH: process the gift immediately; no artificial delay.
 
     /* -----------------------------------------------------
        LELELANG HARUS AKTIF
@@ -784,13 +783,8 @@ async function connectToLive(rawUsername) {
         participantVersion
     };
 
-    /* -----------------------------------------------------
-       LOG
-       ----------------------------------------------------- */
-
-
     /* =====================================================
-       KIRIM KE FRONTEND
+       KIRIM KE FRONTEND SECEPATNYA
        ===================================================== */
 
     /* Gift individual */

@@ -2151,13 +2151,18 @@
           }
         }
 
+        const existingCoins = Number(existing?.coins) || 0;
+        const giftCoins = Number(gift?.coinValue) || 0;
         let incomingCoins = Number(incomingParticipant.coins);
 
-        // Fallback hanya bila participant.coin tidak valid.
+        // Server seharusnya mengirim total coin terbaru. Namun jika browser
+        // menerima event snapshot yang stale, jangan pernah menurunkan coin
+        // peserta. Untuk event gift, total minimal yang aman adalah coin lama
+        // + nilai gift yang baru diterima.
         if (!Number.isFinite(incomingCoins)) {
-          incomingCoins =
-            (Number(existing?.coins) || 0) +
-            (Number(gift.coinValue) || 0);
+          incomingCoins = existingCoins + giftCoins;
+        } else if (giftCoins > 0) {
+          incomingCoins = Math.max(incomingCoins, existingCoins + giftCoins);
         }
 
         const mergedParticipant = {
@@ -2285,12 +2290,16 @@
             }
           }
 
+          const incomingCoins = Number(incoming.coins);
+          const existingCoins = Number(existing?.coins) || 0;
+
           const merged = {
             ...(existing || {}),
             ...incoming,
-            coins: Number.isFinite(Number(incoming.coins))
-              ? Number(incoming.coins)
-              : (Number(existing?.coins) || 0)
+            // A fast-path snapshot must never move a participant backwards.
+            coins: Number.isFinite(incomingCoins)
+              ? Math.max(incomingCoins, existingCoins)
+              : existingCoins
           };
 
           state.participants.set(key, merged);

@@ -180,37 +180,22 @@ function userData(event) {
 
   const userId =
     user.userId ||
-    user.user_id ||
     user.id ||
     event?.userId ||
     event?.user_id ||
-    event?.senderUserId ||
-    event?.sender_user_id ||
     "unknown";
 
   const uniqueId =
     user.uniqueId ||
-    user.unique_id ||
-    user.username ||
-    user.userName ||
     event?.uniqueId ||
-    event?.unique_id ||
-    event?.username ||
-    event?.user_name ||
     event?.nickname ||
     "Viewer";
 
   const nickname =
     user.nickname ||
-    user.displayName ||
-    user.display_name ||
     event?.nickname ||
-    event?.displayName ||
-    event?.display_name ||
     user.uniqueId ||
-    user.unique_id ||
     event?.uniqueId ||
-    event?.unique_id ||
     "Viewer";
 
   const avatar =
@@ -686,72 +671,36 @@ async function connectToLive(rawUsername) {
        PARTICIPANT KEY
        ===================================================== */
 
-    /*
-     * Cari peserta lama berdasarkan semua identitas yang tersedia.
-     * Ini mencegah gift masuk sebagai peserta baru hanya karena
-     * bentuk userId/uniqueId pada payload berbeda.
-     */
-    const giftUserId = String(gift.userId || "").trim();
-    const giftUniqueId = String(gift.uniqueId || "").trim().toLowerCase();
-    const giftUsername = String(gift.username || "").trim().toLowerCase();
+    let key;
 
-    let key = null;
-    let previous = null;
-
-    if (giftUserId && giftUserId.toLowerCase() !== "unknown") {
-      for (const [existingKey, p] of participants.entries()) {
-        if (String(p?.userId || "").trim() === giftUserId) {
-          key = existingKey;
-          previous = p;
-          break;
-        }
-      }
-    }
-
-    if (!previous && giftUniqueId && giftUniqueId !== "viewer") {
-      for (const [existingKey, p] of participants.entries()) {
-        const a = String(p?.uniqueId || "").trim().toLowerCase();
-        const b = String(p?.username || "").trim().toLowerCase();
-        if (a === giftUniqueId || b === giftUniqueId) {
-          key = existingKey;
-          previous = p;
-          break;
-        }
-      }
-    }
-
-    if (!previous && giftUsername && giftUsername !== "viewer") {
-      for (const [existingKey, p] of participants.entries()) {
-        const a = String(p?.uniqueId || "").trim().toLowerCase();
-        const b = String(p?.username || "").trim().toLowerCase();
-        if (a === giftUsername || b === giftUsername) {
-          key = existingKey;
-          previous = p;
-          break;
-        }
-      }
-    }
-
-    if (!key) {
-      if (giftUserId && giftUserId.toLowerCase() !== "unknown") {
-        key = `id:${giftUserId}`;
-      } else if (giftUniqueId && giftUniqueId !== "viewer") {
-        key = `user:${giftUniqueId}`;
-      } else if (giftUsername && giftUsername !== "viewer") {
-        key = `user:${giftUsername}`;
-      } else {
-        key = `name:${String(gift.nickname || "viewer").trim().toLowerCase()}`;
-      }
+    if (
+      gift.userId &&
+      gift.userId !== "unknown"
+    ) {
+      key = `id:${gift.userId}`;
+    } else if (
+      gift.uniqueId
+    ) {
+      key = `unique:${gift.uniqueId.toLowerCase()}`;
+    } else if (
+      gift.username
+    ) {
+      key = `username:${gift.username.toLowerCase()}`;
+    } else {
+      key = `name:${gift.nickname.toLowerCase()}`;
     }
 
     /* -----------------------------------------------------
        PARTICIPANT SEBELUMNYA
        ----------------------------------------------------- */
 
-    /*
-     * Jika participant ditemukan melalui pencarian fleksibel,
-     * gunakan coin lama dari participant tersebut.
-     */
+    const previous =
+      participants.get(key);
+
+    /* -----------------------------------------------------
+       COIN SEBELUMNYA
+       ----------------------------------------------------- */
+
     const previousCoins =
       Number(previous?.coins) || 0;
 
@@ -857,11 +806,6 @@ async function connectToLive(rawUsername) {
       }
     );
 
-    console.log(
-      `[GIFT] PESERTA TERUPDATE: @${participant.uniqueId || participant.username} ` +
-      `coin ${previousCoins} -> ${participant.coins} (+${giftCoins})`
-    );
-
     /*
      * Snapshot seluruh peserta dikirim sesaat setelah event utama.
      * Ini mencegah Array.from(...) + serialisasi daftar peserta
@@ -887,48 +831,27 @@ async function connectToLive(rawUsername) {
   // Standard TikTool event.
   conn.on("gift", handleGiftEvent);
 
-  /* =======================================================
-     GENERIC EVENT FALLBACK
-     =======================================================
-
-     Beberapa versi/transport @tiktool/live juga meneruskan
-     event melalui listener "event" dengan bentuk:
-       { type: "gift", ... }
-     atau:
-       { event: "gift", data: {...} }
-
-     Gunakan fallback ini agar gift tetap masuk jika transport
-     tidak memanggil listener "gift" secara langsung.
-     Duplicate protection di giftData() tetap menjadi pagar
-     agar event yang sama tidak dihitung dua kali.
-  */
+  // Compatibility with transports that expose all events via `event`.
+  // Only use this fallback when the event transport is actually needed.
+  // The normal "gift" listener remains the primary/fast path.
   conn.on("event", (incomingEvent) => {
-    try {
-      const raw = incomingEvent || {};
-      const nested = raw?.data && typeof raw.data === "object"
-        ? raw.data
-        : null;
+    const event = unwrapTikTokEvent(incomingEvent);
+    const type = String(
+      incomingEvent?.event ||
+      incomingEvent?.type ||
+      event?.type ||
+      ""
+    ).toLowerCase();
 
-      const eventType = String(
-        raw?.event ||
-        raw?.type ||
-        nested?.event ||
-        nested?.type ||
-        ""
-      ).toLowerCase();
+    if (type !== "gift") return;
 
-      if (eventType !== "gift") {
-        return;
-      }
-
-      console.log("[TikTok Event Fallback] gift diterima");
-      handleGiftEvent(nested || raw);
-    } catch (error) {
-      console.error(
-        "[TikTok Event Fallback] gagal memproses gift:",
-        error
-      );
+    // Avoid double-processing if this payload is already marked as a
+    // standard gift event by the connector.
+    if (incomingEvent?.event === "gift" && incomingEvent?.data) {
+      return;
     }
+
+    handleGiftEvent(event);
   });
 
   /* =======================================================

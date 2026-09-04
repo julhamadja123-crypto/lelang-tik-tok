@@ -2145,41 +2145,6 @@
     );
 
     /* =======================================================
-       PARTICIPANT UPDATE FALLBACK
-       ======================================================= */
-
-    socket.on(
-      "auction:participant:update",
-      data => {
-        const participant = data?.participant;
-
-        if (!participant) {
-          return;
-        }
-
-        const incomingVersion = Number(data?.version);
-
-        if (
-          Number.isFinite(incomingVersion) &&
-          incomingVersion < state.version
-        ) {
-          return;
-        }
-
-        if (Number.isFinite(incomingVersion)) {
-          state.version = incomingVersion;
-        }
-
-        state.participants.set(
-          participantKey(participant),
-          participant
-        );
-
-        renderParticipants();
-      }
-    );
-
-    /* =======================================================
        LIVE EVENT
        ======================================================= */
 

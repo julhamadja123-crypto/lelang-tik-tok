@@ -793,21 +793,7 @@ async function connectToLive(rawUsername) {
       payload
     );
 
-    /* Daftar seluruh peserta */
-    io.emit(
-      "auction:participants",
-      {
-        version:
-          participantVersion,
-
-        participants:
-          Array.from(
-            participants.values()
-          )
-      }
-    );
-
-    /* State peserta yang baru berubah */
+    /* State peserta yang baru berubah — kirim segera */
     io.emit(
       "auction:participant:update",
       {
@@ -819,6 +805,27 @@ async function connectToLive(rawUsername) {
         gift
       }
     );
+
+    /*
+     * Snapshot seluruh peserta dikirim sesaat setelah event utama.
+     * Ini mencegah Array.from(...) + serialisasi daftar peserta
+     * menahan jalur gift ketika peserta sudah banyak.
+     * Tidak mengubah perhitungan coin maupun urutan event utama.
+     */
+    setImmediate(() => {
+      io.emit(
+        "auction:participants",
+        {
+          version:
+            participantVersion,
+
+          participants:
+            Array.from(
+              participants.values()
+            )
+        }
+      );
+    });
   };
 
   // Standard TikTool event.

@@ -628,11 +628,8 @@ async function connectToLive(rawUsername) {
   const handleGiftEvent = (incomingEvent) => {
     const event = unwrapTikTokEvent(incomingEvent);
 
-    console.log(
-      "[TikTok Gift Event] RAW:",
-      JSON.stringify(event)
-    );
-
+    // FAST PATH: avoid JSON.stringify on every gift.
+    // This reduces CPU/logging overhead while keeping gift processing immediate.
     console.log(
       `[TikTok Gift Event] @${userData(event).uniqueId}`
     );
@@ -854,10 +851,26 @@ async function connectToLive(rawUsername) {
   conn.on("gift", handleGiftEvent);
 
   // Compatibility with transports that expose all events via `event`.
+  // Only use this fallback when the event transport is actually needed.
+  // The normal "gift" listener remains the primary/fast path.
   conn.on("event", (incomingEvent) => {
     const event = unwrapTikTokEvent(incomingEvent);
-    const type = String(incomingEvent?.event || incomingEvent?.type || event?.type || "").toLowerCase();
-    if (type === "gift") handleGiftEvent(event);
+    const type = String(
+      incomingEvent?.event ||
+      incomingEvent?.type ||
+      event?.type ||
+      ""
+    ).toLowerCase();
+
+    if (type !== "gift") return;
+
+    // Avoid double-processing if this payload is already marked as a
+    // standard gift event by the connector.
+    if (incomingEvent?.event === "gift" && incomingEvent?.data) {
+      return;
+    }
+
+    handleGiftEvent(event);
   });
 
   /* =======================================================

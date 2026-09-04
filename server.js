@@ -180,22 +180,37 @@ function userData(event) {
 
   const userId =
     user.userId ||
+    user.user_id ||
     user.id ||
     event?.userId ||
     event?.user_id ||
+    event?.senderUserId ||
+    event?.sender_user_id ||
     "unknown";
 
   const uniqueId =
     user.uniqueId ||
+    user.unique_id ||
+    user.username ||
+    user.userName ||
     event?.uniqueId ||
+    event?.unique_id ||
+    event?.username ||
+    event?.user_name ||
     event?.nickname ||
     "Viewer";
 
   const nickname =
     user.nickname ||
+    user.displayName ||
+    user.display_name ||
     event?.nickname ||
+    event?.displayName ||
+    event?.display_name ||
     user.uniqueId ||
+    user.unique_id ||
     event?.uniqueId ||
+    event?.unique_id ||
     "Viewer";
 
   const avatar =
@@ -672,10 +687,9 @@ async function connectToLive(rawUsername) {
        ===================================================== */
 
     /*
-     * Cari peserta secara fleksibel.
-     * TikTok kadang mengirim userId "unknown" pada event berikutnya,
-     * sementara uniqueId/username tetap sama. Dengan pencarian ini,
-     * gift berikutnya tetap masuk ke peserta yang sama.
+     * Cari peserta lama berdasarkan semua identitas yang tersedia.
+     * Ini mencegah gift masuk sebagai peserta baru hanya karena
+     * bentuk userId/uniqueId pada payload berbeda.
      */
     const giftUserId = String(gift.userId || "").trim();
     const giftUniqueId = String(gift.uniqueId || "").trim().toLowerCase();
@@ -684,32 +698,9 @@ async function connectToLive(rawUsername) {
     let key = null;
     let previous = null;
 
-    if (giftUserId && giftUserId !== "unknown") {
-      key = `id:${giftUserId}`;
-      previous = participants.get(key);
-
-      if (!previous) {
-        for (const [existingKey, p] of participants.entries()) {
-          if (String(p?.userId || "").trim() === giftUserId) {
-            key = existingKey;
-            previous = p;
-            break;
-          }
-        }
-      }
-    }
-
-    if (!previous && giftUniqueId) {
+    if (giftUserId && giftUserId.toLowerCase() !== "unknown") {
       for (const [existingKey, p] of participants.entries()) {
-        const existingUniqueId =
-          String(p?.uniqueId || "").trim().toLowerCase();
-        const existingUsername =
-          String(p?.username || "").trim().toLowerCase();
-
-        if (
-          existingUniqueId === giftUniqueId ||
-          existingUsername === giftUniqueId
-        ) {
+        if (String(p?.userId || "").trim() === giftUserId) {
           key = existingKey;
           previous = p;
           break;
@@ -717,17 +708,23 @@ async function connectToLive(rawUsername) {
       }
     }
 
-    if (!previous && giftUsername) {
+    if (!previous && giftUniqueId && giftUniqueId !== "viewer") {
       for (const [existingKey, p] of participants.entries()) {
-        const existingUniqueId =
-          String(p?.uniqueId || "").trim().toLowerCase();
-        const existingUsername =
-          String(p?.username || "").trim().toLowerCase();
+        const a = String(p?.uniqueId || "").trim().toLowerCase();
+        const b = String(p?.username || "").trim().toLowerCase();
+        if (a === giftUniqueId || b === giftUniqueId) {
+          key = existingKey;
+          previous = p;
+          break;
+        }
+      }
+    }
 
-        if (
-          existingUniqueId === giftUsername ||
-          existingUsername === giftUsername
-        ) {
+    if (!previous && giftUsername && giftUsername !== "viewer") {
+      for (const [existingKey, p] of participants.entries()) {
+        const a = String(p?.uniqueId || "").trim().toLowerCase();
+        const b = String(p?.username || "").trim().toLowerCase();
+        if (a === giftUsername || b === giftUsername) {
           key = existingKey;
           previous = p;
           break;
@@ -736,14 +733,14 @@ async function connectToLive(rawUsername) {
     }
 
     if (!key) {
-      if (giftUserId && giftUserId !== "unknown") {
+      if (giftUserId && giftUserId.toLowerCase() !== "unknown") {
         key = `id:${giftUserId}`;
-      } else if (giftUniqueId) {
-        key = `unique:${giftUniqueId}`;
-      } else if (giftUsername) {
-        key = `username:${giftUsername}`;
+      } else if (giftUniqueId && giftUniqueId !== "viewer") {
+        key = `user:${giftUniqueId}`;
+      } else if (giftUsername && giftUsername !== "viewer") {
+        key = `user:${giftUsername}`;
       } else {
-        key = `name:${String(gift.nickname || "viewer").toLowerCase()}`;
+        key = `name:${String(gift.nickname || "viewer").trim().toLowerCase()}`;
       }
     }
 
@@ -889,29 +886,6 @@ async function connectToLive(rawUsername) {
 
   // Standard TikTool event.
   conn.on("gift", handleGiftEvent);
-
-  // Compatibility with transports that expose all events via `event`.
-  // Only use this fallback when the event transport is actually needed.
-  // The normal "gift" listener remains the primary/fast path.
-  conn.on("event", (incomingEvent) => {
-    const event = unwrapTikTokEvent(incomingEvent);
-    const type = String(
-      incomingEvent?.event ||
-      incomingEvent?.type ||
-      event?.type ||
-      ""
-    ).toLowerCase();
-
-    if (type !== "gift") return;
-
-    // Avoid double-processing if this payload is already marked as a
-    // standard gift event by the connector.
-    if (incomingEvent?.event === "gift" && incomingEvent?.data) {
-      return;
-    }
-
-    handleGiftEvent(event);
-  });
 
   /* =======================================================
      CHAT

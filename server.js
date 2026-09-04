@@ -40,11 +40,9 @@ let participantVersion = 0;
 
 const processedGiftEvents = new Map();
 const processedStreakProgress = new Map();
-const processedAnonymousGiftFingerprints = new Map();
 let processedGiftEventsCleanupAt = 0;
 
 const GIFT_TTL = 60 * 1000;
-const ANONYMOUS_GIFT_DUP_TTL = 750;
 
 /* =========================================================
    LOAD TIKTOK CONNECTOR
@@ -485,12 +483,8 @@ function giftData(event) {
      COIN VALUE
      ------------------------------------------------------- */
 
-  // Gift NON-STREAK: nilai coin/diamond tidak dikalikan repeatCount.
-  // repeatCount hanya digunakan sebagai delta untuk STREAK.
   const coinValue =
-    giftType === 1
-      ? resolvedDiamondCount * repeatCount
-      : resolvedDiamondCount;
+    resolvedDiamondCount * repeatCount;
 
   if (
     !Number.isFinite(coinValue) ||
@@ -514,17 +508,31 @@ function giftData(event) {
 
   let eventKey;
 
+  /*
+   * IMPORTANT: transactionId/msgId/groupId alone are NOT guaranteed to be
+   * unique for every gift update. Using them alone can discard a legitimate
+   * gift, which makes the participant appear not to receive coins.
+   * Include the sender + gift + repeat state in the dedupe key.
+   * For streak gifts, repeatCount is already converted to the NEW delta above.
+   */
+  const senderKey = String(
+    user.userId && user.userId !== "unknown"
+      ? user.userId
+      : user.uniqueId || user.nickname || "viewer"
+  ).trim().toLowerCase();
+  const giftKey = String(giftId || giftName || "gift").trim().toLowerCase();
+  const repeatKey = `${repeatCount}|${repeatEnd ? 1 : 0}`;
+
   if (transactionId) {
-    eventKey = `transaction:${transactionId}`;
+    eventKey = `transaction:${transactionId}|${senderKey}|${giftKey}|${repeatKey}`;
   } else if (msgId) {
-    eventKey = `msg:${msgId}`;
+    eventKey = `msg:${msgId}|${senderKey}|${giftKey}|${repeatKey}`;
   } else if (groupId) {
-    eventKey =
-      `group:${groupId}|${user.userId}|${giftId || "unknown"}|${repeatCount}|${repeatEnd}`;
+    eventKey = `group:${groupId}|${senderKey}|${giftKey}|${repeatKey}`;
   } else {
     const fallbackTime = createTime || Math.floor(Date.now() / 1000);
     eventKey =
-      `fallback:${user.userId}|${user.uniqueId}|${giftId || giftName}|${repeatCount}|${fallbackTime}|${repeatEnd}`;
+      `fallback:${senderKey}|${giftKey}|${repeatKey}|${fallbackTime}`;
   }
 
   /* -------------------------------------------------------
@@ -565,34 +573,6 @@ function giftData(event) {
       eventKey,
       now
     );
-  }
-
-  // Fallback untuk payload tanpa transactionId/msgId/groupId.
-  if (!transactionId && !msgId && !groupId) {
-    const fingerprint =
-      `${user.userId}|${user.uniqueId}|${giftId || giftName}|` +
-      `${resolvedDiamondCount}|${repeatCount}|${repeatEnd}`;
-
-    const previousFingerprintTime =
-      processedAnonymousGiftFingerprints.get(fingerprint);
-
-    if (
-      previousFingerprintTime !== undefined &&
-      now - previousFingerprintTime <= ANONYMOUS_GIFT_DUP_TTL
-    ) {
-      console.log(
-        `[GIFT] DUPLICATE tanpa ID diabaikan: ${fingerprint}`
-      );
-      return null;
-    }
-
-    processedAnonymousGiftFingerprints.set(fingerprint, now);
-
-    for (const [key, time] of processedAnonymousGiftFingerprints.entries()) {
-      if (now - time > ANONYMOUS_GIFT_DUP_TTL) {
-        processedAnonymousGiftFingerprints.delete(key);
-      }
-    }
   }
 
   /* -------------------------------------------------------
@@ -1314,7 +1294,6 @@ io.on("connection", (socket) => {
 
       processedGiftEvents.clear();
       processedStreakProgress.clear();
-      processedAnonymousGiftFingerprints.clear();
       processedGiftEventsCleanupAt = 0;
 
       io.emit(

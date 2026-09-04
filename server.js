@@ -676,7 +676,20 @@ async function connectToLive(rawUsername) {
      GIFT EVENT
      ======================================================= */
 
+  // Guard against the same in-memory event being delivered through
+  // both the primary "gift" listener and the compatibility "event"
+  // listener. Without this guard, one 1-coin gift can be counted twice.
+  const handledGiftObjects = new WeakSet();
+
   const handleGiftEvent = (incomingEvent) => {
+    if (incomingEvent && typeof incomingEvent === "object") {
+      if (handledGiftObjects.has(incomingEvent)) {
+        console.log("[GIFT] DUPLICATE listener event diabaikan");
+        return;
+      }
+      handledGiftObjects.add(incomingEvent);
+    }
+
     const event = unwrapTikTokEvent(incomingEvent);
 
     // FAST PATH: process the gift immediately; no artificial delay.

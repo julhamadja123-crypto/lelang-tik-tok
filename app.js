@@ -2126,12 +2126,10 @@
 
         /*
          * DRAW TIME:
-         * Gift tetap diproses walaupun DRAW TIME sedang berjalan.
-         * Jika setelah gift coin tertinggi sudah tidak seri, langsung FINISHED.
-         * Jika masih seri, DRAW TIME tetap berjalan sampai 00:00 lalu diulang.
+         * Gift tetap diproses selama DRAW TIME.
+         * PERUBAHAN COIN TIDAK BOLEH mengakhiri DRAW TIME lebih awal.
+         * Hasil hanya diperiksa ketika timer benar-benar mencapai 00:00.
          */
-        // Selama DRAW TIME, perubahan coin TIDAK boleh mengakhiri draw.
-        // Coin tetap diperbarui; hasil hanya diperiksa ketika timer mencapai 00:00.
 
         /*
          * Tidak ada popup gift.
@@ -2150,6 +2148,44 @@
             0
           } coin`
         );
+      }
+    );
+
+    /* =======================================================
+       PARTICIPANT UPDATE (FAST PATH)
+       ======================================================= */
+
+    socket.on(
+      "auction:participant:update",
+      data => {
+
+        const incomingVersion =
+          Number(data?.version);
+
+        if (
+          Number.isFinite(incomingVersion) &&
+          incomingVersion < state.version
+        ) {
+          return;
+        }
+
+        if (Number.isFinite(incomingVersion)) {
+          state.version = incomingVersion;
+        }
+
+        if (data?.reset) {
+          state.participants.clear();
+          renderParticipants();
+          return;
+        }
+
+        if (data?.participant) {
+          state.participants.set(
+            participantKey(data.participant),
+            data.participant
+          );
+          renderParticipants();
+        }
       }
     );
 

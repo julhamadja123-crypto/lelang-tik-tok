@@ -38,6 +38,7 @@ let participantVersion = 0;
    ========================================================= */
 
 const processedGiftEvents = new Map();
+let processedGiftEventsCleanupAt = 0;
 
 const GIFT_TTL = 60 * 1000;
 
@@ -464,10 +465,19 @@ function giftData(event) {
 
   const now = Date.now();
 
-  for (const [key, time] of processedGiftEvents.entries()) {
-    if (now - time > GIFT_TTL) {
-      processedGiftEvents.delete(key);
+  // Bersihkan duplicate cache secara berkala, bukan pada setiap gift.
+  // Ini menjaga jalur gift tetap ringan ketika banyak gift masuk bersamaan.
+  if (
+    processedGiftEvents.size > 0 &&
+    (processedGiftEventsCleanupAt === 0 ||
+      now >= processedGiftEventsCleanupAt)
+  ) {
+    for (const [key, time] of processedGiftEvents.entries()) {
+      if (now - time > GIFT_TTL) {
+        processedGiftEvents.delete(key);
+      }
     }
+    processedGiftEventsCleanupAt = now + 5000;
   }
 
   /* -------------------------------------------------------
@@ -630,9 +640,6 @@ async function connectToLive(rawUsername) {
 
     // FAST PATH: avoid JSON.stringify on every gift.
     // This reduces CPU/logging overhead while keeping gift processing immediate.
-    console.log(
-      `[TikTok Gift Event] @${userData(event).uniqueId}`
-    );
 
     /* -----------------------------------------------------
        LELELANG HARUS AKTIF
@@ -781,33 +788,6 @@ async function connectToLive(rawUsername) {
        LOG
        ----------------------------------------------------- */
 
-    console.log(
-      "------------------------------------------------"
-    );
-
-    console.log(
-      `[AUCTION] PESERTA: ${participant.nickname}`
-    );
-
-    console.log(
-      `[AUCTION] GIFT: ${gift.giftName}`
-    );
-
-    console.log(
-      `[AUCTION] GIFT COIN: ${giftCoins}`
-    );
-
-    console.log(
-      `[AUCTION] TOTAL COIN: ${participant.coins}`
-    );
-
-    console.log(
-      `[AUCTION] JUMLAH PESERTA: ${participants.size}`
-    );
-
-    console.log(
-      "------------------------------------------------"
-    );
 
     /* =====================================================
        KIRIM KE FRONTEND
@@ -1184,6 +1164,7 @@ io.on("connection", (socket) => {
          --------------------------------------------------- */
 
       processedGiftEvents.clear();
+      processedGiftEventsCleanupAt = 0;
 
       io.emit(
         "auction:participants",

@@ -183,6 +183,8 @@ function userData(event) {
   const userId =
     user.userId ||
     user.id ||
+    event?.senderUserId ||
+    event?.sender_user_id ||
     event?.userId ||
     event?.user_id ||
     "unknown";
@@ -751,6 +753,12 @@ async function connectToLive(rawUsername) {
       console.log(
         "[GIFT] event diterima tetapi gift tidak valid/complete"
       );
+      try {
+        console.log(
+          "[GIFT] RAW PAYLOAD:",
+          JSON.stringify(event)
+        );
+      } catch (_) {}
 
       return;
     }
@@ -960,13 +968,13 @@ async function connectToLive(rawUsername) {
 
     if (type !== "gift") return;
 
-    // Avoid double-processing if this payload is already marked as a
-    // standard gift event by the connector.
-    if (incomingEvent?.event === "gift" && incomingEvent?.data) {
-      return;
-    }
-
-    handleGiftEvent(event);
+    // IMPORTANT:
+    // Some @tiktool/live transports deliver the gift ONLY through the
+    // generic "event" channel as { event: "gift", data: {...} }.
+    // Do not return here: the primary "gift" listener may not receive
+    // the same gift at all. giftData() + duplicate protection below
+    // safely prevent the same gift from being counted twice.
+    handleGiftEvent(incomingEvent);
   });
 
   /* =======================================================

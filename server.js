@@ -894,22 +894,19 @@ async function connectToLive(rawUsername) {
      */
     // Capture version/snapshot sekarang agar snapshot lama tidak dapat
     // menimpa coin terbaru ketika beberapa gift masuk sangat cepat.
-    const snapshotVersion = participantVersion;
-    const snapshotParticipants =
-      Array.from(participants.values());
+    // Kirim snapshot authoritative segera setelah participant diperbarui.
+    // Tidak ditunda dengan setImmediate agar client langsung menerima
+    // daftar peserta terbaru setelah gift diproses.
+    io.emit(
+      "auction:participants",
+      {
+        version:
+          participantVersion,
 
-    setImmediate(() => {
-      io.emit(
-        "auction:participants",
-        {
-          version:
-            snapshotVersion,
-
-          participants:
-            snapshotParticipants
-        }
-      );
-    });
+        participants:
+          Array.from(participants.values())
+      }
+    );
   };
 
   // Standard TikTool event.

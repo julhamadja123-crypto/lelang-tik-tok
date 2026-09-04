@@ -575,18 +575,12 @@ function giftData(event) {
     console.log(
       `[GIFT] DUPLICATE diabaikan: ${eventKey}`
     );
-
     return null;
   }
 
   /*
    * SECONDARY DUPLICATE GUARD:
-   * TikTool kadang dapat mengirim satu gift melalui dua transport/event
-   * dengan ID berbeda. Jika keduanya membawa sender, gift, nilai, dan
-   * createTime yang sama, itu satu gift yang sama, bukan dua coin.
-   *
-   * Hanya aktif bila createTime tersedia. Jadi dua gift sah yang dikirim
-   * berurutan tanpa createTime tidak ikut dibuang.
+   * Satu gift kadang tiba melalui dua transport dengan ID berbeda.
    */
   const fingerprintTime =
     createTime !== null &&
@@ -600,16 +594,15 @@ function giftData(event) {
     : null;
 
   /*
-   * LAST-RESORT DUPLICATE GUARD:
+   * LAST-RESORT DUPLICATE GUARD.
    *
-   * Pada sebagian payload TikTool, satu gift dapat tiba melalui dua jalur
-   * (gift + generic event) tanpa msgId/transactionId/groupId/createTime.
-   * Dalam kondisi itu fallback Date.now() sebelumnya membuat kedua event
-   * terlihat sebagai gift berbeda, sehingga 1 coin menjadi 2.
+   * V34 mempunyai bug penting: transportFingerprint disimpan terlebih
+   * dahulu, lalu langsung dibaca kembali sebagai duplicate. Akibatnya
+   * event gift tanpa transactionId/msgId/groupId/createTime selalu
+   * ditolak.
    *
-   * Hanya aktif jika SEMUA identifier event memang tidak tersedia.
-   * Window dibuat sangat pendek agar tidak mengganggu gift sah yang
-   * dikirim terpisah.
+   * Sekarang fingerprint DI-CHECK dahulu dan BARU disimpan setelah event
+   * lolos semua pemeriksaan.
    */
   const transportFingerprint =
     !transactionId &&
@@ -626,22 +619,7 @@ function giftData(event) {
     console.log(
       `[GIFT] DUPLICATE fingerprint diabaikan: ${giftFingerprint}`
     );
-
     return null;
-  }
-
-  if (eventKey) {
-    processedGiftEvents.set(
-      eventKey,
-      now
-    );
-  }
-
-  if (giftFingerprint) {
-    processedGiftFingerprints.set(
-      giftFingerprint,
-      now
-    );
   }
 
   if (transportFingerprint) {
@@ -657,11 +635,22 @@ function giftData(event) {
       );
       return null;
     }
+  }
 
-    processedGiftFingerprints.set(
-      transportFingerprint,
-      now
-    );
+  /*
+   * Event lolos duplicate guard.
+   * Tandai cache SEKARANG, bukan sebelum pemeriksaan.
+   */
+  if (eventKey) {
+    processedGiftEvents.set(eventKey, now);
+  }
+
+  if (giftFingerprint) {
+    processedGiftFingerprints.set(giftFingerprint, now);
+  }
+
+  if (transportFingerprint) {
+    processedGiftFingerprints.set(transportFingerprint, now);
   }
 
   /* -------------------------------------------------------

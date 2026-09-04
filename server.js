@@ -427,7 +427,11 @@ function giftData(event) {
      berkali-kali.
      ------------------------------------------------------- */
 
-  if (giftType === 1 && repeatValue !== undefined && repeatValue !== null && !repeatEnd && repeatCount > 1) {
+  if (giftType === 1 && repeatValue !== undefined && repeatValue !== null && !repeatEnd) {
+    // TikTool memakai transactionId yang sama untuk seluruh combo.
+    // Event pertama bisa repeatCount=1 dan event final juga repeatCount=1
+    // untuk gift 1 coin. Jangan dedupe/menandai event pertama; tunggu
+    // repeatEnd=true agar coin benar-benar masuk ke peserta.
     console.log(
       `[GIFT] Streak sementara diabaikan: @${user.uniqueId} | ${giftName} | x${repeatCount}`
     );

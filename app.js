@@ -2152,28 +2152,20 @@
         }
 
         const existingCoins = Number(existing?.coins) || 0;
-        const giftCoins = Number(gift?.coinValue) || 0;
-        let incomingCoins = Number(incomingParticipant.coins);
+        const incomingCoins = Number(incomingParticipant.coins);
 
-        // Server seharusnya mengirim total coin terbaru. Namun jika browser
-        // menerima event snapshot yang stale, jangan pernah menurunkan coin
-        // peserta. Untuk event gift, total minimal yang aman adalah coin lama
-        // + nilai gift yang baru diterima.
-        if (!Number.isFinite(incomingCoins)) {
-          // Only use a local fallback when the server did not provide a total.
-          incomingCoins = existingCoins + giftCoins;
-        }
-        // When the server provides participant.coins, that value is authoritative.
-        // Do NOT add giftCoins again here; the server has already applied the gift.
-        // This keeps the browser from ever turning +1 into +2.
-        else {
-          incomingCoins = Math.max(incomingCoins, existingCoins);
-        }
+        // Server sudah menghitung TOTAL coin peserta.
+        // Jangan tambahkan gift.coinValue lagi di browser karena event
+        // yang sama juga dikirim melalui auction:participant:update.
+        // Penambahan kedua inilah yang dapat membuat 1 coin menjadi 2.
+        const safeCoins = Number.isFinite(incomingCoins)
+          ? Math.max(incomingCoins, existingCoins)
+          : existingCoins;
 
         const mergedParticipant = {
           ...(existing || {}),
           ...incomingParticipant,
-          coins: incomingCoins,
+          coins: safeCoins,
           userId:
             incomingParticipant.userId ||
             existing?.userId ||

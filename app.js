@@ -2160,9 +2160,14 @@
         // peserta. Untuk event gift, total minimal yang aman adalah coin lama
         // + nilai gift yang baru diterima.
         if (!Number.isFinite(incomingCoins)) {
+          // Only use a local fallback when the server did not provide a total.
           incomingCoins = existingCoins + giftCoins;
-        } else if (giftCoins > 0) {
-          incomingCoins = Math.max(incomingCoins, existingCoins + giftCoins);
+        }
+        // When the server provides participant.coins, that value is authoritative.
+        // Do NOT add giftCoins again here; the server has already applied the gift.
+        // This keeps the browser from ever turning +1 into +2.
+        else {
+          incomingCoins = Math.max(incomingCoins, existingCoins);
         }
 
         const mergedParticipant = {

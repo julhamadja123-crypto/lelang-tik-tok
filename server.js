@@ -40,9 +40,11 @@ let participantVersion = 0;
 
 const processedGiftEvents = new Map();
 const processedStreakProgress = new Map();
+const processedAnonymousGiftFingerprints = new Map();
 let processedGiftEventsCleanupAt = 0;
 
 const GIFT_TTL = 60 * 1000;
+const ANONYMOUS_GIFT_DUP_TTL = 750;
 
 /* =========================================================
    LOAD TIKTOK CONNECTOR
@@ -483,8 +485,12 @@ function giftData(event) {
      COIN VALUE
      ------------------------------------------------------- */
 
+  // Gift NON-STREAK: nilai coin/diamond tidak dikalikan repeatCount.
+  // repeatCount hanya digunakan sebagai delta untuk STREAK.
   const coinValue =
-    resolvedDiamondCount * repeatCount;
+    giftType === 1
+      ? resolvedDiamondCount * repeatCount
+      : resolvedDiamondCount;
 
   if (
     !Number.isFinite(coinValue) ||
@@ -559,6 +565,34 @@ function giftData(event) {
       eventKey,
       now
     );
+  }
+
+  // Fallback untuk payload tanpa transactionId/msgId/groupId.
+  if (!transactionId && !msgId && !groupId) {
+    const fingerprint =
+      `${user.userId}|${user.uniqueId}|${giftId || giftName}|` +
+      `${resolvedDiamondCount}|${repeatCount}|${repeatEnd}`;
+
+    const previousFingerprintTime =
+      processedAnonymousGiftFingerprints.get(fingerprint);
+
+    if (
+      previousFingerprintTime !== undefined &&
+      now - previousFingerprintTime <= ANONYMOUS_GIFT_DUP_TTL
+    ) {
+      console.log(
+        `[GIFT] DUPLICATE tanpa ID diabaikan: ${fingerprint}`
+      );
+      return null;
+    }
+
+    processedAnonymousGiftFingerprints.set(fingerprint, now);
+
+    for (const [key, time] of processedAnonymousGiftFingerprints.entries()) {
+      if (now - time > ANONYMOUS_GIFT_DUP_TTL) {
+        processedAnonymousGiftFingerprints.delete(key);
+      }
+    }
   }
 
   /* -------------------------------------------------------
@@ -1280,6 +1314,7 @@ io.on("connection", (socket) => {
 
       processedGiftEvents.clear();
       processedStreakProgress.clear();
+      processedAnonymousGiftFingerprints.clear();
       processedGiftEventsCleanupAt = 0;
 
       io.emit(

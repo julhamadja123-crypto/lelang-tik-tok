@@ -2112,14 +2112,86 @@
           return;
         }
 
-        const participant =
-          gift.participant;
+        // Server mengirim participant lengkap dengan total coin.
+        // Merge berdasarkan identitas agar perubahan userId TikTok
+        // tidak membuat peserta baru/terpisah di layar.
+        const incomingParticipant = {
+          ...(gift.participant || {})
+        };
+
+        let key = participantKey(incomingParticipant);
+        let existing = state.participants.get(key);
+
+        if (!existing) {
+          const incomingUnique =
+            String(
+              incomingParticipant.uniqueId ||
+              incomingParticipant.username ||
+              ""
+            ).trim().toLowerCase();
+
+          if (incomingUnique) {
+            for (const [existingKey, p] of state.participants.entries()) {
+              const existingUnique =
+                String(
+                  p?.uniqueId ||
+                  p?.username ||
+                  ""
+                ).trim().toLowerCase();
+
+              if (existingUnique && existingUnique === incomingUnique) {
+                key = existingKey;
+                existing = p;
+                break;
+              }
+            }
+          }
+        }
+
+        let incomingCoins = Number(incomingParticipant.coins);
+
+        // Fallback hanya bila participant.coin tidak valid.
+        if (!Number.isFinite(incomingCoins)) {
+          incomingCoins =
+            (Number(existing?.coins) || 0) +
+            (Number(gift.coinValue) || 0);
+        }
+
+        const mergedParticipant = {
+          ...(existing || {}),
+          ...incomingParticipant,
+          coins: incomingCoins,
+          userId:
+            incomingParticipant.userId ||
+            existing?.userId ||
+            "unknown",
+          uniqueId:
+            incomingParticipant.uniqueId ||
+            existing?.uniqueId ||
+            incomingParticipant.username ||
+            "unknown",
+          username:
+            incomingParticipant.username ||
+            existing?.username ||
+            incomingParticipant.uniqueId ||
+            "unknown",
+          nickname:
+            incomingParticipant.nickname ||
+            existing?.nickname ||
+            "Viewer",
+          avatar:
+            incomingParticipant.avatar ||
+            existing?.avatar ||
+            null,
+          joinedAt:
+            existing?.joinedAt ||
+            incomingParticipant.joinedAt ||
+            Date.now()
+        };
 
         state.participants.set(
-          participantKey(
-            participant
-          ),
-          participant
+          key,
+          mergedParticipant
         );
 
         renderParticipants();
@@ -2180,10 +2252,45 @@
         }
 
         if (data?.participant) {
-          state.participants.set(
-            participantKey(data.participant),
-            data.participant
-          );
+          const incoming = { ...data.participant };
+          let key = participantKey(incoming);
+          let existing = state.participants.get(key);
+
+          if (!existing) {
+            const incomingUnique =
+              String(
+                incoming.uniqueId ||
+                incoming.username ||
+                ""
+              ).trim().toLowerCase();
+
+            if (incomingUnique) {
+              for (const [existingKey, p] of state.participants.entries()) {
+                const existingUnique =
+                  String(
+                    p?.uniqueId ||
+                    p?.username ||
+                    ""
+                  ).trim().toLowerCase();
+
+                if (existingUnique && existingUnique === incomingUnique) {
+                  key = existingKey;
+                  existing = p;
+                  break;
+                }
+              }
+            }
+          }
+
+          const merged = {
+            ...(existing || {}),
+            ...incoming,
+            coins: Number.isFinite(Number(incoming.coins))
+              ? Number(incoming.coins)
+              : (Number(existing?.coins) || 0)
+          };
+
+          state.participants.set(key, merged);
           renderParticipants();
         }
       }

@@ -718,20 +718,17 @@ async function connectToLive(rawUsername) {
     // FAST PATH: process the gift immediately; no artificial delay.
 
     /* -----------------------------------------------------
-       LELELANG HARUS AKTIF
-       ----------------------------------------------------- */
-
-    if (!auctionActive) {
-      console.log(
-        "[GIFT] diabaikan karena lelang tidak aktif"
-      );
-
-      return;
-    }
-
-    /* -----------------------------------------------------
        PARSE GIFT
+       -----------------------------------------------------
+       Gift tetap diproses ketika event TikTok diterima.
+       Jangan membuang event hanya karena auctionActive belum
+       sinkron dengan UI. Duplicate protection di giftData()
+       tetap mencegah event yang sama dihitung dua kali.
        ----------------------------------------------------- */
+
+    console.log(
+      `[GIFT] EVENT DITERIMA | auctionActive=${auctionActive} | drawTime=${auctionDrawTime}`
+    );
 
     const gift =
       giftData(event);

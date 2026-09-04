@@ -448,38 +448,71 @@ function giftData(event) {
   const createTime = event.createTime || event.create_time || event.timestamp || null;
 
   /* -------------------------------------------------------
-     GIFT STREAK
-     
-     giftType = 1 biasanya merupakan streak gift.
-     Hanya proses saat repeatEnd supaya tidak dihitung
-     berkali-kali.
+     GIFT STREAK / COMBO
+
+     TikTok/TikTool dapat mengirim dua tahap untuk SATU gift:
+       - progress: repeatEnd=false, repeatCount=1
+       - final:    repeatEnd=true,  repeatCount=1
+
+     Versi sebelumnya hanya melakukan delta pada progress, sedangkan
+     event final dihitung lagi sebagai 1 coin. Akibatnya kirim 1 coin
+     bisa menjadi 2 coin.
+
+     Sekarang semua event streak dihitung sebagai delta terhadap
+     repeatCount terakhir. Jika hanya event final yang diterima,
+     delta tetap penuh sehingga gift tidak hilang.
      ------------------------------------------------------- */
 
-  if (giftType === 1 && repeatValue !== undefined && repeatValue !== null && !repeatEnd) {
-    // Di luar DRAW TIME, pertahankan perilaku lama: tunggu repeatEnd.
-    // Saat DRAW TIME aktif, proses progress streak segera agar coin tidak
-    // tertunda ke sesi berikutnya. Yang dihitung hanya delta repeatCount,
-    // sehingga combo tidak menjadi double-count.
-    const streakKey = String(
-      transactionId ||
-      groupId ||
-      `${user.userId}|${giftId || giftName}`
+  if (giftType === 1) {
+    // Gunakan identitas pengirim + gift sebagai kunci combo yang stabil.
+    // Jangan bergantung hanya pada transactionId/groupId karena nilai
+    // tersebut dapat berbeda antara event progress dan event final.
+    const streakSenderKey = String(
+      user.userId && user.userId !== "unknown"
+        ? user.userId
+        : user.uniqueId || user.username || user.nickname || "viewer"
+    ).trim().toLowerCase();
+
+    const streakGiftKey = String(
+      giftId || giftName || "gift"
+    ).trim().toLowerCase();
+
+    const streakKey = `${streakSenderKey}|${streakGiftKey}`;
+
+    const previousRepeat = Number(
+      processedStreakProgress.get(streakKey) || 0
     );
 
-    const previousRepeat = Number(processedStreakProgress.get(streakKey) || 0);
-    const deltaRepeat = Math.max(0, repeatCount - previousRepeat);
-
-    processedStreakProgress.set(streakKey, Math.max(previousRepeat, repeatCount));
+    const deltaRepeat = Math.max(
+      0,
+      repeatCount - previousRepeat
+    );
 
     if (deltaRepeat <= 0) {
       console.log(
-        `[GIFT] Streak progress duplicate diabaikan: @${user.uniqueId} | ${giftName} | x${repeatCount}`
+        `[GIFT] Streak duplicate diabaikan: @${user.uniqueId} | ${giftName} | x${repeatCount} | repeatEnd=${repeatEnd}`
       );
+
+      // Event final menutup combo yang sudah selesai.
+      if (repeatEnd) {
+        processedStreakProgress.delete(streakKey);
+      }
+
       return null;
     }
 
-    // Ganti repeatCount untuk perhitungan di bawah menjadi delta yang baru
-    // saja, bukan seluruh combo yang sudah pernah dihitung.
+    if (repeatEnd) {
+      // Final sudah membawa total repeatCount. Yang masuk hanya delta.
+      // Hapus state agar combo berikutnya dari user yang sama normal.
+      processedStreakProgress.delete(streakKey);
+    } else {
+      processedStreakProgress.set(
+        streakKey,
+        Math.max(previousRepeat, repeatCount)
+      );
+    }
+
+    // Hanya delta baru yang boleh menjadi coin.
     repeatCount = deltaRepeat;
   }
 
@@ -532,7 +565,10 @@ function giftData(event) {
   } else if (msgId) {
     eventKey = `msg:${msgId}|${senderKey}|${giftKey}|${repeatKey}`;
   } else if (groupId) {
-    eventKey = `group:${groupId}|${senderKey}|${giftKey}|${repeatKey}`;
+    // groupId dapat dipakai untuk beberapa update/gift dalam combo.
+    // Jangan jadikan groupId saja sebagai ID unik selama 60 detik karena
+    // dua gift terpisah dari user yang sama bisa memiliki groupId yang sama.
+    eventKey = `group:${groupId}|${senderKey}|${giftKey}|${repeatKey}|${createTime || Math.floor(Date.now() / 1000)}`;
   } else {
     const fallbackTime = createTime || Math.floor(Date.now() / 1000);
     eventKey =
@@ -736,6 +772,13 @@ async function connectToLive(rawUsername) {
   }
 
   await stopConnection();
+
+  // Mulai sesi TikTok baru dengan cache dedupe yang bersih.
+  // Cache lama tidak boleh membuat gift pertama pada koneksi baru diabaikan.
+  processedGiftEvents.clear();
+  processedGiftFingerprints.clear();
+  processedStreakProgress.clear();
+  processedGiftEventsCleanupAt = 0;
 
   manualDisconnect = false;
   activeUsername = username;
@@ -1377,6 +1420,7 @@ io.on("connection", (socket) => {
          --------------------------------------------------- */
 
       processedGiftEvents.clear();
+      processedGiftFingerprints.clear();
       processedStreakProgress.clear();
       processedGiftEventsCleanupAt = 0;
 

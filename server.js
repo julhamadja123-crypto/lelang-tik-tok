@@ -671,36 +671,90 @@ async function connectToLive(rawUsername) {
        PARTICIPANT KEY
        ===================================================== */
 
-    let key;
+    /*
+     * Cari peserta secara fleksibel.
+     * TikTok kadang mengirim userId "unknown" pada event berikutnya,
+     * sementara uniqueId/username tetap sama. Dengan pencarian ini,
+     * gift berikutnya tetap masuk ke peserta yang sama.
+     */
+    const giftUserId = String(gift.userId || "").trim();
+    const giftUniqueId = String(gift.uniqueId || "").trim().toLowerCase();
+    const giftUsername = String(gift.username || "").trim().toLowerCase();
 
-    if (
-      gift.userId &&
-      gift.userId !== "unknown"
-    ) {
-      key = `id:${gift.userId}`;
-    } else if (
-      gift.uniqueId
-    ) {
-      key = `unique:${gift.uniqueId.toLowerCase()}`;
-    } else if (
-      gift.username
-    ) {
-      key = `username:${gift.username.toLowerCase()}`;
-    } else {
-      key = `name:${gift.nickname.toLowerCase()}`;
+    let key = null;
+    let previous = null;
+
+    if (giftUserId && giftUserId !== "unknown") {
+      key = `id:${giftUserId}`;
+      previous = participants.get(key);
+
+      if (!previous) {
+        for (const [existingKey, p] of participants.entries()) {
+          if (String(p?.userId || "").trim() === giftUserId) {
+            key = existingKey;
+            previous = p;
+            break;
+          }
+        }
+      }
+    }
+
+    if (!previous && giftUniqueId) {
+      for (const [existingKey, p] of participants.entries()) {
+        const existingUniqueId =
+          String(p?.uniqueId || "").trim().toLowerCase();
+        const existingUsername =
+          String(p?.username || "").trim().toLowerCase();
+
+        if (
+          existingUniqueId === giftUniqueId ||
+          existingUsername === giftUniqueId
+        ) {
+          key = existingKey;
+          previous = p;
+          break;
+        }
+      }
+    }
+
+    if (!previous && giftUsername) {
+      for (const [existingKey, p] of participants.entries()) {
+        const existingUniqueId =
+          String(p?.uniqueId || "").trim().toLowerCase();
+        const existingUsername =
+          String(p?.username || "").trim().toLowerCase();
+
+        if (
+          existingUniqueId === giftUsername ||
+          existingUsername === giftUsername
+        ) {
+          key = existingKey;
+          previous = p;
+          break;
+        }
+      }
+    }
+
+    if (!key) {
+      if (giftUserId && giftUserId !== "unknown") {
+        key = `id:${giftUserId}`;
+      } else if (giftUniqueId) {
+        key = `unique:${giftUniqueId}`;
+      } else if (giftUsername) {
+        key = `username:${giftUsername}`;
+      } else {
+        key = `name:${String(gift.nickname || "viewer").toLowerCase()}`;
+      }
     }
 
     /* -----------------------------------------------------
        PARTICIPANT SEBELUMNYA
        ----------------------------------------------------- */
 
-    const previous =
-      participants.get(key);
-
-    /* -----------------------------------------------------
-       COIN SEBELUMNYA
-       ----------------------------------------------------- */
-
+    /*
+     * Jika participant ditemukan melalui pencarian fleksibel,
+     * gunakan coin lama dari participant tersebut.
+     */
     const previousCoins =
       Number(previous?.coins) || 0;
 
@@ -804,6 +858,11 @@ async function connectToLive(rawUsername) {
 
         gift
       }
+    );
+
+    console.log(
+      `[GIFT] PESERTA TERUPDATE: @${participant.uniqueId || participant.username} ` +
+      `coin ${previousCoins} -> ${participant.coins} (+${giftCoins})`
     );
 
     /*

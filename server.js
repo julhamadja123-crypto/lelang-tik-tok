@@ -197,7 +197,9 @@ function userData(event) {
     user.nickname ||
     event?.nickname ||
     user.uniqueId ||
+    user.unique_id ||
     event?.uniqueId ||
+    event?.unique_id ||
     "Viewer";
 
   const avatar =
@@ -274,6 +276,10 @@ function giftData(event) {
     event.coinCount,
     event.coin_count,
     event.coins,
+    event.diamondValue,
+    event.diamond_value,
+    event.coin,
+    event.coin_value_total,
 
     event.gift?.diamondCount,
     event.gift?.diamond_count,
@@ -284,6 +290,9 @@ function giftData(event) {
     event.gift?.coinCount,
     event.gift?.coin_count,
     event.gift?.coins,
+    event.gift?.diamondValue,
+    event.gift?.diamond_value,
+    event.gift?.coin,
 
     event.giftDetails?.diamondCount,
     event.giftDetails?.diamond_count,
@@ -294,6 +303,9 @@ function giftData(event) {
     event.giftDetails?.coinCount,
     event.giftDetails?.coin_count,
     event.giftDetails?.coins,
+    event.giftDetails?.diamondValue,
+    event.giftDetails?.diamond_value,
+    event.giftDetails?.coin,
 
     event.extendedGiftInfo?.diamondCount,
     event.extendedGiftInfo?.diamond_count,
@@ -303,7 +315,10 @@ function giftData(event) {
     event.extendedGiftInfo?.coin_value,
     event.extendedGiftInfo?.coinCount,
     event.extendedGiftInfo?.coin_count,
-    event.extendedGiftInfo?.coins
+    event.extendedGiftInfo?.coins,
+    event.extendedGiftInfo?.diamondValue,
+    event.extendedGiftInfo?.diamond_value,
+    event.extendedGiftInfo?.coin
   );
 
   // Be tolerant of additional TikTool nesting (for example payloads
@@ -312,7 +327,8 @@ function giftData(event) {
   if (resolvedDiamondCount <= 0) {
     const valueKeys = new Set([
       "diamondCount", "diamond_count", "diamondCost", "diamond_cost",
-      "coinValue", "coin_value", "coinCount", "coin_count", "coins"
+      "coinValue", "coin_value", "coinCount", "coin_count", "coins",
+      "diamondValue", "diamond_value", "coin"
     ]);
 
     const scanGiftValue = (value, depth = 0, seen = new Set()) => {

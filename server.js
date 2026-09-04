@@ -888,35 +888,46 @@ async function connectToLive(rawUsername) {
   conn.on("gift", handleGiftEvent);
 
   /* =======================================================
-     GIFT FALLBACK VIA GENERIC EVENT
+     GENERIC EVENT FALLBACK
      =======================================================
-     @tiktool/live juga menyediakan event generik "event".
-     Pada kondisi tertentu transport dapat menyampaikan gift
-     melalui jalur ini. Tangani keduanya; duplicate protection
-     di giftData() mencegah satu gift dihitung dua kali.
+
+     Beberapa versi/transport @tiktool/live juga meneruskan
+     event melalui listener "event" dengan bentuk:
+       { type: "gift", ... }
+     atau:
+       { event: "gift", data: {...} }
+
+     Gunakan fallback ini agar gift tetap masuk jika transport
+     tidak memanggil listener "gift" secara langsung.
+     Duplicate protection di giftData() tetap menjadi pagar
+     agar event yang sama tidak dihitung dua kali.
   */
   conn.on("event", (incomingEvent) => {
     try {
-      const outer = incomingEvent || {};
-      const type = String(
-        outer?.type ||
-        outer?.event ||
-        outer?.name ||
+      const raw = incomingEvent || {};
+      const nested = raw?.data && typeof raw.data === "object"
+        ? raw.data
+        : null;
+
+      const eventType = String(
+        raw?.event ||
+        raw?.type ||
+        nested?.event ||
+        nested?.type ||
         ""
       ).toLowerCase();
 
-      if (type !== "gift") return;
+      if (eventType !== "gift") {
+        return;
+      }
 
-      console.log("[TikTok] GIFT diterima melalui generic event");
-
-      const payload =
-        outer?.data && typeof outer.data === "object"
-          ? outer.data
-          : outer;
-
-      handleGiftEvent(payload);
-    } catch (err) {
-      console.error("[GIFT] generic event handler error:", err);
+      console.log("[TikTok Event Fallback] gift diterima");
+      handleGiftEvent(nested || raw);
+    } catch (error) {
+      console.error(
+        "[TikTok Event Fallback] gagal memproses gift:",
+        error
+      );
     }
   });
 

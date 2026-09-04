@@ -586,6 +586,8 @@
       setAuctionUI("draw");
       renderTimer();
 
+      sendAuctionState("running", true);
+
       showToast("DRAW TIME dimulai — 20 detik");
 
       const tick = () => {
@@ -890,14 +892,15 @@
        AUCTION STATE
        ======================================================= */
 
-    function sendAuctionState(next) {
+    function sendAuctionState(next, drawTime = false) {
 
       if (!socket) return;
 
       socket.emit(
         "auction:state",
         {
-          state: next
+          state: next,
+          drawTime: drawTime === true
         }
       );
     }

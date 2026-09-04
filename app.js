@@ -2115,6 +2115,10 @@
           return;
         }
 
+        console.log(
+          `[GIFT] participant diterima: @${gift.participant.uniqueId || gift.participant.username || "Viewer"} = ${Number(gift.participant.coins) || 0} coin`
+        );
+
         // Server mengirim participant lengkap dengan total coin.
         // Merge berdasarkan identitas agar perubahan userId TikTok
         // tidak membuat peserta baru/terpisah di layar.

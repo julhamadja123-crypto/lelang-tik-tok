@@ -30,6 +30,7 @@ let manualDisconnect = false;
    ========================================================= */
 
 let auctionActive = false;
+let auctionDrawTime = false;
 let participants = new Map();
 let participantVersion = 0;
 
@@ -38,6 +39,7 @@ let participantVersion = 0;
    ========================================================= */
 
 const processedGiftEvents = new Map();
+const processedStreakProgress = new Map();
 let processedGiftEventsCleanupAt = 0;
 
 const GIFT_TTL = 60 * 1000;
@@ -419,6 +421,12 @@ function giftData(event) {
     return null;
   }
 
+  // Identitas event dipakai juga untuk melacak progress streak saat DRAW TIME.
+  const msgId = event.msgId || event.msg_id || null;
+  const transactionId = event.transactionId || event.transaction_id || null;
+  const groupId = event.groupId || event.group_id || null;
+  const createTime = event.createTime || event.create_time || event.timestamp || null;
+
   /* -------------------------------------------------------
      GIFT STREAK
      
@@ -428,15 +436,38 @@ function giftData(event) {
      ------------------------------------------------------- */
 
   if (giftType === 1 && repeatValue !== undefined && repeatValue !== null && !repeatEnd) {
-    // TikTool memakai transactionId yang sama untuk seluruh combo.
-    // Event pertama bisa repeatCount=1 dan event final juga repeatCount=1
-    // untuk gift 1 coin. Jangan dedupe/menandai event pertama; tunggu
-    // repeatEnd=true agar coin benar-benar masuk ke peserta.
-    console.log(
-      `[GIFT] Streak sementara diabaikan: @${user.uniqueId} | ${giftName} | x${repeatCount}`
+    // Di luar DRAW TIME, pertahankan perilaku lama: tunggu repeatEnd.
+    // Saat DRAW TIME aktif, proses progress streak segera agar coin tidak
+    // tertunda ke sesi berikutnya. Yang dihitung hanya delta repeatCount,
+    // sehingga combo tidak menjadi double-count.
+    if (!auctionDrawTime) {
+      console.log(
+        `[GIFT] Streak sementara diabaikan: @${user.uniqueId} | ${giftName} | x${repeatCount}`
+      );
+      return null;
+    }
+
+    const streakKey = String(
+      transactionId ||
+      groupId ||
+      `${user.userId}|${giftId || giftName}`
     );
 
-    return null;
+    const previousRepeat = Number(processedStreakProgress.get(streakKey) || 0);
+    const deltaRepeat = Math.max(0, repeatCount - previousRepeat);
+
+    processedStreakProgress.set(streakKey, Math.max(previousRepeat, repeatCount));
+
+    if (deltaRepeat <= 0) {
+      console.log(
+        `[GIFT] Streak progress duplicate diabaikan: @${user.uniqueId} | ${giftName} | x${repeatCount}`
+      );
+      return null;
+    }
+
+    // Ganti repeatCount untuk perhitungan di bawah menjadi delta yang baru
+    // saja, bukan seluruh combo yang sudah pernah dihitung.
+    repeatCount = deltaRepeat;
   }
 
   /* -------------------------------------------------------
@@ -456,27 +487,6 @@ function giftData(event) {
   /* =======================================================
      DUPLICATE PROTECTION
      ======================================================= */
-
-  const msgId =
-    event.msgId ||
-    event.msg_id ||
-    null;
-
-  const transactionId =
-    event.transactionId ||
-    event.transaction_id ||
-    null;
-
-  const groupId =
-    event.groupId ||
-    event.group_id ||
-    null;
-
-  const createTime =
-    event.createTime ||
-    event.create_time ||
-    event.timestamp ||
-    null;
 
   /*
    * Prioritas ID:
@@ -1131,6 +1141,9 @@ io.on("connection", (socket) => {
       active:
         auctionActive,
 
+      drawTime:
+        auctionDrawTime,
+
       version:
         participantVersion
     }
@@ -1209,8 +1222,15 @@ io.on("connection", (socket) => {
       auctionActive =
         requestedState === "running";
 
+      auctionDrawTime =
+        auctionActive && data?.drawTime === true;
+
+      if (!auctionDrawTime) {
+        processedStreakProgress.clear();
+      }
+
       console.log(
-        `[Auction] state=${requestedState} active=${auctionActive}`
+        `[Auction] state=${requestedState} active=${auctionActive} drawTime=${auctionDrawTime}`
       );
 
       io.emit(
@@ -1221,6 +1241,9 @@ io.on("connection", (socket) => {
 
           active:
             auctionActive,
+
+          drawTime:
+            auctionDrawTime,
 
           version:
             participantVersion
@@ -1250,6 +1273,7 @@ io.on("connection", (socket) => {
          --------------------------------------------------- */
 
       processedGiftEvents.clear();
+      processedStreakProgress.clear();
       processedGiftEventsCleanupAt = 0;
 
       io.emit(
@@ -1277,6 +1301,8 @@ io.on("connection", (socket) => {
       );
 
       auctionActive = false;
+      auctionDrawTime = false;
+      processedStreakProgress.clear();
 
       io.emit(
         "auction:state",
@@ -1304,6 +1330,8 @@ io.on("connection", (socket) => {
       );
 
       auctionActive = false;
+      auctionDrawTime = false;
+      processedStreakProgress.clear();
 
       await stopConnection();
 
@@ -1349,6 +1377,8 @@ app.get(
         activeUsername,
 
       auctionActive,
+
+      auctionDrawTime,
 
       participantCount:
         participants.size,

@@ -39,7 +39,6 @@ let participantVersion = 0;
 
 const processedGiftEvents = new Map();
 let processedGiftEventsCleanupAt = 0;
-const streakProgress = new Map();
 
 const GIFT_TTL = 60 * 1000;
 
@@ -256,12 +255,13 @@ function giftData(event) {
     (giftId ? `Gift #${giftId}` : "Gift");
 
   /* -------------------------------------------------------
-     DIAMOND COUNT
+     DIAMOND / COIN COUNT
      ------------------------------------------------------- */
 
-  // TikTool dapat mengirim nilai gift di beberapa bentuk payload.
-  // Prioritaskan diamond/value gift, lalu fallback ke field coin yang
-  // memang dikirim oleh sebagian transport TikTok/TikTool.
+  // TikTool dapat mengirim nilai gift pada payload flat maupun pada
+  // object bertingkat. Ambil field yang benar-benar merepresentasikan
+  // nilai gift sebelum memakai fallback generik. Jangan memakai
+  // repeatCount sebagai coin karena itu hanya jumlah pengulangan gift.
   const diamondCount = numberPositive(
     event.diamondCount,
     event.diamond_count,
@@ -303,6 +303,44 @@ function giftData(event) {
     event.extendedGiftInfo?.coin_count,
     event.extendedGiftInfo?.coins
   );
+
+  // Be tolerant of additional TikTool nesting (for example payloads
+  // wrapped in giftInfo/giftData). Only inspect known value field names.
+  let resolvedDiamondCount = diamondCount;
+  if (resolvedDiamondCount <= 0) {
+    const valueKeys = new Set([
+      "diamondCount", "diamond_count", "diamondCost", "diamond_cost",
+      "coinValue", "coin_value", "coinCount", "coin_count", "coins"
+    ]);
+
+    const scanGiftValue = (value, depth = 0, seen = new Set()) => {
+      if (resolvedDiamondCount > 0 || depth > 5 || value === null || value === undefined) {
+        return;
+      }
+      if (typeof value !== "object") return;
+      if (seen.has(value)) return;
+      seen.add(value);
+
+      for (const [key, child] of Object.entries(value)) {
+        if (valueKeys.has(key)) {
+          const n = Number(child);
+          if (Number.isFinite(n) && n > 0) {
+            resolvedDiamondCount = n;
+            return;
+          }
+        }
+      }
+
+      for (const child of Object.values(value)) {
+        if (child && typeof child === "object") {
+          scanGiftValue(child, depth + 1, seen);
+          if (resolvedDiamondCount > 0) return;
+        }
+      }
+    };
+
+    scanGiftValue(event);
+  }
 
   /* -------------------------------------------------------
      REPEAT COUNT
@@ -369,50 +407,32 @@ function giftData(event) {
   // to accept a valid gift. Some TikTool payloads can omit it.
   if (!giftId) {
     console.log(
-      `[GIFT] giftId tidak ada, tetap diproses karena diamondCount=${diamondCount}.`
+      `[GIFT] giftId tidak ada, tetap diproses karena coin/diamond=${resolvedDiamondCount}.`
     );
   }
 
-  if (diamondCount <= 0) {
+  if (resolvedDiamondCount <= 0) {
     console.log(
-      `[GIFT] ${giftName} diabaikan: diamondCount tidak valid.`
+      `[GIFT] ${giftName} diabaikan: nilai coin/diamond tidak ditemukan pada payload.`
     );
 
     return null;
   }
 
   /* -------------------------------------------------------
-     GIFT STREAK - PROSES SEGERA
-
-     repeatCount pada streak umumnya kumulatif. Kita hanya
-     menambahkan selisih dari repeatCount sebelumnya agar gift
-     langsung terlihat tanpa menghitung coin dua kali.
+     GIFT STREAK
+     
+     giftType = 1 biasanya merupakan streak gift.
+     Hanya proses saat repeatEnd supaya tidak dihitung
+     berkali-kali.
      ------------------------------------------------------- */
 
-  let effectiveRepeatCount = repeatCount;
+  if (giftType === 1 && repeatValue !== undefined && repeatValue !== null && !repeatEnd && repeatCount > 1) {
+    console.log(
+      `[GIFT] Streak sementara diabaikan: @${user.uniqueId} | ${giftName} | x${repeatCount}`
+    );
 
-  if (giftType === 1) {
-    const streakKey =
-      `${user.userId}|${user.uniqueId.toLowerCase()}|${giftId || giftName}`;
-
-    const previousRepeat =
-      Number(streakProgress.get(streakKey)) || 0;
-
-    effectiveRepeatCount =
-      Math.max(0, repeatCount - previousRepeat);
-
-    if (effectiveRepeatCount <= 0) {
-      console.log(
-        `[GIFT] Streak progress duplicate diabaikan: @${user.uniqueId} | ${giftName} | x${repeatCount}`
-      );
-      return null;
-    }
-
-    if (repeatEnd) {
-      streakProgress.delete(streakKey);
-    } else {
-      streakProgress.set(streakKey, repeatCount);
-    }
+    return null;
   }
 
   /* -------------------------------------------------------
@@ -420,7 +440,7 @@ function giftData(event) {
      ------------------------------------------------------- */
 
   const coinValue =
-    diamondCount * effectiveRepeatCount;
+    resolvedDiamondCount * repeatCount;
 
   if (
     !Number.isFinite(coinValue) ||
@@ -503,7 +523,7 @@ function giftData(event) {
      DUPLICATE CHECK
      ------------------------------------------------------- */
 
-  if (processedGiftEvents.has(eventKey)) {
+  if (eventKey && processedGiftEvents.has(eventKey)) {
     console.log(
       `[GIFT] DUPLICATE diabaikan: ${eventKey}`
     );
@@ -511,17 +531,19 @@ function giftData(event) {
     return null;
   }
 
-  processedGiftEvents.set(
-    eventKey,
-    now
-  );
+  if (eventKey) {
+    processedGiftEvents.set(
+      eventKey,
+      now
+    );
+  }
 
   /* -------------------------------------------------------
      LOG
      ------------------------------------------------------- */
 
   console.log(
-    `[GIFT] @${user.uniqueId} | ${giftName} | ${diamondCount} x ${repeatCount} = ${coinValue}`
+    `[GIFT] @${user.uniqueId} | ${giftName} | ${resolvedDiamondCount} x ${repeatCount} = ${coinValue}`
   );
 
   /* -------------------------------------------------------
@@ -538,7 +560,7 @@ function giftData(event) {
     giftName,
     giftId,
 
-    diamondCount,
+    diamondCount: resolvedDiamondCount,
     repeatCount,
 
     coinValue,
@@ -706,15 +728,41 @@ async function connectToLive(rawUsername) {
     ) {
       key = `username:${gift.username.toLowerCase()}`;
     } else {
-      key = `name:${gift.nickname.toLowerCase()}`;
+      key = `name:${String(gift.nickname || "viewer").toLowerCase()}`;
     }
 
     /* -----------------------------------------------------
        PARTICIPANT SEBELUMNYA
+       -----------------------------------------------------
+       TikTok/TikTool kadang mengirim userId pada satu event dan
+       tidak pada event berikutnya. Cocokkan juga uniqueId/username
+       agar coin tidak terpecah ke peserta baru.
        ----------------------------------------------------- */
 
-    const previous =
-      participants.get(key);
+    let previous = participants.get(key);
+
+    if (!previous) {
+      const uniqueId =
+        String(gift.uniqueId || "").trim().toLowerCase();
+      const username =
+        String(gift.username || "").trim().toLowerCase();
+
+      for (const [existingKey, existingParticipant] of participants.entries()) {
+        const existingUniqueId =
+          String(existingParticipant?.uniqueId || "").trim().toLowerCase();
+        const existingUsername =
+          String(existingParticipant?.username || "").trim().toLowerCase();
+
+        if (
+          (uniqueId && existingUniqueId === uniqueId) ||
+          (username && existingUsername === username)
+        ) {
+          key = existingKey;
+          previous = existingParticipant;
+          break;
+        }
+      }
+    }
 
     /* -----------------------------------------------------
        COIN SEBELUMNYA
@@ -831,17 +879,21 @@ async function connectToLive(rawUsername) {
      * menahan jalur gift ketika peserta sudah banyak.
      * Tidak mengubah perhitungan coin maupun urutan event utama.
      */
+    // Capture version/snapshot sekarang agar snapshot lama tidak dapat
+    // menimpa coin terbaru ketika beberapa gift masuk sangat cepat.
+    const snapshotVersion = participantVersion;
+    const snapshotParticipants =
+      Array.from(participants.values());
+
     setImmediate(() => {
       io.emit(
         "auction:participants",
         {
           version:
-            participantVersion,
+            snapshotVersion,
 
           participants:
-            Array.from(
-              participants.values()
-            )
+            snapshotParticipants
         }
       );
     });

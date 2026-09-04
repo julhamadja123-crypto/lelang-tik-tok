@@ -440,13 +440,6 @@ function giftData(event) {
     // Saat DRAW TIME aktif, proses progress streak segera agar coin tidak
     // tertunda ke sesi berikutnya. Yang dihitung hanya delta repeatCount,
     // sehingga combo tidak menjadi double-count.
-    if (!auctionDrawTime) {
-      console.log(
-        `[GIFT] Streak sementara diabaikan: @${user.uniqueId} | ${giftName} | x${repeatCount}`
-      );
-      return null;
-    }
-
     const streakKey = String(
       transactionId ||
       groupId ||

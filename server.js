@@ -40,9 +40,13 @@ let participantVersion = 0;
 
 const processedGiftEvents = new Map();
 const processedStreakProgress = new Map();
+// Extra protection for TikTool deliveries that arrive as different JS objects
+// and do not carry a stable transaction/message id.
+const recentGiftFingerprints = new Map();
 let processedGiftEventsCleanupAt = 0;
 
 const GIFT_TTL = 60 * 1000;
+const DELIVERY_DUP_TTL = 750;
 
 /* =========================================================
    LOAD TIKTOK CONNECTOR
@@ -562,6 +566,46 @@ function giftData(event) {
   }
 
   /* -------------------------------------------------------
+     DELIVERY FINGERPRINT
+     -------------------------------------------------------
+     Beberapa transport dapat mengirim delivery yang sama sebagai dua
+     object berbeda dan tanpa ID transaksi yang stabil. Jangan sampai
+     delivery seperti itu menambah coin dua kali. Fingerprint ini hanya
+     dipakai sebagai pagar pendek; event yang punya transactionId/msgId
+     tetap memakai duplicate protection utama di atas.
+     ------------------------------------------------------- */
+
+  const deliveryFingerprint = [
+    user.userId,
+    user.uniqueId,
+    giftId || giftName,
+    resolvedDiamondCount,
+    repeatCount,
+    repeatEnd ? 1 : 0
+  ].join("|");
+
+  const previousDeliveryAt =
+    recentGiftFingerprints.get(deliveryFingerprint);
+
+  if (previousDeliveryAt && now - previousDeliveryAt < DELIVERY_DUP_TTL) {
+    console.log(
+      `[GIFT] DUPLICATE delivery fingerprint diabaikan: ${deliveryFingerprint}`
+    );
+    return null;
+  }
+
+  recentGiftFingerprints.set(deliveryFingerprint, now);
+
+  // Buang fingerprint lama agar cache tetap kecil.
+  if (recentGiftFingerprints.size > 200) {
+    for (const [key, time] of recentGiftFingerprints.entries()) {
+      if (now - time >= DELIVERY_DUP_TTL) {
+        recentGiftFingerprints.delete(key);
+      }
+    }
+  }
+
+  /* -------------------------------------------------------
      LOG
      ------------------------------------------------------- */
 
@@ -705,6 +749,13 @@ async function connectToLive(rawUsername) {
   const handledGiftObjects = new WeakSet();
 
   const handleGiftEvent = (incomingEvent) => {
+    // Ignore late events from a connection that has already been replaced.
+    // This prevents a reconnect from briefly counting the same gift twice.
+    if (liveConnection !== conn) {
+      console.log("[GIFT] event dari koneksi lama diabaikan");
+      return;
+    }
+
     if (incomingEvent && typeof incomingEvent === "object") {
       if (handledGiftObjects.has(incomingEvent)) {
         console.log("[GIFT] DUPLICATE listener event diabaikan");
@@ -1283,6 +1334,7 @@ io.on("connection", (socket) => {
 
       processedGiftEvents.clear();
       processedStreakProgress.clear();
+      recentGiftFingerprints.clear();
       processedGiftEventsCleanupAt = 0;
 
       io.emit(
@@ -1341,6 +1393,7 @@ io.on("connection", (socket) => {
       auctionActive = false;
       auctionDrawTime = false;
       processedStreakProgress.clear();
+      recentGiftFingerprints.clear();
 
       await stopConnection();
 

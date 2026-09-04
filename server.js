@@ -38,6 +38,7 @@ let participantVersion = 0;
    ========================================================= */
 
 const processedGiftEvents = new Map();
+let processedGiftEventsCleanupAt = 0;
 
 const GIFT_TTL = 60 * 1000;
 
@@ -464,10 +465,19 @@ function giftData(event) {
 
   const now = Date.now();
 
-  for (const [key, time] of processedGiftEvents.entries()) {
-    if (now - time > GIFT_TTL) {
-      processedGiftEvents.delete(key);
+  // Bersihkan duplicate cache secara berkala, bukan pada setiap gift.
+  // Ini menjaga jalur gift tetap ringan ketika banyak gift masuk bersamaan.
+  if (
+    processedGiftEvents.size > 0 &&
+    (processedGiftEventsCleanupAt === 0 ||
+      now >= processedGiftEventsCleanupAt)
+  ) {
+    for (const [key, time] of processedGiftEvents.entries()) {
+      if (now - time > GIFT_TTL) {
+        processedGiftEvents.delete(key);
+      }
     }
+    processedGiftEventsCleanupAt = now + 5000;
   }
 
   /* -------------------------------------------------------
@@ -628,14 +638,7 @@ async function connectToLive(rawUsername) {
   const handleGiftEvent = (incomingEvent) => {
     const event = unwrapTikTokEvent(incomingEvent);
 
-    console.log(
-      "[TikTok Gift Event] RAW:",
-      JSON.stringify(event)
-    );
-
-    console.log(
-      `[TikTok Gift Event] @${userData(event).uniqueId}`
-    );
+    // FAST PATH: process the gift immediately; no artificial delay.
 
     /* -----------------------------------------------------
        LELELANG HARUS AKTIF
@@ -780,40 +783,8 @@ async function connectToLive(rawUsername) {
         participantVersion
     };
 
-    /* -----------------------------------------------------
-       LOG
-       ----------------------------------------------------- */
-
-    console.log(
-      "------------------------------------------------"
-    );
-
-    console.log(
-      `[AUCTION] PESERTA: ${participant.nickname}`
-    );
-
-    console.log(
-      `[AUCTION] GIFT: ${gift.giftName}`
-    );
-
-    console.log(
-      `[AUCTION] GIFT COIN: ${giftCoins}`
-    );
-
-    console.log(
-      `[AUCTION] TOTAL COIN: ${participant.coins}`
-    );
-
-    console.log(
-      `[AUCTION] JUMLAH PESERTA: ${participants.size}`
-    );
-
-    console.log(
-      "------------------------------------------------"
-    );
-
     /* =====================================================
-       KIRIM KE FRONTEND
+       KIRIM KE FRONTEND SECEPATNYA
        ===================================================== */
 
     /* Gift individual */
@@ -822,21 +793,7 @@ async function connectToLive(rawUsername) {
       payload
     );
 
-    /* Daftar seluruh peserta */
-    io.emit(
-      "auction:participants",
-      {
-        version:
-          participantVersion,
-
-        participants:
-          Array.from(
-            participants.values()
-          )
-      }
-    );
-
-    /* State peserta yang baru berubah */
+    /* State peserta yang baru berubah — kirim segera */
     io.emit(
       "auction:participant:update",
       {
@@ -848,16 +805,53 @@ async function connectToLive(rawUsername) {
         gift
       }
     );
+
+    /*
+     * Snapshot seluruh peserta dikirim sesaat setelah event utama.
+     * Ini mencegah Array.from(...) + serialisasi daftar peserta
+     * menahan jalur gift ketika peserta sudah banyak.
+     * Tidak mengubah perhitungan coin maupun urutan event utama.
+     */
+    setImmediate(() => {
+      io.emit(
+        "auction:participants",
+        {
+          version:
+            participantVersion,
+
+          participants:
+            Array.from(
+              participants.values()
+            )
+        }
+      );
+    });
   };
 
   // Standard TikTool event.
   conn.on("gift", handleGiftEvent);
 
   // Compatibility with transports that expose all events via `event`.
+  // Only use this fallback when the event transport is actually needed.
+  // The normal "gift" listener remains the primary/fast path.
   conn.on("event", (incomingEvent) => {
     const event = unwrapTikTokEvent(incomingEvent);
-    const type = String(incomingEvent?.event || incomingEvent?.type || event?.type || "").toLowerCase();
-    if (type === "gift") handleGiftEvent(event);
+    const type = String(
+      incomingEvent?.event ||
+      incomingEvent?.type ||
+      event?.type ||
+      ""
+    ).toLowerCase();
+
+    if (type !== "gift") return;
+
+    // Avoid double-processing if this payload is already marked as a
+    // standard gift event by the connector.
+    if (incomingEvent?.event === "gift" && incomingEvent?.data) {
+      return;
+    }
+
+    handleGiftEvent(event);
   });
 
   /* =======================================================
@@ -1171,6 +1165,7 @@ io.on("connection", (socket) => {
          --------------------------------------------------- */
 
       processedGiftEvents.clear();
+      processedGiftEventsCleanupAt = 0;
 
       io.emit(
         "auction:participants",

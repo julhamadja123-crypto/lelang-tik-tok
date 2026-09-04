@@ -484,7 +484,7 @@ function giftData(event) {
      DUPLICATE CHECK
      ------------------------------------------------------- */
 
-  if (processedGiftEvents.has(eventKey)) {
+  if (eventKey && processedGiftEvents.has(eventKey)) {
     console.log(
       `[GIFT] DUPLICATE diabaikan: ${eventKey}`
     );
@@ -492,10 +492,12 @@ function giftData(event) {
     return null;
   }
 
-  processedGiftEvents.set(
-    eventKey,
-    now
-  );
+  if (eventKey) {
+    processedGiftEvents.set(
+      eventKey,
+      now
+    );
+  }
 
   /* -------------------------------------------------------
      LOG
@@ -687,15 +689,41 @@ async function connectToLive(rawUsername) {
     ) {
       key = `username:${gift.username.toLowerCase()}`;
     } else {
-      key = `name:${gift.nickname.toLowerCase()}`;
+      key = `name:${String(gift.nickname || "viewer").toLowerCase()}`;
     }
 
     /* -----------------------------------------------------
        PARTICIPANT SEBELUMNYA
+       -----------------------------------------------------
+       TikTok/TikTool kadang mengirim userId pada satu event dan
+       tidak pada event berikutnya. Cocokkan juga uniqueId/username
+       agar coin tidak terpecah ke peserta baru.
        ----------------------------------------------------- */
 
-    const previous =
-      participants.get(key);
+    let previous = participants.get(key);
+
+    if (!previous) {
+      const uniqueId =
+        String(gift.uniqueId || "").trim().toLowerCase();
+      const username =
+        String(gift.username || "").trim().toLowerCase();
+
+      for (const [existingKey, existingParticipant] of participants.entries()) {
+        const existingUniqueId =
+          String(existingParticipant?.uniqueId || "").trim().toLowerCase();
+        const existingUsername =
+          String(existingParticipant?.username || "").trim().toLowerCase();
+
+        if (
+          (uniqueId && existingUniqueId === uniqueId) ||
+          (username && existingUsername === username)
+        ) {
+          key = existingKey;
+          previous = existingParticipant;
+          break;
+        }
+      }
+    }
 
     /* -----------------------------------------------------
        COIN SEBELUMNYA
@@ -812,17 +840,21 @@ async function connectToLive(rawUsername) {
      * menahan jalur gift ketika peserta sudah banyak.
      * Tidak mengubah perhitungan coin maupun urutan event utama.
      */
+    // Capture version/snapshot sekarang agar snapshot lama tidak dapat
+    // menimpa coin terbaru ketika beberapa gift masuk sangat cepat.
+    const snapshotVersion = participantVersion;
+    const snapshotParticipants =
+      Array.from(participants.values());
+
     setImmediate(() => {
       io.emit(
         "auction:participants",
         {
           version:
-            participantVersion,
+            snapshotVersion,
 
           participants:
-            Array.from(
-              participants.values()
-            )
+            snapshotParticipants
         }
       );
     });

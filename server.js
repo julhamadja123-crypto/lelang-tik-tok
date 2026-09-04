@@ -888,6 +888,39 @@ async function connectToLive(rawUsername) {
   conn.on("gift", handleGiftEvent);
 
   /* =======================================================
+     GIFT FALLBACK VIA GENERIC EVENT
+     =======================================================
+     @tiktool/live juga menyediakan event generik "event".
+     Pada kondisi tertentu transport dapat menyampaikan gift
+     melalui jalur ini. Tangani keduanya; duplicate protection
+     di giftData() mencegah satu gift dihitung dua kali.
+  */
+  conn.on("event", (incomingEvent) => {
+    try {
+      const outer = incomingEvent || {};
+      const type = String(
+        outer?.type ||
+        outer?.event ||
+        outer?.name ||
+        ""
+      ).toLowerCase();
+
+      if (type !== "gift") return;
+
+      console.log("[TikTok] GIFT diterima melalui generic event");
+
+      const payload =
+        outer?.data && typeof outer.data === "object"
+          ? outer.data
+          : outer;
+
+      handleGiftEvent(payload);
+    } catch (err) {
+      console.error("[GIFT] generic event handler error:", err);
+    }
+  });
+
+  /* =======================================================
      CHAT
      ======================================================= */
 

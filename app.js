@@ -2125,6 +2125,21 @@
         renderParticipants();
 
         /*
+         * DRAW TIME:
+         * Gift tetap diproses walaupun DRAW TIME sedang berjalan.
+         * Jika setelah gift coin tertinggi sudah tidak seri, langsung FINISHED.
+         * Jika masih seri, DRAW TIME tetap berjalan sampai 00:00 lalu diulang.
+         */
+        if (
+          state.drawTime === true &&
+          state.auction === "running" &&
+          !hasCoinTie()
+        ) {
+          finishDrawTime();
+          return;
+        }
+
+        /*
          * Tidak ada popup gift.
          */
 

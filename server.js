@@ -170,12 +170,64 @@ function numberPositive(...values) {
    ========================================================= */
 
 function unwrapTikTokEvent(event) {
-  // TikTool old-style normally emits a flat event, but newer
-  // transports may wrap it as { event: "gift", data: {...} }.
-  if (event?.data && typeof event.data === "object") {
-    return event.data;
+  /*
+   * TikTool's documented GiftEvent is normally already flat:
+   * { user, giftId, giftName, diamondCount, repeatCount, ... }.
+   * Some transports/wrappers can however deliver:
+   *   { event: "gift", data: {...} }
+   * or { type: "gift", payload: {...} }.
+   *
+   * Normalize ALL of those forms before parsing. This is deliberately
+   * limited to known wrapper fields so ordinary gift payload fields
+   * cannot be accidentally replaced.
+   */
+  let current = event || {};
+
+  for (let i = 0; i < 4; i++) {
+    if (!current || typeof current !== "object") {
+      break;
+    }
+
+    let next = null;
+
+    if (
+      current.data &&
+      typeof current.data === "object"
+    ) {
+      next = current.data;
+    } else if (
+      current.payload &&
+      typeof current.payload === "object"
+    ) {
+      next = current.payload;
+    } else if (
+      current.message &&
+      typeof current.message === "object"
+    ) {
+      next = current.message;
+    }
+
+    if (!next || next === current) {
+      break;
+    }
+
+    current = next;
   }
-  return event || {};
+
+  /*
+   * A few webhook/transport adapters can put data in a JSON string.
+   * Accept it when it is an object-shaped JSON payload.
+   */
+  if (typeof current === "string") {
+    try {
+      const parsed = JSON.parse(current);
+      if (parsed && typeof parsed === "object") {
+        return unwrapTikTokEvent(parsed);
+      }
+    } catch (_) {}
+  }
+
+  return current || {};
 }
 
 function userData(event) {

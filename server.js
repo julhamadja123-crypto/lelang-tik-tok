@@ -599,6 +599,26 @@ function giftData(event) {
     ? `fingerprint:${senderKey}|${giftKey}|${resolvedDiamondCount}|${repeatCount}|${repeatEnd ? 1 : 0}|${fingerprintTime}`
     : null;
 
+  /*
+   * LAST-RESORT DUPLICATE GUARD:
+   *
+   * Pada sebagian payload TikTool, satu gift dapat tiba melalui dua jalur
+   * (gift + generic event) tanpa msgId/transactionId/groupId/createTime.
+   * Dalam kondisi itu fallback Date.now() sebelumnya membuat kedua event
+   * terlihat sebagai gift berbeda, sehingga 1 coin menjadi 2.
+   *
+   * Hanya aktif jika SEMUA identifier event memang tidak tersedia.
+   * Window dibuat sangat pendek agar tidak mengganggu gift sah yang
+   * dikirim terpisah.
+   */
+  const transportFingerprint =
+    !transactionId &&
+    !msgId &&
+    !groupId &&
+    !fingerprintTime
+      ? `transport:${senderKey}|${giftKey}|${resolvedDiamondCount}|${repeatCount}|${repeatEnd ? 1 : 0}`
+      : null;
+
   if (
     giftFingerprint &&
     processedGiftFingerprints.has(giftFingerprint)
@@ -620,6 +640,26 @@ function giftData(event) {
   if (giftFingerprint) {
     processedGiftFingerprints.set(
       giftFingerprint,
+      now
+    );
+  }
+
+  if (transportFingerprint) {
+    const previousTransportTime =
+      processedGiftFingerprints.get(transportFingerprint);
+
+    if (
+      previousTransportTime &&
+      now - previousTransportTime <= 750
+    ) {
+      console.log(
+        `[GIFT] DUPLICATE transport diabaikan: ${transportFingerprint}`
+      );
+      return null;
+    }
+
+    processedGiftFingerprints.set(
+      transportFingerprint,
       now
     );
   }

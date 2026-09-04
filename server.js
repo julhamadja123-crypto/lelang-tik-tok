@@ -39,10 +39,12 @@ let participantVersion = 0;
    ========================================================= */
 
 const processedGiftEvents = new Map();
+const processedGiftFingerprints = new Map();
 const processedStreakProgress = new Map();
 let processedGiftEventsCleanupAt = 0;
 
 const GIFT_TTL = 60 * 1000;
+const GIFT_FINGERPRINT_TTL = 1500;
 
 /* =========================================================
    LOAD TIKTOK CONNECTOR
@@ -187,25 +189,17 @@ function userData(event) {
     event?.sender_user_id ||
     event?.userId ||
     event?.user_id ||
-    event?.sender?.userId ||
-    event?.sender?.user_id ||
-    event?.senderUserId ||
-    event?.sender_user_id ||
     "unknown";
 
   const uniqueId =
     user.uniqueId ||
     event?.uniqueId ||
-    event?.unique_id ||
-    event?.sender?.uniqueId ||
-    event?.sender?.unique_id ||
     event?.nickname ||
     "Viewer";
 
   const nickname =
     user.nickname ||
     event?.nickname ||
-    event?.sender?.nickname ||
     user.uniqueId ||
     user.unique_id ||
     event?.uniqueId ||
@@ -218,8 +212,6 @@ function userData(event) {
     user.profilePicture?.urls?.[0] ||
     event?.profilePictureUrl ||
     event?.profilePicture ||
-    event?.sender?.avatar ||
-    event?.sender?.profilePictureUrl ||
     null;
 
   return {
@@ -330,20 +322,7 @@ function giftData(event) {
     event.extendedGiftInfo?.coins,
     event.extendedGiftInfo?.diamondValue,
     event.extendedGiftInfo?.diamond_value,
-    event.extendedGiftInfo?.coin,
-
-    event.giftInfo?.diamondCount,
-    event.giftInfo?.diamond_count,
-    event.giftInfo?.diamondCost,
-    event.giftInfo?.diamond_cost,
-    event.giftInfo?.coinValue,
-    event.giftInfo?.coin_value,
-    event.giftInfo?.coinCount,
-    event.giftInfo?.coin_count,
-    event.giftInfo?.coins,
-    event.giftInfo?.diamondValue,
-    event.giftInfo?.diamond_value,
-    event.giftInfo?.coin
+    event.extendedGiftInfo?.coin
   );
 
   // Be tolerant of additional TikTool nesting (for example payloads
@@ -422,9 +401,6 @@ function giftData(event) {
     event.gift?.gift_type ??
     event.giftDetails?.giftType ??
     event.giftDetails?.gift_type ??
-    event.gift?.type ??
-    event.giftDetails?.type ??
-    event.giftInfo?.type ??
     0;
 
   const giftType = Number(giftTypeRaw) || 0;
@@ -437,11 +413,7 @@ function giftData(event) {
     event.repeatEnd ??
     event.repeat_end ??
     event.gift?.repeatEnd ??
-    event.gift?.repeat_end ??
-    event.giftDetails?.repeatEnd ??
-    event.giftDetails?.repeat_end ??
-    event.giftInfo?.repeatEnd ??
-    event.giftInfo?.repeat_end;
+    event.gift?.repeat_end;
 
   const repeatEnd =
     repeatValue === true ||
@@ -556,20 +528,13 @@ function giftData(event) {
   const repeatKey = `${repeatCount}|${repeatEnd ? 1 : 0}`;
 
   if (transactionId) {
-    // TikTool v3 documents transactionId as the stable per-gift UUID.
-    // Keep repeat state in the key so combo progress updates can each
-    // contribute only their NEW delta.
-    eventKey = `transaction:${String(transactionId)}|${senderKey}|${giftKey}|${repeatKey}`;
+    eventKey = `transaction:${transactionId}|${senderKey}|${giftKey}|${repeatKey}`;
   } else if (msgId) {
-    // msgId identifies an individual upstream gift message.
-    eventKey = `msg:${String(msgId)}|${senderKey}|${giftKey}|${repeatKey}`;
+    eventKey = `msg:${msgId}|${senderKey}|${giftKey}|${repeatKey}`;
   } else if (groupId) {
-    // groupId identifies a combo when transactionId/msgId is unavailable.
-    eventKey = `group:${String(groupId)}|${senderKey}|${giftKey}|${repeatKey}`;
+    eventKey = `group:${groupId}|${senderKey}|${giftKey}|${repeatKey}`;
   } else {
-    // Last-resort signature: do NOT use a coarse seconds-only timestamp,
-    // otherwise two real gifts sent in the same second could be lost.
-    const fallbackTime = createTime || Date.now();
+    const fallbackTime = createTime || Math.floor(Date.now() / 1000);
     eventKey =
       `fallback:${senderKey}|${giftKey}|${repeatKey}|${fallbackTime}`;
   }
@@ -592,6 +557,13 @@ function giftData(event) {
         processedGiftEvents.delete(key);
       }
     }
+
+    for (const [key, time] of processedGiftFingerprints.entries()) {
+      if (now - time > GIFT_FINGERPRINT_TTL) {
+        processedGiftFingerprints.delete(key);
+      }
+    }
+
     processedGiftEventsCleanupAt = now + 5000;
   }
 
@@ -607,9 +579,47 @@ function giftData(event) {
     return null;
   }
 
+  /*
+   * SECONDARY DUPLICATE GUARD:
+   * TikTool kadang dapat mengirim satu gift melalui dua transport/event
+   * dengan ID berbeda. Jika keduanya membawa sender, gift, nilai, dan
+   * createTime yang sama, itu satu gift yang sama, bukan dua coin.
+   *
+   * Hanya aktif bila createTime tersedia. Jadi dua gift sah yang dikirim
+   * berurutan tanpa createTime tidak ikut dibuang.
+   */
+  const fingerprintTime =
+    createTime !== null &&
+    createTime !== undefined &&
+    String(createTime).trim() !== ""
+      ? String(createTime).trim()
+      : null;
+
+  const giftFingerprint = fingerprintTime
+    ? `fingerprint:${senderKey}|${giftKey}|${resolvedDiamondCount}|${repeatCount}|${repeatEnd ? 1 : 0}|${fingerprintTime}`
+    : null;
+
+  if (
+    giftFingerprint &&
+    processedGiftFingerprints.has(giftFingerprint)
+  ) {
+    console.log(
+      `[GIFT] DUPLICATE fingerprint diabaikan: ${giftFingerprint}`
+    );
+
+    return null;
+  }
+
   if (eventKey) {
     processedGiftEvents.set(
       eventKey,
+      now
+    );
+  }
+
+  if (giftFingerprint) {
+    processedGiftFingerprints.set(
+      giftFingerprint,
       now
     );
   }
@@ -783,9 +793,6 @@ async function connectToLive(rawUsername) {
       `[GIFT] EVENT DITERIMA | auctionActive=${auctionActive} | drawTime=${auctionDrawTime}`
     );
 
-    // IMPORTANT: gift processing is intentionally NOT gated by
-    // auctionActive or auctionDrawTime. A gift must always update the
-    // participant, including while DRAW TIME is running.
     const gift =
       giftData(event);
 

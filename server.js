@@ -873,12 +873,33 @@ async function connectToLive(rawUsername) {
      @tiktool/live v2.x
      ------------------------------------------------------- */
 
+  /*
+   * Use TikTool RELAYED mode for the production connection.
+   *
+   * The v38 log showed that the signed/direct WebSocket was able to obtain
+   * roomId + credentials and report "connected", but no gift events reached
+   * the SDK listener. Relayed mode keeps the same @tiktool/live event API
+   * while letting TikTool's edge handle the TikTok WebSocket/protobuf side.
+   * This is especially important here because the application only needs the
+   * normalized gift/chat events, not the raw TikTok socket.
+   *
+   * TIKTOOL_MODE can be set to "direct" if a direct connection is explicitly
+   * required. Default is "relayed".
+   */
+  const tikToolMode =
+    String(process.env.TIKTOOL_MODE || "relayed").trim().toLowerCase();
+
   const conn = new Connector({
     uniqueId: username,
     apiKey: TIKTOOL_API_KEY,
+    mode: tikToolMode === "direct" ? "direct" : "relayed",
     autoReconnect: false,
     debug: false
   });
+
+  console.log(
+    `[TikTok] Mode koneksi: ${tikToolMode === "direct" ? "direct" : "relayed"}`
+  );
 
   liveConnection = conn;
 
@@ -1128,24 +1149,46 @@ async function connectToLive(rawUsername) {
   // Compatibility with transports that expose all events via `event`.
   // Only use this fallback when the event transport is actually needed.
   // The normal "gift" listener remains the primary/fast path.
-  conn.on("event", (incomingEvent) => {
-    const event = unwrapTikTokEvent(incomingEvent);
+  conn.on("event", (incomingEvent, maybePayload) => {
+    /*
+     * @tiktool/live documents the generic event channel as:
+     *   event.type === "gift"
+     *
+     * Some adapters instead expose (type, payload), while raw/relayed
+     * transports can expose { event: "gift", data: {...} }.
+     * Normalize all three forms before deciding whether this is a gift.
+     */
+    let candidate = incomingEvent;
+
+    if (
+      typeof incomingEvent === "string" &&
+      maybePayload &&
+      typeof maybePayload === "object"
+    ) {
+      candidate = {
+        type: incomingEvent,
+        data: maybePayload
+      };
+    }
+
+    const event = unwrapTikTokEvent(candidate);
     const type = String(
-      incomingEvent?.event ||
-      incomingEvent?.type ||
+      candidate?.event ||
+      candidate?.type ||
+      event?.event ||
       event?.type ||
       ""
     ).toLowerCase();
 
     if (type !== "gift") return;
 
+    console.log("[GIFT] diterima melalui generic event channel");
+
     // IMPORTANT:
     // Some @tiktool/live transports deliver the gift ONLY through the
-    // generic "event" channel as { event: "gift", data: {...} }.
-    // Do not return here: the primary "gift" listener may not receive
-    // the same gift at all. giftData() + duplicate protection below
-    // safely prevent the same gift from being counted twice.
-    handleGiftEvent(incomingEvent);
+    // generic "event" channel. The primary "gift" listener and this
+    // compatibility path share the same duplicate protection.
+    handleGiftEvent(candidate);
   });
 
   /* =======================================================
@@ -1268,6 +1311,12 @@ async function connectToLive(rawUsername) {
     console.log(
       `[TikTok] BERHASIL TERHUBUNG @${username}`
     );
+
+    if (typeof conn.eventCount !== "undefined") {
+      console.log(
+        `[TikTok] eventCount awal: ${conn.eventCount}`
+      );
+    }
 
     return state;
 

@@ -100,6 +100,73 @@
     `;
     document.head.appendChild(style);
 
+    /* =======================================================
+       TIKTOK CONNECTION MONITOR - DASHBOARD
+       Panel visual untuk membuktikan koneksi dan event stream.
+       Tidak mengubah perhitungan coin/gift.
+       ======================================================= */
+    if (!document.getElementById("tiktokConnectionMonitor")) {
+      const monitor = document.createElement("section");
+      monitor.id = "tiktokConnectionMonitor";
+      monitor.innerHTML = `
+        <div class="tcm-head">
+          <div>
+            <div class="tcm-kicker">TIKTOK LIVE</div>
+            <div class="tcm-title">Connection Monitor</div>
+          </div>
+          <div id="tcmStatus" class="tcm-status offline">
+            <span class="tcm-dot"></span>
+            <span id="tcmStatusText">OFFLINE</span>
+          </div>
+        </div>
+        <div class="tcm-account" id="tcmAccount">@—</div>
+        <div class="tcm-message" id="tcmMessage">Belum terhubung ke TikTok LIVE.</div>
+        <div class="tcm-grid">
+          <div class="tcm-stat"><span>CONNECTION</span><strong id="tcmConnection">OFFLINE</strong></div>
+          <div class="tcm-stat"><span>EVENT MASUK</span><strong id="tcmEvents">0</strong></div>
+          <div class="tcm-stat"><span>GIFT DITERIMA</span><strong id="tcmGifts">0</strong></div>
+          <div class="tcm-stat"><span>GIFT TERAKHIR</span><strong id="tcmLastGift">—</strong></div>
+        </div>
+        <div class="tcm-footer">
+          <span id="tcmLastEvent">Belum ada event</span>
+          <span id="tcmReconnect"></span>
+        </div>
+      `;
+      document.body.insertBefore(monitor, document.body.firstElementChild);
+
+      const s = document.createElement("style");
+      s.id = "tiktokConnectionMonitorStyle";
+      s.textContent = `
+        #tiktokConnectionMonitor {
+          box-sizing:border-box;width:min(1100px,calc(100% - 24px));margin:12px auto 8px;
+          padding:16px;border:1px solid rgba(148,163,184,.20);border-radius:18px;
+          background:rgba(15,23,42,.88);color:#e5e7eb;box-shadow:0 12px 35px rgba(0,0,0,.20);
+          font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+        }
+        #tiktokConnectionMonitor .tcm-head{display:flex;justify-content:space-between;align-items:center;gap:12px}
+        #tiktokConnectionMonitor .tcm-kicker{font-size:10px;letter-spacing:.16em;font-weight:800;opacity:.65}
+        #tiktokConnectionMonitor .tcm-title{font-size:18px;font-weight:800;margin-top:2px}
+        #tiktokConnectionMonitor .tcm-account{margin-top:10px;font-weight:700;font-size:14px}
+        #tiktokConnectionMonitor .tcm-message{margin-top:4px;font-size:12px;opacity:.78;min-height:18px}
+        #tiktokConnectionMonitor .tcm-status{display:inline-flex;align-items:center;gap:7px;padding:7px 10px;border-radius:999px;
+          font-size:11px;font-weight:900;letter-spacing:.04em;background:rgba(239,68,68,.12);color:#fca5a5}
+        #tiktokConnectionMonitor .tcm-status.connected{background:rgba(34,197,94,.12);color:#86efac}
+        #tiktokConnectionMonitor .tcm-status.waiting,#tiktokConnectionMonitor .tcm-status.reconnecting{background:rgba(245,158,11,.12);color:#fcd34d}
+        #tiktokConnectionMonitor .tcm-dot{width:8px;height:8px;border-radius:50%;background:currentColor;box-shadow:0 0 10px currentColor}
+        #tiktokConnectionMonitor .tcm-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:14px}
+        #tiktokConnectionMonitor .tcm-stat{padding:10px 11px;border-radius:12px;background:rgba(255,255,255,.045);border:1px solid rgba(255,255,255,.06)}
+        #tiktokConnectionMonitor .tcm-stat span{display:block;font-size:9px;opacity:.55;letter-spacing:.08em;font-weight:800}
+        #tiktokConnectionMonitor .tcm-stat strong{display:block;margin-top:4px;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+        #tiktokConnectionMonitor .tcm-footer{display:flex;justify-content:space-between;gap:10px;margin-top:10px;font-size:10px;opacity:.55}
+        @media (max-width:700px){
+          #tiktokConnectionMonitor{width:calc(100% - 14px);margin:7px auto;padding:13px;border-radius:15px}
+          #tiktokConnectionMonitor .tcm-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+          #tiktokConnectionMonitor .tcm-title{font-size:16px}
+        }
+      `;
+      document.head.appendChild(s);
+    }
+
     // Pastikan heading tidak kembali menjadi "PESERTA LELANG".
     document.querySelectorAll("h1,h2,h3,h4,.section-title,.panel-title,.card-title").forEach(node => {
       if ((node.textContent || "").trim().toUpperCase() === "PESERTA LELANG") {
@@ -191,7 +258,14 @@
       timerInterval: null,
 
       connected: false,
-      connecting: false
+      connecting: false,
+      tiktokPhase: "offline",
+      tiktokEventCount: 0,
+      tiktokGiftCount: 0,
+      tiktokLastEventAt: 0,
+      tiktokLastGiftAt: 0,
+      tiktokLastGiftName: "",
+      tiktokLastGiftCoins: 0
     };
 
     const STORAGE_KEY =
@@ -1729,6 +1803,82 @@
        CONNECTION STATUS
        ======================================================= */
 
+    function updateTikTokMonitor(data = {}) {
+      const phase = String(data?.phase || (data?.ok ? "connected" : "offline"));
+      const ok = !!data?.ok && phase === "connected";
+      const status = document.getElementById("tcmStatus");
+      const statusText = document.getElementById("tcmStatusText");
+      const account = document.getElementById("tcmAccount");
+      const message = document.getElementById("tcmMessage");
+      const connection = document.getElementById("tcmConnection");
+      const events = document.getElementById("tcmEvents");
+      const gifts = document.getElementById("tcmGifts");
+      const lastGift = document.getElementById("tcmLastGift");
+      const lastEvent = document.getElementById("tcmLastEvent");
+      const reconnect = document.getElementById("tcmReconnect");
+
+      if (!status) return;
+
+      state.tiktokPhase = phase;
+      state.tiktokEventCount = num(data?.eventCount, 0);
+      state.tiktokGiftCount = num(data?.giftCount, 0);
+      state.tiktokLastEventAt = num(data?.lastEventAt, 0);
+      state.tiktokLastGiftAt = num(data?.lastGiftAt, 0);
+
+      status.classList.remove("connected","waiting","reconnecting","offline");
+      status.classList.add(
+        ok ? "connected" :
+        phase === "reconnecting" ? "reconnecting" :
+        phase === "connected_waiting" || phase === "connecting" ? "waiting" :
+        "offline"
+      );
+
+      statusText.textContent =
+        ok ? "TERHUBUNG" :
+        phase === "reconnecting" ? "RECONNECTING" :
+        phase === "connected_waiting" ? "MENUNGGU EVENT" :
+        phase === "connecting" ? "MENGHUBUNGKAN" :
+        phase === "error" ? "ERROR" : "OFFLINE";
+
+      account.textContent =
+        data?.username ? `@${String(data.username).replace(/^@/,"")}` : "@—";
+
+      message.textContent = String(data?.message || "Belum terhubung ke TikTok LIVE.");
+
+      connection.textContent =
+        ok ? "LIVE CONNECTED" :
+        phase === "reconnecting" ? "RECONNECTING" :
+        phase === "connected_waiting" ? "WAITING STREAM" :
+        phase.toUpperCase();
+
+      events.textContent = String(state.tiktokEventCount);
+      gifts.textContent = String(state.tiktokGiftCount);
+
+      if (state.tiktokLastGiftAt) {
+        const sec = Math.max(0, Math.floor((Date.now() - state.tiktokLastGiftAt) / 1000));
+        lastGift.textContent =
+          state.tiktokLastGiftName
+            ? `${state.tiktokLastGiftName} • ${sec}s lalu`
+            : `${sec}s lalu`;
+      } else {
+        lastGift.textContent = "—";
+      }
+
+      if (state.tiktokLastEventAt) {
+        const sec = Math.max(0, Math.floor((Date.now() - state.tiktokLastEventAt) / 1000));
+        lastEvent.textContent = `Event terakhir ${sec}s lalu`;
+      } else {
+        lastEvent.textContent = "Belum ada event";
+      }
+
+      reconnect.textContent =
+        num(data?.reconnectCount, 0) > 0
+          ? `Reconnect: ${num(data?.reconnectCount,0)}`
+          : "";
+
+      state.connected = ok;
+    }
+
     function setConnectionText(
       message,
       ok = false
@@ -1759,6 +1909,13 @@
           "connected",
           !!ok
         );
+      }
+
+      const monitorMessage =
+        document.getElementById("tcmMessage");
+
+      if (monitorMessage && message) {
+        monitorMessage.textContent = String(message);
       }
     }
 
@@ -1865,7 +2022,11 @@
           ok;
 
         state.connecting =
-          false;
+          data?.phase === "connecting" ||
+          data?.phase === "reconnecting" ||
+          data?.phase === "connected_waiting";
+
+        updateTikTokMonitor(data);
 
         setConnectionText(
           message,
@@ -1876,7 +2037,10 @@
 
         console.log(
           "[TikTok]",
-          message
+          data?.phase || "unknown",
+          message,
+          `events=${num(data?.eventCount,0)}`,
+          `gifts=${num(data?.giftCount,0)}`
         );
       }
     );
@@ -2118,6 +2282,15 @@
         console.log(
           `[GIFT] participant diterima: @${gift.participant.uniqueId || gift.participant.username || "Viewer"} = ${Number(gift.participant.coins) || 0} coin`
         );
+
+        state.tiktokLastGiftAt = Date.now();
+        state.tiktokLastGiftName = String(gift?.giftName || "Gift");
+        state.tiktokLastGiftCoins = num(gift?.coinValue, 0);
+        const monitorLastGift = document.getElementById("tcmLastGift");
+        if (monitorLastGift) {
+          monitorLastGift.textContent =
+            `${state.tiktokLastGiftName} • ${state.tiktokLastGiftCoins} coin`;
+        }
 
         // Server mengirim participant lengkap dengan total coin.
         // Merge berdasarkan identitas agar perubahan userId TikTok

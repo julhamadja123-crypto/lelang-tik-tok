@@ -539,10 +539,25 @@ function giftData(event) {
       processedStreakProgress.get(streakKey) || 0
     );
 
-    const deltaRepeat = Math.max(
-      0,
-      repeatCount - previousRepeat
-    );
+    // TikTok/TikTool tidak selalu mengirim format combo yang sama.
+    // Ada stream yang mengirim progress kumulatif (x1, x2, x3), tetapi
+    // ada juga yang mengirim progress lalu event FINAL dengan repeatCount=1.
+    // Jika final lebih kecil dari progress terakhir, final tetap mewakili
+    // 1 hit tambahan. Jika nilainya sama, final adalah pengulangan event
+    // yang sudah dihitung dan harus diabaikan.
+    let deltaRepeat;
+
+    if (repeatCount > previousRepeat) {
+      // Progress/final membawa total kumulatif baru.
+      deltaRepeat = repeatCount - previousRepeat;
+    } else if (repeatEnd && repeatCount < previousRepeat) {
+      // Format final non-kumulatif: progress terakhir sudah xN, lalu
+      // event final datang sebagai x1. Tambahkan tepat 1 combo.
+      deltaRepeat = 1;
+    } else {
+      // Nilai sama = event duplicate / final yang sudah terwakili.
+      deltaRepeat = 0;
+    }
 
     if (deltaRepeat <= 0) {
       console.log(

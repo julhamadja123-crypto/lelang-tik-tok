@@ -26,6 +26,19 @@ let reconnectTimer = null;
 let manualDisconnect = false;
 
 /* =========================================================
+   TIKTOK LIVE MONITOR
+   Memisahkan status server, koneksi TikTok, event stream, dan gift.
+   ========================================================= */
+let tikTokConnectionState = "offline";
+let tikTokEventCount = 0;
+let tikTokGiftCount = 0;
+let tikTokLastEventAt = 0;
+let tikTokLastGiftAt = 0;
+let tikTokConnectedAt = 0;
+let tikTokLastError = "";
+let tikTokReconnectCount = 0;
+
+/* =========================================================
    AUCTION STATE
    ========================================================= */
 
@@ -96,12 +109,56 @@ function cleanUsername(value) {
    STATUS
    ========================================================= */
 
-function emitStatus(message, ok = false) {
+function emitStatus(message, ok = false, extra = {}) {
   console.log(`[STATUS] ${message}`);
 
   io.emit("live:status", {
     message,
-    ok
+    ok,
+    username: activeUsername,
+    phase: tikTokConnectionState,
+    eventCount: tikTokEventCount,
+    giftCount: tikTokGiftCount,
+    lastEventAt: tikTokLastEventAt || null,
+    lastGiftAt: tikTokLastGiftAt || null,
+    connectedAt: tikTokConnectedAt || null,
+    reconnectCount: tikTokReconnectCount,
+    error: tikTokLastError || null,
+    serverTime: Date.now(),
+    ...extra
+  });
+}
+
+function setTikTokState(phase, message, ok = false, extra = {}) {
+  tikTokConnectionState = phase;
+  emitStatus(message, ok, extra);
+}
+
+function noteTikTokEvent(type = "event") {
+  tikTokEventCount += 1;
+  tikTokLastEventAt = Date.now();
+
+  if (type === "gift") {
+    tikTokGiftCount += 1;
+    tikTokLastGiftAt = tikTokLastEventAt;
+  }
+
+  io.emit("live:status", {
+    message:
+      type === "gift"
+        ? `Event gift diterima dari TikTok @${activeUsername}`
+        : `Event ${type} diterima dari TikTok @${activeUsername}`,
+    ok: tikTokConnectionState === "connected",
+    username: activeUsername,
+    phase: tikTokConnectionState,
+    eventCount: tikTokEventCount,
+    giftCount: tikTokGiftCount,
+    lastEventAt: tikTokLastEventAt,
+    lastGiftAt: tikTokLastGiftAt || null,
+    connectedAt: tikTokConnectedAt || null,
+    reconnectCount: tikTokReconnectCount,
+    error: tikTokLastError || null,
+    serverTime: Date.now()
   });
 }
 
@@ -842,6 +899,7 @@ async function stopConnection() {
   reconnectTimer = null;
 
   manualDisconnect = true;
+  tikTokConnectionState = "offline";
 
   const conn = liveConnection;
 
@@ -888,6 +946,14 @@ async function connectToLive(rawUsername) {
 
   manualDisconnect = false;
   activeUsername = username;
+
+  tikTokConnectionState = "connecting";
+  tikTokEventCount = 0;
+  tikTokGiftCount = 0;
+  tikTokLastEventAt = 0;
+  tikTokLastGiftAt = 0;
+  tikTokConnectedAt = 0;
+  tikTokLastError = "";
 
   console.log(
     "================================================"
@@ -976,6 +1042,10 @@ async function connectToLive(rawUsername) {
     }
 
     const event = unwrapTikTokEvent(incomingEvent);
+
+    // Event counter hanya bertambah setelah gift benar-benar diterima.
+    // WeakSet di atas mencegah listener ganda menghitung dua kali.
+    noteTikTokEvent("gift");
 
     // FAST PATH: process the gift immediately; no artificial delay.
 
@@ -1260,6 +1330,8 @@ async function connectToLive(rawUsername) {
      ======================================================= */
 
   conn.on("chat", (event) => {
+    noteTikTokEvent("chat");
+
     io.emit(
       "live:event",
       {
@@ -1278,9 +1350,20 @@ async function connectToLive(rawUsername) {
      ======================================================= */
 
   conn.on("connected", (state) => {
+    tikTokConnectionState = "connected";
+    tikTokConnectedAt = Date.now();
+    tikTokLastError = "";
+
     console.log(
-      "[TikTok] connected:",
+      "[TikTok] CONNECTED event diterima:",
       state
+    );
+
+    setTikTokState(
+      "connected",
+      `TikTok BENAR-BENAR TERHUBUNG ke LIVE @${activeUsername}`,
+      true,
+      { roomId: conn.roomId || state?.roomId || null }
     );
   });
 
@@ -1289,13 +1372,18 @@ async function connectToLive(rawUsername) {
      ======================================================= */
 
   conn.on("error", (err) => {
+    const friendly = formatError(err);
+    tikTokLastError = friendly;
+
     console.error(
       "[TikTok] error:",
       err
     );
 
-    emitStatus(
-      `Error TikTok: ${formatError(err)}`
+    setTikTokState(
+      "error",
+      `Error TikTok: ${friendly}`,
+      false
     );
   });
 
@@ -1305,24 +1393,35 @@ async function connectToLive(rawUsername) {
 
   conn.on("disconnected", () => {
     console.warn(
-      `[TikTok] @${activeUsername} terputus.`
+      `[TikTok] @${activeUsername} TERPUTUS.`
     );
+
+    tikTokConnectionState = "reconnecting";
 
     if (
       manualDisconnect ||
       liveConnection !== conn ||
       !activeUsername
     ) {
+      setTikTokState(
+        "offline",
+        `TikTok LIVE @${activeUsername || ""} diputus.`,
+        false
+      );
       return;
     }
 
-    emitStatus(
-      `Koneksi @${activeUsername} terputus. Mencoba ulang...`
+    setTikTokState(
+      "reconnecting",
+      `TikTok LIVE @${activeUsername} terputus. Mencoba terhubung kembali...`,
+      false
     );
 
     clearTimeout(
       reconnectTimer
     );
+
+    tikTokReconnectCount += 1;
 
     reconnectTimer =
       setTimeout(() => {
@@ -1333,8 +1432,12 @@ async function connectToLive(rawUsername) {
           connectToLive(
             activeUsername
           ).catch((err) => {
-            emitStatus(
-              `Reconnect gagal: ${formatError(err)}`
+            const friendly = formatError(err);
+            tikTokLastError = friendly;
+            setTikTokState(
+              "reconnecting",
+              `Reconnect gagal: ${friendly}`,
+              false
             );
           });
         }
@@ -1365,20 +1468,48 @@ async function connectToLive(rawUsername) {
 
     const roomId =
       conn.roomId ||
-      "aktif";
+      state?.roomId ||
+      null;
 
-    emitStatus(
-      `Terhubung ke LIVE @${username} • Room ${roomId}`,
-      true
+    // Jangan menganggap await connect() saja sebagai bukti stream event.
+    // Status hijau hanya dipakai ketika connector benar-benar connected.
+    const connectorConnected = Boolean(
+      conn.connected === true ||
+      conn.isConnected === true ||
+      state?.isConnected === true
     );
 
-    console.log(
-      `[TikTok] BERHASIL TERHUBUNG @${username}`
-    );
+    if (connectorConnected && tikTokConnectionState !== "connected") {
+      tikTokConnectionState = "connected";
+      tikTokConnectedAt = Date.now();
+    }
+
+    if (tikTokConnectionState === "connected") {
+      emitStatus(
+        `TikTok TERHUBUNG ke LIVE @${username} • Room ${roomId || "aktif"} • Menunggu event`,
+        true,
+        { roomId }
+      );
+
+      console.log(
+        `[TikTok] CONNECTED & LISTENING @${username}`
+      );
+    } else {
+      setTikTokState(
+        "connected_waiting",
+        `Transport TikTok tersambung ke @${username}, menunggu konfirmasi stream event...`,
+        false,
+        { roomId }
+      );
+
+      console.warn(
+        `[TikTok] connect() selesai tetapi status connected belum terkonfirmasi.`
+      );
+    }
 
     if (typeof conn.eventCount !== "undefined") {
       console.log(
-        `[TikTok] eventCount awal: ${conn.eventCount}`
+        `[TikTok] connector eventCount awal: ${conn.eventCount}`
       );
     }
 
@@ -1394,13 +1525,17 @@ async function connectToLive(rawUsername) {
     const friendly =
       formatError(err);
 
+    tikTokConnectionState = "error";
+    tikTokLastError = friendly;
+
     console.error(
       "[TikTok] gagal connect:",
       err
     );
 
     emitStatus(
-      `Gagal terhubung @${username}: ${friendly}`
+      `Gagal terhubung @${username}: ${friendly}`,
+      false
     );
 
     throw new Error(
@@ -1423,18 +1558,27 @@ io.on("connection", (socket) => {
      ======================================================= */
 
   const connected =
-    Boolean(
-      liveConnection?.connected === true
-    );
+    tikTokConnectionState === "connected";
 
   socket.emit(
     "live:status",
     {
       ok: connected,
-
       message: connected
-        ? `Terhubung ke @${activeUsername}`
-        : "Belum terhubung ke TikTok LIVE"
+        ? `TikTok TERHUBUNG ke @${activeUsername}`
+        : activeUsername
+          ? `TikTok ${tikTokConnectionState}: @${activeUsername}`
+          : "Belum terhubung ke TikTok LIVE",
+      username: activeUsername,
+      phase: tikTokConnectionState,
+      eventCount: tikTokEventCount,
+      giftCount: tikTokGiftCount,
+      lastEventAt: tikTokLastEventAt || null,
+      lastGiftAt: tikTokLastGiftAt || null,
+      connectedAt: tikTokConnectedAt || null,
+      reconnectCount: tikTokReconnectCount,
+      error: tikTokLastError || null,
+      serverTime: Date.now()
     }
   );
 
@@ -1649,9 +1793,12 @@ io.on("connection", (socket) => {
       await stopConnection();
 
       activeUsername = null;
+      tikTokConnectionState = "offline";
+      tikTokLastError = "";
 
       emitStatus(
-        "Koneksi TikTok LIVE diputus."
+        "Koneksi TikTok LIVE diputus.",
+        false
       );
     }
   );
@@ -1684,10 +1831,34 @@ app.get(
         "tiktok-live-coin-auction",
 
       connected:
-        Boolean(liveConnection),
+        tikTokConnectionState === "connected",
+
+      connectionPhase:
+        tikTokConnectionState,
 
       username:
         activeUsername,
+
+      eventCount:
+        tikTokEventCount,
+
+      giftCount:
+        tikTokGiftCount,
+
+      lastEventAt:
+        tikTokLastEventAt || null,
+
+      lastGiftAt:
+        tikTokLastGiftAt || null,
+
+      connectedAt:
+        tikTokConnectedAt || null,
+
+      reconnectCount:
+        tikTokReconnectCount,
+
+      lastError:
+        tikTokLastError || null,
 
       auctionActive,
 
@@ -1703,6 +1874,34 @@ app.get(
     });
   }
 );
+
+/* =========================================================
+   TIKTOK MONITOR HEARTBEAT
+   Mengirim status setiap 5 detik agar dashboard bisa membedakan
+   "server hidup" dari "TikTok benar-benar connected".
+   ========================================================= */
+
+setInterval(() => {
+  if (!activeUsername) return;
+
+  io.emit("live:status", {
+    message:
+      tikTokConnectionState === "connected"
+        ? `TikTok LIVE @${activeUsername} terhubung • event stream aktif`
+        : `TikTok @${activeUsername}: ${tikTokConnectionState}`,
+    ok: tikTokConnectionState === "connected",
+    username: activeUsername,
+    phase: tikTokConnectionState,
+    eventCount: tikTokEventCount,
+    giftCount: tikTokGiftCount,
+    lastEventAt: tikTokLastEventAt || null,
+    lastGiftAt: tikTokLastGiftAt || null,
+    connectedAt: tikTokConnectedAt || null,
+    reconnectCount: tikTokReconnectCount,
+    error: tikTokLastError || null,
+    serverTime: Date.now()
+  });
+}, 5000);
 
 /* =========================================================
    INDEX

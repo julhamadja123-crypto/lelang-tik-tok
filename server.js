@@ -45,6 +45,10 @@ let processedGiftEventsCleanupAt = 0;
 
 const GIFT_TTL = 60 * 1000;
 const GIFT_FINGERPRINT_TTL = 1500;
+// TikTok/TikTool can occasionally deliver the same normal gift through
+// two channels with different transaction/message IDs. Keep a very short
+// semantic guard for that case; combo/streak gifts use their own delta logic.
+const GIFT_SEMANTIC_TTL = 300;
 
 /* =========================================================
    LOAD TIKTOK CONNECTOR
@@ -700,7 +704,23 @@ function giftData(event) {
       ? `transport:${senderKey}|${giftKey}|${resolvedDiamondCount}|${repeatCount}|${repeatEnd ? 1 : 0}`
       : null;
 
+  /*
+   * SEMANTIC DUPLICATE GUARD:
+   * Untuk gift biasa (non-streak), jangan hanya bergantung pada ID.
+   * Beberapa transport dapat membuat transactionId/msgId berbeda untuk
+   * event gift yang sama. Jika sender + gift + nilai + repeat sama masuk
+   * hampir bersamaan, anggap itu satu gift.
+   *
+   * Hanya berlaku sangat singkat agar dua gift sah yang dikirim terpisah
+   * tetap dapat dihitung.
+   */
+  const semanticFingerprint =
+    giftType !== 1
+      ? `semantic:${senderKey}|${giftKey}|${resolvedDiamondCount}|${repeatCount}`
+      : null;
+
   if (
+    giftFingerprint &&
     giftFingerprint &&
     processedGiftFingerprints.has(giftFingerprint)
   ) {
@@ -725,6 +745,21 @@ function giftData(event) {
     }
   }
 
+  if (semanticFingerprint) {
+    const previousSemanticTime =
+      processedGiftFingerprints.get(semanticFingerprint);
+
+    if (
+      previousSemanticTime &&
+      now - previousSemanticTime <= GIFT_SEMANTIC_TTL
+    ) {
+      console.log(
+        `[GIFT] DUPLICATE semantic diabaikan: ${semanticFingerprint}`
+      );
+      return null;
+    }
+  }
+
   /*
    * Event lolos duplicate guard.
    * Tandai cache SEKARANG, bukan sebelum pemeriksaan.
@@ -739,6 +774,10 @@ function giftData(event) {
 
   if (transportFingerprint) {
     processedGiftFingerprints.set(transportFingerprint, now);
+  }
+
+  if (semanticFingerprint) {
+    processedGiftFingerprints.set(semanticFingerprint, now);
   }
 
   /* -------------------------------------------------------
@@ -937,6 +976,16 @@ async function connectToLive(rawUsername) {
     console.log(
       `[GIFT] EVENT DITERIMA | auctionActive=${auctionActive} | drawTime=${auctionDrawTime}`
     );
+
+    // Gift hanya boleh menambah coin ketika lelang sedang aktif.
+    // Ini juga mencegah event duplicate/terlambat yang baru tiba setelah
+    // lelang FINISH menambahkan coin sekali lagi.
+    if (!auctionActive) {
+      console.log(
+        "[GIFT] DIABAIKAN: auction sudah selesai/tidak aktif"
+      );
+      return;
+    }
 
     const gift =
       giftData(event);

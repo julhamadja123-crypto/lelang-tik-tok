@@ -23,7 +23,9 @@ let TikTokLiveConnection = null;
 let liveConnection = null;
 let activeUsername = null;
 let reconnectTimer = null;
+let liveCheckTimer = null;
 let manualDisconnect = false;
+const LIVE_CHECK_INTERVAL = 10000;
 
 /* =========================================================
    TIKTOK LIVE MONITOR
@@ -563,85 +565,26 @@ function giftData(event) {
   /* -------------------------------------------------------
      GIFT STREAK / COMBO
 
-     TikTok/TikTool dapat mengirim dua tahap untuk SATU gift:
-       - progress: repeatEnd=false, repeatCount=1
-       - final:    repeatEnd=true,  repeatCount=1
+     TikTool menjelaskan bahwa gift combo/streak mengirim beberapa
+     update dengan repeatCount yang terus naik, lalu SATU event final
+     dengan repeatEnd=true yang membawa jumlah combo final.
 
-     Versi sebelumnya hanya melakukan delta pada progress, sedangkan
-     event final dihitung lagi sebagai 1 coin. Akibatnya kirim 1 coin
-     bisa menjadi 2 coin.
-
-     Sekarang semua event streak dihitung sebagai delta terhadap
-     repeatCount terakhir. Jika hanya event final yang diterima,
-     delta tetap penuh sehingga gift tidak hilang.
+     Untuk auction, jangan menghitung event progress satu per satu.
+     Ambil hanya event final dan gunakan repeatCount final sebagai
+     jumlah gift. TransactionId TikTool bersifat stabil untuk satu
+     combo sehingga event final yang terkirim ulang tetap ter-dedup.
      ------------------------------------------------------- */
 
   if (giftType === 1) {
-    // Gunakan identitas pengirim + gift sebagai kunci combo yang stabil.
-    // Jangan bergantung hanya pada transactionId/groupId karena nilai
-    // tersebut dapat berbeda antara event progress dan event final.
-    const streakSenderKey = String(
-      user.userId && user.userId !== "unknown"
-        ? user.userId
-        : user.uniqueId || user.username || user.nickname || "viewer"
-    ).trim().toLowerCase();
-
-    const streakGiftKey = String(
-      giftId || giftName || "gift"
-    ).trim().toLowerCase();
-
-    const streakKey = `${streakSenderKey}|${streakGiftKey}`;
-
-    const previousRepeat = Number(
-      processedStreakProgress.get(streakKey) || 0
-    );
-
-    // TikTok/TikTool tidak selalu mengirim format combo yang sama.
-    // Ada stream yang mengirim progress kumulatif (x1, x2, x3), tetapi
-    // ada juga yang mengirim progress lalu event FINAL dengan repeatCount=1.
-    // Jika final lebih kecil dari progress terakhir, final tetap mewakili
-    // 1 hit tambahan. Jika nilainya sama, final adalah pengulangan event
-    // yang sudah dihitung dan harus diabaikan.
-    let deltaRepeat;
-
-    if (repeatCount > previousRepeat) {
-      // Progress/final membawa total kumulatif baru.
-      deltaRepeat = repeatCount - previousRepeat;
-    } else if (repeatEnd && repeatCount < previousRepeat) {
-      // Format final non-kumulatif: progress terakhir sudah xN, lalu
-      // event final datang sebagai x1. Tambahkan tepat 1 combo.
-      deltaRepeat = 1;
-    } else {
-      // Nilai sama = event duplicate / final yang sudah terwakili.
-      deltaRepeat = 0;
-    }
-
-    if (deltaRepeat <= 0) {
+    if (!repeatEnd) {
       console.log(
-        `[GIFT] Streak duplicate diabaikan: @${user.uniqueId} | ${giftName} | x${repeatCount} | repeatEnd=${repeatEnd}`
+        `[GIFT] Combo progress diabaikan sampai final: @${user.uniqueId} | ${giftName} | x${repeatCount}`
       );
-
-      // Event final menutup combo yang sudah selesai.
-      if (repeatEnd) {
-        processedStreakProgress.delete(streakKey);
-      }
-
       return null;
     }
 
-    if (repeatEnd) {
-      // Final sudah membawa total repeatCount. Yang masuk hanya delta.
-      // Hapus state agar combo berikutnya dari user yang sama normal.
-      processedStreakProgress.delete(streakKey);
-    } else {
-      processedStreakProgress.set(
-        streakKey,
-        Math.max(previousRepeat, repeatCount)
-      );
-    }
-
-    // Hanya delta baru yang boleh menjadi coin.
-    repeatCount = deltaRepeat;
+    // repeatCount final = jumlah gift sebenarnya dalam combo.
+    repeatCount = Math.max(1, Math.floor(repeatCount));
   }
 
   /* -------------------------------------------------------
@@ -891,11 +834,107 @@ function giftData(event) {
 }
 
 /* =========================================================
+   LIVE STATUS MONITOR
+   ========================================================= */
+
+const handledStreamEndConnections = new WeakSet();
+
+async function markStreamOffline(reason = "TikTok LIVE sudah selesai.") {
+  if (!activeUsername) return;
+
+  const username = activeUsername;
+  console.warn(`[TikTok] STREAM OFFLINE @${username}: ${reason}`);
+
+  clearTimeout(liveCheckTimer);
+  liveCheckTimer = null;
+
+  manualDisconnect = true;
+  tikTokConnectionState = "offline";
+  tikTokLastError = "";
+
+  const conn = liveConnection;
+  liveConnection = null;
+
+  if (conn) {
+    try {
+      await conn.disconnect();
+    } catch (err) {
+      console.warn("[TikTok] disconnect setelah stream end:", err?.message || err);
+    }
+  }
+
+  setTikTokState(
+    "offline",
+    `TikTok LIVE @${username} sudah selesai/offline.`,
+    false,
+    { streamEnded: true, reason }
+  );
+}
+
+function handleStreamEnd(conn, reason = "creator_offline") {
+  if (!conn || handledStreamEndConnections.has(conn)) return;
+  handledStreamEndConnections.add(conn);
+  markStreamOffline(reason).catch((err) => {
+    console.error("[TikTok] gagal menandai stream offline:", err);
+    setTikTokState(
+      "offline",
+      `TikTok LIVE @${activeUsername || ""} sudah selesai/offline.`,
+      false,
+      { streamEnded: true }
+    );
+  });
+}
+
+function startLiveStatusMonitor() {
+  clearTimeout(liveCheckTimer);
+  liveCheckTimer = null;
+
+  if (!activeUsername || !process.env.TIKTOOL_API_KEY) return;
+
+  const username = activeUsername;
+
+  const check = async () => {
+    if (!activeUsername || activeUsername !== username || manualDisconnect) return;
+
+    try {
+      const apiKey = encodeURIComponent(String(process.env.TIKTOOL_API_KEY).trim());
+      const user = encodeURIComponent(username);
+      const response = await fetch(
+        `https://api.tik.tools/webcast/check_alive?apiKey=${apiKey}&unique_id=${user}`,
+        { headers: { Accept: "application/json" } }
+      );
+
+      if (response.ok) {
+        const json = await response.json();
+        const row = Array.isArray(json?.data) ? json.data[0] : null;
+
+        // Hanya false yang dianggap definitif offline. Error/unknown tidak
+        // boleh memutus koneksi aktif secara keliru.
+        if (row && row.alive === false) {
+          handleStreamEnd(liveConnection, "check_alive: offline");
+          return;
+        }
+      }
+    } catch (err) {
+      console.warn("[TikTok] live status check gagal:", err?.message || err);
+    }
+
+    if (activeUsername === username && !manualDisconnect) {
+      liveCheckTimer = setTimeout(check, LIVE_CHECK_INTERVAL);
+    }
+  };
+
+  liveCheckTimer = setTimeout(check, LIVE_CHECK_INTERVAL);
+}
+
+/* =========================================================
    STOP TIKTOK CONNECTION
    ========================================================= */
 
 async function stopConnection() {
   clearTimeout(reconnectTimer);
+  clearTimeout(liveCheckTimer);
+  liveCheckTimer = null;
   reconnectTimer = null;
 
   manualDisconnect = true;
@@ -1043,49 +1082,41 @@ async function connectToLive(rawUsername) {
 
     const event = unwrapTikTokEvent(incomingEvent);
 
-    // Event counter hanya bertambah setelah gift benar-benar diterima.
-    // WeakSet di atas mencegah listener ganda menghitung dua kali.
-    noteTikTokEvent("gift");
-
     // FAST PATH: process the gift immediately; no artificial delay.
 
     /* -----------------------------------------------------
        PARSE GIFT
        -----------------------------------------------------
-       Gift tetap diproses ketika event TikTok diterima.
-       Jangan membuang event hanya karena auctionActive belum
-       sinkron dengan UI. Duplicate protection di giftData()
-       tetap mencegah event yang sama dihitung dua kali.
+       giftData() juga menjadi gerbang duplicate protection.
+       Counter monitor HARUS dinaikkan setelah gift lolos gerbang ini,
+       bukan pada saat listener menerima frame. Dengan begitu satu combo
+       yang datang melalui channel gift + generic event tidak tampil
+       sebagai 2 gift di monitor.
        ----------------------------------------------------- */
-
-    console.log(
-      `[GIFT] EVENT DITERIMA | auctionActive=${auctionActive} | drawTime=${auctionDrawTime}`
-    );
-
-    // Gift hanya boleh menambah coin ketika lelang sedang aktif.
-    // Ini juga mencegah event duplicate/terlambat yang baru tiba setelah
-    // lelang FINISH menambahkan coin sekali lagi.
-    if (!auctionActive) {
-      console.log(
-        "[GIFT] DIABAIKAN: auction sudah selesai/tidak aktif"
-      );
-      return;
-    }
 
     const gift =
       giftData(event);
 
     if (!gift) {
       console.log(
-        "[GIFT] event diterima tetapi gift tidak valid/complete"
+        "[GIFT] event diterima tetapi gift tidak valid/complete atau duplicate/progress combo"
       );
-      try {
-        console.log(
-          "[GIFT] RAW PAYLOAD:",
-          JSON.stringify(event)
-        );
-      } catch (_) {}
+      return;
+    }
 
+    noteTikTokEvent("gift");
+
+    console.log(
+      `[GIFT] GIFT VALID | auctionActive=${auctionActive} | drawTime=${auctionDrawTime} | ${gift.giftName} x${gift.repeatCount}`
+    );
+
+    // Gift hanya boleh menambah coin ketika lelang sedang aktif.
+    // Monitor tetap mencatat gift yang benar-benar diterima walaupun
+    // lelang sedang tidak aktif.
+    if (!auctionActive) {
+      console.log(
+        "[GIFT] DIABAIKAN: auction sudah selesai/tidak aktif"
+      );
       return;
     }
 
@@ -1314,6 +1345,14 @@ async function connectToLive(rawUsername) {
       ""
     ).toLowerCase();
 
+    if (type === "streamend") {
+      handleStreamEnd(
+        conn,
+        event?.reason || candidate?.data?.reason || "creator_offline"
+      );
+      return;
+    }
+
     if (type !== "gift") return;
 
     console.log("[GIFT] diterima melalui generic event channel");
@@ -1323,6 +1362,15 @@ async function connectToLive(rawUsername) {
     // generic "event" channel. The primary "gift" listener and this
     // compatibility path share the same duplicate protection.
     handleGiftEvent(candidate);
+  });
+
+  // TikTool v3 juga menyediakan streamEnd saat creator benar-benar
+  // mengakhiri LIVE. Tangani langsung agar status tidak tetap hijau.
+  conn.on("streamEnd", (event) => {
+    handleStreamEnd(
+      conn,
+      event?.reason || "creator_offline"
+    );
   });
 
   /* =======================================================
@@ -1512,6 +1560,10 @@ async function connectToLive(rawUsername) {
         `[TikTok] connector eventCount awal: ${conn.eventCount}`
       );
     }
+
+    // Fallback liveness monitor: beberapa relay menutup socket beberapa saat
+    // setelah LIVE berakhir, jadi jangan hanya bergantung pada disconnected.
+    startLiveStatusMonitor();
 
     return state;
 

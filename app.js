@@ -81,13 +81,6 @@
         text-shadow: 0 0 12px rgba(250, 204, 21, 0.35) !important;
       }
 
-      /* FINISHED: tampil hijau */
-      #timer.finished-timer,
-      .finished-note {
-        color: #22c55e !important;
-        text-shadow: 0 0 12px rgba(34, 197, 94, 0.30) !important;
-      }
-
       /* Sembunyikan panel aktivitas pada layar HP agar fokus ke peserta */
       @media (max-width: 700px) {
         #activityList,
@@ -722,14 +715,10 @@
         (state.drawTimeRunId || 0) + 1;
 
       const runId = state.drawTimeRunId;
-      // DRAW TIME selalu dimulai dari tepat 20 detik.
-      // Deadline server hanya dipakai untuk sinkronisasi setelah angka 20
-      // sudah langsung ditampilkan di layar. Jangan pernah menampilkan 21.
-      const now = Date.now();
       const deadline =
-        Number.isFinite(Number(serverDeadline)) && Number(serverDeadline) >= now
+        Number.isFinite(Number(serverDeadline)) && Number(serverDeadline) > Date.now()
           ? Number(serverDeadline)
-          : now + 20000;
+          : Date.now() + 20000;
 
       state.timerDeadline = deadline;
       state.timer = 20;
@@ -739,10 +728,7 @@
       setAuctionUI("draw");
       renderTimer();
 
-      // Jangan kirim ulang state DRAW TIME ke server di sini.
-      // Server sudah mengirim state + deadline saat Draw Time dimulai.
-      // Mengirim balik akan membuat server mem-broadcast ulang state dan
-      // dapat mereset countdown ke 20 detik.
+      sendAuctionState("running", true);
 
       showToast("DRAW TIME dimulai — 20 detik");
 
@@ -756,16 +742,11 @@
           return;
         }
 
-        // Jangan pernah menghasilkan 21 akibat sinkronisasi clock.
-        // Nilai maksimum DRAW TIME adalah tepat 20 detik.
         const remaining =
-          Math.min(
-            20,
-            Math.max(
-              0,
-              Math.ceil(
-                (deadline - Date.now()) / 1000
-              )
+          Math.max(
+            0,
+            Math.ceil(
+              (deadline - Date.now()) / 1000
             )
           );
 
@@ -799,18 +780,13 @@
         return;
       }
 
-      // PENTING: perubahan coin selama DRAW TIME TIDAK BOLEH
-      // menghentikan countdown atau langsung FINISHED.
-      // Pemeriksaan hasil hanya dilakukan tepat ketika countdown
-      // sudah mencapai 00:00.
-      const tiedAtZero = hasCoinTie();
-
+      // Coin berubah sebelum 00:00 tidak langsung finish.
       state.drawTime = false;
       state.drawTimeRunId =
         (state.drawTimeRunId || 0) + 1;
 
-      if (tiedAtZero) {
-        // Masih seri tepat pada 00:00 -> ulangi Draw Time 20 detik.
+      if (hasCoinTie()) {
+        // Masih seri -> ulangi Draw Time 20 detik.
         state.timer = 20;
         state.timerDeadline = null;
         removeDrawTimeColor();
@@ -818,7 +794,7 @@
         return;
       }
 
-      // Coin sudah berbeda tepat pada 00:00 -> baru FINISHED.
+      // Coin sudah berbeda -> FINISHED.
       state.timer = 0;
       state.timerDeadline = null;
       removeDrawTimeColor();

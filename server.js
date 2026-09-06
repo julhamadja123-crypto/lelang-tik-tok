@@ -59,6 +59,7 @@ const AUCTION_FINISH_GRACE_MS = 4000;
 let auctionFinishedAt = 0;
 let graceDrawCheckTimer = null;
 let drawTimeEndTimer = null;
+let drawTimeDeadline = 0;
 
 function getTopTwoTie() {
   const list = Array.from(participants.values());
@@ -91,7 +92,7 @@ function startServerDrawTime(reason = "coin seri") {
   auctionActive = true;
   auctionDrawTime = true;
 
-  const drawTimeDeadline = Date.now() + 20000;
+  drawTimeDeadline = Date.now() + 20000;
 
   console.log(`[Auction] ${reason} -> DRAW TIME 20 detik`);
 
@@ -113,6 +114,7 @@ function startServerDrawTime(reason = "coin seri") {
     if (!auctionActive || !auctionDrawTime) return;
 
     auctionDrawTime = false;
+    drawTimeDeadline = 0;
 
     if (getTopTwoTie()) {
       startServerDrawTime("DRAW TIME 00:00 dan coin masih seri");
@@ -1775,6 +1777,11 @@ io.on("connection", (socket) => {
       drawTime:
         auctionDrawTime,
 
+      drawTimeDeadline:
+        auctionDrawTime && drawTimeDeadline > 0
+          ? drawTimeDeadline
+          : undefined,
+
       version:
         participantVersion
     }
@@ -1853,6 +1860,7 @@ io.on("connection", (socket) => {
       if (requestedState === "finished") {
         auctionActive = false;
         auctionDrawTime = false;
+        drawTimeDeadline = 0;
         processedStreakProgress.clear();
 
         // Tell the browser that the main countdown ended, then keep the
@@ -1872,6 +1880,7 @@ io.on("connection", (socket) => {
         clearFinishGrace();
         auctionActive = requestedState === "paused" ? true : false;
         auctionDrawTime = false;
+        drawTimeDeadline = 0;
         processedStreakProgress.clear();
       } else {
         auctionActive = true;
@@ -1907,6 +1916,7 @@ io.on("connection", (socket) => {
     "auction:reset",
     () => {
       clearFinishGrace();
+      drawTimeDeadline = 0;
       participants.clear();
 
       participantVersion += 1;

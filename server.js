@@ -1297,6 +1297,13 @@ async function connectToLive(rawUsername) {
 
     participantVersion += 1;
 
+    // Selama grace setelah FINISHED, jangan tunggu timer grace.
+    // Begitu gift membuat minimal 2 peserta dengan coin tertinggi sama,
+    // DRAW TIME langsung dimulai.
+    if (withinFinishGrace && !auctionActive) {
+      startDrawTimeNow("gift masuk saat grace");
+    }
+
     /* =====================================================
        PAYLOAD GIFT
        ===================================================== */
@@ -1680,53 +1687,58 @@ io.on("connection", (socket) => {
     }
   );
 
+  function isTopCoinTie() {
+    const list = Array.from(participants.values());
+    if (list.length < 2) return false;
+
+    const coins = list
+      .map(p => Number(p?.coins) || 0)
+      .sort((a, b) => b - a);
+
+    return coins[0] === coins[1];
+  }
+
+  function startDrawTimeNow(reason = "tie") {
+    if (auctionActive || auctionDrawTime || !isTopCoinTie()) return false;
+
+    auctionActive = true;
+    auctionDrawTime = true;
+    auctionFinishedAt = 0;
+    clearTimeout(graceDrawCheckTimer);
+    graceDrawCheckTimer = null;
+
+    const drawTimeStartedAt = Date.now();
+    const drawTimeDeadline = drawTimeStartedAt + 20000;
+
+    console.log(
+      `[Auction] ${reason} -> COIN SERI -> DRAW TIME 20 detik langsung`
+    );
+
+    io.emit("auction:state", {
+      state: "running",
+      active: true,
+      drawTime: true,
+      drawTimeStartedAt,
+      drawTimeDeadline,
+      drawTimeSeconds: 20,
+      version: participantVersion
+    });
+
+    return true;
+  }
+
   function scheduleGraceDrawCheck() {
     clearTimeout(graceDrawCheckTimer);
     graceDrawCheckTimer = null;
 
+    // Tidak lagi wajib menunggu 4 detik. Ini hanya fallback jika peserta
+    // belum lengkap saat FINISHED diterima. Begitu 2 peserta coin sama ada,
+    // DRAW TIME dimulai langsung dari handler gift di bawah.
+    if (startDrawTimeNow("FINISHED / pengecekan langsung")) return;
+
     graceDrawCheckTimer = setTimeout(() => {
       graceDrawCheckTimer = null;
-
-      // Only evaluate the tie after the full 4-second grace period.
-      if (auctionActive || auctionFinishedAt <= 0) return;
-
-      const list = Array.from(participants.values());
-      if (list.length < 2) {
-        console.log("[Auction] Grace selesai: peserta kurang dari 2, tidak ada DRAW TIME");
-        return;
-      }
-      const coins = list
-        .map(p => Number(p?.coins) || 0)
-        .sort((a, b) => b - a);
-
-      const tie = coins.length >= 2 && coins[0] === coins[1];
-
-      if (tie) {
-        // Grace is over. Re-open the auction state only for DRAW TIME.
-        auctionActive = true;
-        auctionDrawTime = true;
-        auctionFinishedAt = 0;
-
-        console.log(
-          `[Auction] Grace 4 detik selesai -> COIN SERI (${coins[0]}) -> DRAW TIME 20 detik`
-        );
-
-        // Kirim deadline Draw Time bersamaan dengan event agar frontend
-        // bisa mulai menghitung mundur seketika tanpa menunggu polling/tick lain.
-        const drawTimeDeadline = Date.now() + 20000;
-
-        io.emit("auction:state", {
-          state: "running",
-          active: true,
-          drawTime: true,
-          drawTimeDeadline,
-          version: participantVersion
-        });
-      } else {
-        console.log(
-          `[Auction] Grace 4 detik selesai -> coin tidak seri -> tetap FINISHED`
-        );
-      }
+      startDrawTimeNow("fallback grace 4 detik");
     }, AUCTION_FINISH_GRACE_MS);
   }
 

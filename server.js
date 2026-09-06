@@ -25,7 +25,7 @@ let activeUsername = null;
 let reconnectTimer = null;
 let liveCheckTimer = null;
 let manualDisconnect = false;
-const LIVE_CHECK_INTERVAL = 10000;
+const LIVE_CHECK_INTERVAL = 3000;
 
 /* =========================================================
    TIKTOK LIVE MONITOR

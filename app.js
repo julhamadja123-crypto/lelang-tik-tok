@@ -736,8 +736,9 @@
       setAuctionUI("draw");
       renderTimer();
 
-      sendAuctionState("running", true);
-
+      // Server sudah menjadi sumber utama Draw Time.
+      // JANGAN kirim balik auction:state di sini karena event dari server
+      // akan memicu event baru lagi dan me-reset countdown berulang-ulang.
       showToast("DRAW TIME dimulai — 20 detik");
 
       const tick = () => {

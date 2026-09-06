@@ -715,10 +715,14 @@
         (state.drawTimeRunId || 0) + 1;
 
       const runId = state.drawTimeRunId;
+      // DRAW TIME selalu dimulai dari tepat 20 detik.
+      // Deadline server hanya dipakai untuk sinkronisasi setelah angka 20
+      // sudah langsung ditampilkan di layar. Jangan pernah menampilkan 21.
+      const now = Date.now();
       const deadline =
-        Number.isFinite(Number(serverDeadline)) && Number(serverDeadline) > Date.now()
+        Number.isFinite(Number(serverDeadline)) && Number(serverDeadline) >= now
           ? Number(serverDeadline)
-          : Date.now() + 20000;
+          : now + 20000;
 
       state.timerDeadline = deadline;
       state.timer = 20;
@@ -745,11 +749,16 @@
           return;
         }
 
+        // Jangan pernah menghasilkan 21 akibat sinkronisasi clock.
+        // Nilai maksimum DRAW TIME adalah tepat 20 detik.
         const remaining =
-          Math.max(
-            0,
-            Math.ceil(
-              (deadline - Date.now()) / 1000
+          Math.min(
+            20,
+            Math.max(
+              0,
+              Math.ceil(
+                (deadline - Date.now()) / 1000
+              )
             )
           );
 

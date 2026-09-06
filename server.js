@@ -506,6 +506,7 @@ function giftData(event) {
 
     scanGiftValue(event);
   }
+  }
 
   /* -------------------------------------------------------
      REPEAT COUNT
@@ -2082,4 +2083,3 @@ process.on(
     );
   }
 );
-}

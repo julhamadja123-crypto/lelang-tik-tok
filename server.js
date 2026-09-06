@@ -47,7 +47,7 @@ let tikTokReconnectCount = 0;
 let auctionActive = false;
 let auctionDrawTime = false;
 let auctionFinishedAt = 0;
-const AUCTION_FINISH_GRACE_MS = 5000;
+const AUCTION_FINISH_GRACE_MS = 8000;
 let participants = new Map();
 let participantVersion = 0;
 
@@ -1115,21 +1115,26 @@ async function connectToLive(rawUsername) {
     // Gift hanya boleh menambah coin ketika lelang sedang aktif.
     // Monitor tetap mencatat gift yang benar-benar diterima walaupun
     // lelang sedang tidak aktif.
+    const giftNow = Date.now();
+    const finishAge =
+      auctionFinishedAt > 0 ? giftNow - auctionFinishedAt : Infinity;
+
     const withinFinishGrace =
       !auctionActive &&
       auctionFinishedAt > 0 &&
-      (Date.now() - auctionFinishedAt) <= AUCTION_FINISH_GRACE_MS;
+      finishAge >= 0 &&
+      finishAge <= AUCTION_FINISH_GRACE_MS;
 
     if (!auctionActive && !withinFinishGrace) {
       console.log(
-        "[GIFT] DIABAIKAN: auction sudah selesai / grace period 5 detik sudah habis"
+        `[GIFT] DIABAIKAN: auction sudah selesai / grace ${AUCTION_FINISH_GRACE_MS / 1000} detik sudah habis`
       );
       return;
     }
 
     if (withinFinishGrace) {
       console.log(
-        `[GIFT] MASUK GRACE 5 DETIK: ${Math.max(0, AUCTION_FINISH_GRACE_MS - (Date.now() - auctionFinishedAt))}ms tersisa`
+        `[GIFT] MASUK GRACE ${AUCTION_FINISH_GRACE_MS / 1000} DETIK: ${Math.max(0, AUCTION_FINISH_GRACE_MS - finishAge)}ms tersisa`
       );
     }
 
@@ -1297,29 +1302,7 @@ async function connectToLive(rawUsername) {
         gift
       }
     );
-
-    /*
-     * Snapshot seluruh peserta dikirim sesaat setelah event utama.
-     * Ini mencegah Array.from(...) + serialisasi daftar peserta
-     * menahan jalur gift ketika peserta sudah banyak.
-     * Tidak mengubah perhitungan coin maupun urutan event utama.
-     */
-    // Capture version/snapshot sekarang agar snapshot lama tidak dapat
-    // menimpa coin terbaru ketika beberapa gift masuk sangat cepat.
-    // Kirim snapshot authoritative segera setelah participant diperbarui.
-    // Tidak ditunda dengan setImmediate agar client langsung menerima
-    // daftar peserta terbaru setelah gift diproses.
-    io.emit(
-      "auction:participants",
-      {
-        version:
-          participantVersion,
-
-        participants:
-          Array.from(participants.values())
-      }
-    );
-  };
+};
 
   // Standard TikTool event.
   conn.on("gift", handleGiftEvent);

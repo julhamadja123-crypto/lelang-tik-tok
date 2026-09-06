@@ -46,7 +46,7 @@ let tikTokReconnectCount = 0;
 
 let auctionActive = false;
 let auctionFinishedAt = 0;
-const AUCTION_FINISH_GRACE_MS = 8000;
+const AUCTION_FINISH_GRACE_MS = 3000;
 let auctionDrawTime = false;
 let participants = new Map();
 let participantVersion = 0;
@@ -1060,12 +1060,33 @@ async function connectToLive(rawUsername) {
      @tiktool/live v2.x
      ------------------------------------------------------- */
 
+  /*
+   * Use TikTool RELAYED mode for the production connection.
+   *
+   * The v38 log showed that the signed/direct WebSocket was able to obtain
+   * roomId + credentials and report "connected", but no gift events reached
+   * the SDK listener. Relayed mode keeps the same @tiktool/live event API
+   * while letting TikTool's edge handle the TikTok WebSocket/protobuf side.
+   * This is especially important here because the application only needs the
+   * normalized gift/chat events, not the raw TikTok socket.
+   *
+   * TIKTOOL_MODE can be set to "direct" if a direct connection is explicitly
+   * required. Default is "relayed".
+   */
+  const tikToolMode =
+    String(process.env.TIKTOOL_MODE || "relayed").trim().toLowerCase();
+
   const conn = new Connector({
     uniqueId: username,
     apiKey: TIKTOOL_API_KEY,
+    mode: tikToolMode === "direct" ? "direct" : "relayed",
     autoReconnect: false,
     debug: false
   });
+
+  console.log(
+    `[TikTok] Mode koneksi: ${tikToolMode === "direct" ? "direct" : "relayed"}`
+  );
 
   liveConnection = conn;
 
@@ -1127,7 +1148,7 @@ async function connectToLive(rawUsername) {
 
     if (!auctionActive && !withinFinishGrace) {
       console.log(
-        "[GIFT] DIABAIKAN: auction sudah selesai / grace period 8 detik sudah habis"
+        "[GIFT] DIABAIKAN: auction sudah selesai / grace period 3 detik sudah habis"
       );
       return;
     }
@@ -1754,7 +1775,7 @@ io.on("connection", (socket) => {
         requestedState === "running";
 
       if (requestedState === "finished") {
-        // Start the 8-second post-finish gift window exactly when FINISH arrives.
+        // Start the 3-second post-finish gift window exactly when FINISH arrives.
         auctionFinishedAt = Date.now();
       } else if (requestedState === "running") {
         // New round: remove the previous grace window.

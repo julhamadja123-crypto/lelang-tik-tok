@@ -108,6 +108,137 @@
     });
   }
 
+
+  function injectTikTokConnectionDashboard() {
+    if (document.getElementById("tiktokConnectionDashboard")) return;
+
+    const style = document.createElement("style");
+    style.id = "tiktok-connection-dashboard-style";
+    style.textContent = `
+      #tiktokConnectionDashboard {
+        width: 100%;
+        box-sizing: border-box;
+        margin: 10px 0 14px;
+        padding: 12px 14px;
+        border: 1px solid rgba(255,255,255,.10);
+        border-radius: 14px;
+        background: rgba(20,20,28,.92);
+        box-shadow: 0 8px 24px rgba(0,0,0,.18);
+      }
+
+      #tiktokConnectionDashboard .tcd-main {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      #tiktokConnectionDashboard .tcd-dot {
+        width: 11px;
+        height: 11px;
+        min-width: 11px;
+        border-radius: 50%;
+        background: #71717a;
+        box-shadow: 0 0 0 4px rgba(113,113,122,.12);
+      }
+
+      #tiktokConnectionDashboard .tcd-title {
+        font-size: 14px;
+        font-weight: 800;
+        letter-spacing: .2px;
+      }
+
+      #tiktokConnectionDashboard .tcd-message {
+        margin-top: 5px;
+        font-size: 13px;
+        line-height: 1.35;
+        opacity: .78;
+        word-break: break-word;
+      }
+
+      #tiktokConnectionDashboard .tcd-meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px 14px;
+        margin-top: 8px;
+        font-size: 11px;
+        opacity: .65;
+      }
+
+      #tiktokConnectionDashboard[data-state="connected"] .tcd-dot {
+        background: #22c55e;
+        box-shadow: 0 0 0 4px rgba(34,197,94,.13), 0 0 12px rgba(34,197,94,.45);
+      }
+
+      #tiktokConnectionDashboard[data-state="connecting"] .tcd-dot,
+      #tiktokConnectionDashboard[data-state="reconnecting"] .tcd-dot {
+        background: #f59e0b;
+        box-shadow: 0 0 0 4px rgba(245,158,11,.13), 0 0 12px rgba(245,158,11,.40);
+        animation: tcdPulse 1s infinite;
+      }
+
+      #tiktokConnectionDashboard[data-state="offline"] .tcd-dot,
+      #tiktokConnectionDashboard[data-state="error"] .tcd-dot,
+      #tiktokConnectionDashboard[data-state="disconnected"] .tcd-dot {
+        background: #ef4444;
+        box-shadow: 0 0 0 4px rgba(239,68,68,.10);
+      }
+
+      @keyframes tcdPulse {
+        0%, 100% { transform: scale(1); opacity: 1; }
+        50% { transform: scale(.72); opacity: .55; }
+      }
+
+      @media (max-width: 700px) {
+        #tiktokConnectionDashboard {
+          margin: 8px 0 12px;
+          padding: 11px 12px;
+          border-radius: 12px;
+        }
+
+        #tiktokConnectionDashboard .tcd-title {
+          font-size: 13px;
+        }
+
+        #tiktokConnectionDashboard .tcd-message {
+          font-size: 12px;
+        }
+      }
+    `;
+    document.head.appendChild(style);
+
+    const card = document.createElement("div");
+    card.id = "tiktokConnectionDashboard";
+    card.dataset.state = "disconnected";
+    card.innerHTML = `
+      <div class="tcd-main">
+        <span class="tcd-dot" aria-hidden="true"></span>
+        <div class="tcd-title">TikTok: TERPUTUS</div>
+      </div>
+      <div class="tcd-message">Belum terhubung ke TikTok LIVE</div>
+      <div class="tcd-meta">
+        <span class="tcd-user">Akun: -</span>
+        <span class="tcd-reconnect">Reconnect: 0</span>
+        <span class="tcd-events">Event: 0</span>
+        <span class="tcd-gifts">Gift: 0</span>
+      </div>
+    `;
+
+    // Place it beside the existing connection status without replacing
+    // any existing dashboard elements.
+    const log = document.getElementById("connectionLog");
+    const parent = log?.parentElement;
+
+    if (parent) {
+      parent.insertBefore(card, log);
+    } else {
+      const firstPanel =
+        document.querySelector("main") ||
+        document.querySelector(".container") ||
+        document.body;
+      firstPanel.prepend(card);
+    }
+  }
+
   function init() {
 
     /* =======================================================
@@ -115,6 +246,14 @@
        Tidak mengubah koneksi TikTok / gift / coin.
        ======================================================= */
     injectMobileAuctionUI();
+
+    /* =======================================================
+       TIKTOK CONNECTION STATUS DASHBOARD
+       Menampilkan CONNECTING / TERHUBUNG / RECONNECTING /
+       TERPUTUS / OFFLINE langsung di dashboard.
+       Tidak mengubah koneksi TikTok atau jalur gift.
+       ======================================================= */
+    injectTikTokConnectionDashboard();
 
     /* =======================================================
        SOCKET.IO
@@ -1684,8 +1823,19 @@
 
       updateButtons();
 
+      const connectingStatus = {
+        phase: "connecting",
+        message: `Menghubungkan ke @${username}...`,
+        username,
+        reconnectCount: 0,
+        eventCount: 0,
+        giftCount: 0
+      };
+
+      updateTikTokConnectionDashboard(connectingStatus);
+
       setConnectionText(
-        `Menghubungkan ke @${username}...`,
+        connectingStatus.message,
         false
       );
 
@@ -1729,6 +1879,79 @@
        CONNECTION STATUS
        ======================================================= */
 
+    function updateTikTokConnectionDashboard(data = {}) {
+      const card = document.getElementById("tiktokConnectionDashboard");
+      if (!card) return;
+
+      const phase = String(data?.phase || "").toLowerCase();
+      const message = String(
+        data?.message ||
+        "Status TikTok tidak diketahui"
+      );
+
+      let uiState = "disconnected";
+      let title = "TikTok: TERPUTUS";
+
+      if (
+        phase === "connected" ||
+        data?.ok === true
+      ) {
+        uiState = "connected";
+        title = "TikTok: TERHUBUNG";
+      } else if (
+        phase === "connecting" ||
+        phase === "connected_waiting"
+      ) {
+        uiState = "connecting";
+        title = "TikTok: MENGHUBUNGKAN...";
+      } else if (
+        phase === "reconnecting" ||
+        message.toLowerCase().includes("reconnect")
+      ) {
+        uiState = "reconnecting";
+        title = "TikTok: RECONNECTING...";
+      } else if (
+        phase === "offline" ||
+        message.toLowerCase().includes("offline")
+      ) {
+        uiState = "offline";
+        title = "TikTok: OFFLINE";
+      } else if (
+        phase === "error"
+      ) {
+        uiState = "error";
+        title = "TikTok: ERROR";
+      }
+
+      card.dataset.state = uiState;
+
+      const titleEl = card.querySelector(".tcd-title");
+      const messageEl = card.querySelector(".tcd-message");
+      const userEl = card.querySelector(".tcd-user");
+      const reconnectEl = card.querySelector(".tcd-reconnect");
+      const eventsEl = card.querySelector(".tcd-events");
+      const giftsEl = card.querySelector(".tcd-gifts");
+
+      if (titleEl) titleEl.textContent = title;
+      if (messageEl) messageEl.textContent = message;
+      if (userEl) {
+        userEl.textContent =
+          `Akun: @${String(data?.username || el.username?.value || "-").replace(/^@/, "")}`;
+      }
+      if (reconnectEl) {
+        reconnectEl.textContent =
+          `Reconnect: ${Number(data?.reconnectCount) || 0}`;
+      }
+      if (eventsEl) {
+        eventsEl.textContent =
+          `Event: ${Number(data?.eventCount) || 0}`;
+      }
+      if (giftsEl) {
+        giftsEl.textContent =
+          `Gift: ${Number(data?.giftCount) || 0}`;
+      }
+    }
+
     function setConnectionText(
       message,
       ok = false
@@ -1744,11 +1967,21 @@
       }
 
       if (el.statusBadge) {
+        const lower = String(message || "").toLowerCase();
 
-        el.statusBadge.textContent =
-          ok
-            ? "TERHUBUNG"
-            : "OFFLINE";
+        let label = ok
+          ? "TERHUBUNG"
+          : "OFFLINE";
+
+        if (!ok && (state.connecting || lower.includes("menghubungkan"))) {
+          label = "MENGHUBUNGKAN...";
+        } else if (!ok && lower.includes("reconnect")) {
+          label = "RECONNECTING...";
+        } else if (!ok && lower.includes("terputus")) {
+          label = "TERPUTUS";
+        }
+
+        el.statusBadge.textContent = label;
 
         el.statusBadge.classList.toggle(
           "online",
@@ -1816,6 +2049,12 @@
           false
         );
 
+        updateTikTokConnectionDashboard({
+          phase: "disconnected",
+          message: "Koneksi ke server terputus. Menunggu koneksi kembali.",
+          username: el.username?.value || "",
+        });
+
         updateButtons();
       }
     );
@@ -1861,11 +2100,21 @@
         const ok =
           !!data?.ok;
 
+        const phase =
+          String(data?.phase || "").toLowerCase();
+
+        const isConnecting =
+          phase === "connecting" ||
+          phase === "reconnecting" ||
+          phase === "connected_waiting";
+
         state.connected =
           ok;
 
         state.connecting =
-          false;
+          isConnecting;
+
+        updateTikTokConnectionDashboard(data);
 
         setConnectionText(
           message,
@@ -1876,6 +2125,7 @@
 
         console.log(
           "[TikTok]",
+          phase || "unknown",
           message
         );
       }
@@ -1901,6 +2151,12 @@
           message,
           false
         );
+
+        updateTikTokConnectionDashboard({
+          phase: "error",
+          message,
+          username: el.username?.value || ""
+        });
 
         updateButtons();
 

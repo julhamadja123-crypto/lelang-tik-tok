@@ -15,6 +15,37 @@ const io = new Server(server, {
 app.use(express.static(__dirname));
 
 /* =========================================================
+   RAILWAY SERVER BOOTSTRAP
+   =========================================================
+   Bind the HTTP server as early as possible. Railway health checks
+   only need the process to listen on process.env.PORT; TikTok setup
+   is lazy and must never block the web server from becoming reachable.
+*/
+
+const PORT = process.env.PORT || 3000;
+
+process.on("unhandledRejection", (reason) => {
+  console.error("[PROCESS] Unhandled Promise Rejection:", reason);
+});
+
+process.on("uncaughtException", (error) => {
+  console.error("[PROCESS] Uncaught Exception:", error);
+});
+
+server.on("error", (error) => {
+  console.error("[SERVER] HTTP server error:", error);
+});
+
+server.listen(PORT, "0.0.0.0", () => {
+  console.log("================================================");
+  console.log(`Server berjalan di port ${PORT}`);
+  console.log("Railway HTTP server siap menerima koneksi.");
+  console.log("TikTok Live Coin Auction siap.");
+  console.log("MODE: @tiktool/live + TIKTOOL_API_KEY");
+  console.log("================================================");
+});
+
+/* =========================================================
    TIKTOK CONNECTION
    BAGIAN INI DIPERTAHANKAN
    ========================================================= */
@@ -2026,60 +2057,6 @@ app.get(
   }
 );
 
-/* =========================================================
-   SERVER
-   ========================================================= */
 
-const PORT =
-  process.env.PORT || 3000;
 
-server.listen(
-  PORT,
-  "0.0.0.0",
-  () => {
-    console.log(
-      "================================================"
-    );
-
-    console.log(
-      `Server berjalan di port ${PORT}`
-    );
-
-    console.log(
-      "TikTok Live Coin Auction siap."
-    );
-
-    console.log(
-      "MODE: @tiktool/live + TIKTOOL_API_KEY"
-    );
-
-    console.log(
-      "================================================"
-    );
-  }
-);
-
-/* =========================================================
-   PROCESS ERROR HANDLER
-   ========================================================= */
-
-process.on(
-  "unhandledRejection",
-  (reason) => {
-    console.error(
-      "[PROCESS] Unhandled Promise Rejection:",
-      reason
-    );
-  }
-);
-
-process.on(
-  "uncaughtException",
-  (error) => {
-    console.error(
-      "[PROCESS] Uncaught Exception:",
-      error
-    );
-  }
-);
 }

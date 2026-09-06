@@ -15,37 +15,6 @@ const io = new Server(server, {
 app.use(express.static(__dirname));
 
 /* =========================================================
-   RAILWAY SERVER BOOTSTRAP
-   =========================================================
-   Bind the HTTP server as early as possible. Railway health checks
-   only need the process to listen on process.env.PORT; TikTok setup
-   is lazy and must never block the web server from becoming reachable.
-*/
-
-const PORT = process.env.PORT || 3000;
-
-process.on("unhandledRejection", (reason) => {
-  console.error("[PROCESS] Unhandled Promise Rejection:", reason);
-});
-
-process.on("uncaughtException", (error) => {
-  console.error("[PROCESS] Uncaught Exception:", error);
-});
-
-server.on("error", (error) => {
-  console.error("[SERVER] HTTP server error:", error);
-});
-
-server.listen(PORT, "0.0.0.0", () => {
-  console.log("================================================");
-  console.log(`Server berjalan di port ${PORT}`);
-  console.log("Railway HTTP server siap menerima koneksi.");
-  console.log("TikTok Live Coin Auction siap.");
-  console.log("MODE: @tiktool/live + TIKTOOL_API_KEY");
-  console.log("================================================");
-});
-
-/* =========================================================
    TIKTOK CONNECTION
    BAGIAN INI DIPERTAHANKAN
    ========================================================= */
@@ -1091,33 +1060,12 @@ async function connectToLive(rawUsername) {
      @tiktool/live v2.x
      ------------------------------------------------------- */
 
-  /*
-   * Use TikTool RELAYED mode for the production connection.
-   *
-   * The v38 log showed that the signed/direct WebSocket was able to obtain
-   * roomId + credentials and report "connected", but no gift events reached
-   * the SDK listener. Relayed mode keeps the same @tiktool/live event API
-   * while letting TikTool's edge handle the TikTok WebSocket/protobuf side.
-   * This is especially important here because the application only needs the
-   * normalized gift/chat events, not the raw TikTok socket.
-   *
-   * TIKTOOL_MODE can be set to "direct" if a direct connection is explicitly
-   * required. Default is "relayed".
-   */
-  const tikToolMode =
-    String(process.env.TIKTOOL_MODE || "relayed").trim().toLowerCase();
-
   const conn = new Connector({
     uniqueId: username,
     apiKey: TIKTOOL_API_KEY,
-    mode: tikToolMode === "direct" ? "direct" : "relayed",
     autoReconnect: false,
     debug: false
   });
-
-  console.log(
-    `[TikTok] Mode koneksi: ${tikToolMode === "direct" ? "direct" : "relayed"}`
-  );
 
   liveConnection = conn;
 
@@ -2057,6 +2005,60 @@ app.get(
   }
 );
 
+/* =========================================================
+   SERVER
+   ========================================================= */
 
+const PORT =
+  process.env.PORT || 3000;
 
+server.listen(
+  PORT,
+  "0.0.0.0",
+  () => {
+    console.log(
+      "================================================"
+    );
+
+    console.log(
+      `Server berjalan di port ${PORT}`
+    );
+
+    console.log(
+      "TikTok Live Coin Auction siap."
+    );
+
+    console.log(
+      "MODE: @tiktool/live + TIKTOOL_API_KEY"
+    );
+
+    console.log(
+      "================================================"
+    );
+  }
+);
+
+/* =========================================================
+   PROCESS ERROR HANDLER
+   ========================================================= */
+
+process.on(
+  "unhandledRejection",
+  (reason) => {
+    console.error(
+      "[PROCESS] Unhandled Promise Rejection:",
+      reason
+    );
+  }
+);
+
+process.on(
+  "uncaughtException",
+  (error) => {
+    console.error(
+      "[PROCESS] Uncaught Exception:",
+      error
+    );
+  }
+);
 }

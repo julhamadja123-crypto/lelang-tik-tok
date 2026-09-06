@@ -47,7 +47,8 @@ let tikTokReconnectCount = 0;
 let auctionActive = false;
 let auctionDrawTime = false;
 let auctionFinishedAt = 0;
-const AUCTION_FINISH_GRACE_MS = 8000;
+let graceDrawCheckTimer = null;
+const AUCTION_FINISH_GRACE_MS = 5000;
 let participants = new Map();
 let participantVersion = 0;
 
@@ -1650,6 +1651,51 @@ io.on("connection", (socket) => {
     }
   );
 
+  function scheduleGraceDrawCheck() {
+    clearTimeout(graceDrawCheckTimer);
+    graceDrawCheckTimer = null;
+
+    graceDrawCheckTimer = setTimeout(() => {
+      graceDrawCheckTimer = null;
+
+      // Only evaluate the tie after the full 5-second grace period.
+      if (auctionActive || auctionFinishedAt <= 0) return;
+
+      const list = Array.from(participants.values());
+      if (list.length < 2) {
+        console.log("[Auction] Grace selesai: peserta kurang dari 2, tidak ada DRAW TIME");
+        return;
+      }
+      const coins = list
+        .map(p => Number(p?.coins) || 0)
+        .sort((a, b) => b - a);
+
+      const tie = coins.length >= 2 && coins[0] === coins[1];
+
+      if (tie) {
+        // Grace is over. Re-open the auction state only for DRAW TIME.
+        auctionActive = true;
+        auctionDrawTime = true;
+        auctionFinishedAt = 0;
+
+        console.log(
+          `[Auction] Grace 5 detik selesai -> COIN SERI (${coins[0]}) -> DRAW TIME 20 detik`
+        );
+
+        io.emit("auction:state", {
+          state: "running",
+          active: true,
+          drawTime: true,
+          version: participantVersion
+        });
+      } else {
+        console.log(
+          `[Auction] Grace 5 detik selesai -> coin tidak seri -> tetap FINISHED`
+        );
+      }
+    }, AUCTION_FINISH_GRACE_MS);
+  }
+
   /* =======================================================
      AUCTION STATE
      ======================================================= */
@@ -1750,9 +1796,15 @@ io.on("connection", (socket) => {
 
       if (requestedState === "finished") {
         auctionFinishedAt = Date.now();
+        auctionDrawTime = false;
+        scheduleGraceDrawCheck();
       } else if (requestedState === "running") {
+        clearTimeout(graceDrawCheckTimer);
+        graceDrawCheckTimer = null;
         auctionFinishedAt = 0;
       } else if (wasAuctionActive) {
+        clearTimeout(graceDrawCheckTimer);
+        graceDrawCheckTimer = null;
         auctionFinishedAt = 0;
       }
 
@@ -1793,6 +1845,8 @@ io.on("connection", (socket) => {
   socket.on(
     "auction:reset",
     () => {
+      clearTimeout(graceDrawCheckTimer);
+      graceDrawCheckTimer = null;
       participants.clear();
 
       participantVersion += 1;
@@ -1868,6 +1922,8 @@ io.on("connection", (socket) => {
       auctionActive = false;
       auctionFinishedAt = 0;
       auctionDrawTime = false;
+      clearTimeout(graceDrawCheckTimer);
+      graceDrawCheckTimer = null;
       processedStreakProgress.clear();
 
       await stopConnection();

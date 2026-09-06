@@ -703,9 +703,13 @@
       el.timer.classList.remove("draw-time-active");
     }
 
-    function startDrawTime(serverDeadline = null) {
+    function startDrawTime(serverDeadline = null, forceServerDraw = false) {
       if (state.auction !== "running") return false;
-      if (!hasCoinTie()) return false;
+
+      // Jika server sudah menyatakan DRAW TIME dimulai, jangan menunggu
+      // participant update berikutnya. Server sudah melakukan pengecekan tie
+      // setelah grace period, jadi countdown harus aktif SEKETIKA.
+      if (!forceServerDraw && !hasCoinTie()) return false;
 
       stopTimer();
 
@@ -2252,7 +2256,8 @@
             startDrawTime(
               Number.isFinite(serverDrawDeadline) && serverDrawDeadline > Date.now()
                 ? serverDrawDeadline
-                : null
+                : null,
+              true
             );
           } else {
             if (

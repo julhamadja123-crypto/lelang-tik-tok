@@ -703,7 +703,7 @@
       el.timer.classList.remove("draw-time-active");
     }
 
-    function startDrawTime() {
+    function startDrawTime(serverDeadline = null) {
       if (state.auction !== "running") return false;
       if (!hasCoinTie()) return false;
 
@@ -715,7 +715,10 @@
         (state.drawTimeRunId || 0) + 1;
 
       const runId = state.drawTimeRunId;
-      const deadline = Date.now() + 20000;
+      const deadline =
+        Number.isFinite(Number(serverDeadline)) && Number(serverDeadline) > Date.now()
+          ? Number(serverDeadline)
+          : Date.now() + 20000;
 
       state.timerDeadline = deadline;
       state.timer = 20;
@@ -2243,7 +2246,14 @@
             state.drawTime = false;
             state.timer = 0;
             state.timerDeadline = null;
-            startDrawTime();
+            // Gunakan deadline dari server agar Draw Time terbaca langsung
+            // saat event tiba, tanpa jeda sinkronisasi tambahan.
+            const serverDrawDeadline = Number(data?.drawTimeDeadline);
+            startDrawTime(
+              Number.isFinite(serverDrawDeadline) && serverDrawDeadline > Date.now()
+                ? serverDrawDeadline
+                : null
+            );
           } else {
             if (
               previous !== "running" &&

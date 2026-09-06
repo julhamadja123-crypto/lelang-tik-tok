@@ -1005,20 +1005,13 @@
          DRAW TIME
          ===================================================== */
 
-      // Setelah timer utama + Extra Time habis, jika masih ada
-      // peserta dengan jumlah coin yang sama, masuk Draw Time.
-      if (hasCoinTie()) {
-        state.timer = 0;
-        state.timerDeadline = null;
-        renderTimer();
-
-        startDrawTime();
-        return;
-      }
-
       /* =====================================================
          WAKTU BENAR-BENAR HABIS
-         ===================================================== */
+         =====================================================
+         Server memberi grace period 5 detik untuk gift yang terlambat.
+         Setelah grace selesai, SERVER mengecek apakah coin tertinggi seri.
+         Jika seri, server memulai DRAW TIME 20 detik.
+      */
 
       state.timer = 0;
       state.timerDeadline = null;
@@ -2244,27 +2237,36 @@
           next === "running"
         ) {
 
-          if (
-            previous !== "running" &&
-            state.timer <= 0
-          ) {
+          if (data?.drawTime === true) {
+            // Server starts DRAW TIME only after the 5-second grace check.
+            state.auction = "running";
+            state.drawTime = false;
+            state.timer = 0;
+            state.timerDeadline = null;
+            startDrawTime();
+          } else {
+            if (
+              previous !== "running" &&
+              state.timer <= 0
+            ) {
 
-            state.initialTimer =
-              getMainTime();
+              state.initialTimer =
+                getMainTime();
 
-            state.timer =
-              state.initialTimer;
+              state.timer =
+                state.initialTimer;
 
-            state.extraTime =
-              getExtraTime();
+              state.extraTime =
+                getExtraTime();
 
-            state.extraUsed =
-              false;
+              state.extraUsed =
+                false;
 
-            removeExtraTimeColor();
+              removeExtraTimeColor();
+            }
+
+            startTimer();
           }
-
-          startTimer();
 
         } else {
 

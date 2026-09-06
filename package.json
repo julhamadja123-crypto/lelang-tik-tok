@@ -1,6 +1,6 @@
 {
   "name": "tiktok-live-coin-auction",
-  "version": "22.0.0",
+  "version": "23.0.0",
   "private": true,
   "scripts": {
     "start": "node server.js"
@@ -11,6 +11,6 @@
   "dependencies": {
     "express": "^4.21.2",
     "socket.io": "^4.8.1",
-    "@tiktool/live": "^2.8.0"
+    "@tiktool/live": "2.8.0"
   }
 }

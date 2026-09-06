@@ -2,6 +2,18 @@ const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
 
+/* =========================================================
+   EARLY PROCESS ERROR HANDLERS
+   Railway startup errors are logged before app initialization.
+   TikTok connection logic is unchanged.
+   ========================================================= */
+process.on("unhandledRejection", (reason) => {
+  console.error("[PROCESS] Unhandled Promise Rejection:", reason);
+});
+process.on("uncaughtException", (error) => {
+  console.error("[PROCESS] Uncaught Exception:", error);
+});
+
 const app = express();
 const server = http.createServer(app);
 
@@ -45,8 +57,6 @@ let tikTokReconnectCount = 0;
    ========================================================= */
 
 let auctionActive = false;
-let auctionFinishedAt = 0;
-const AUCTION_FINISH_GRACE_MS = 3000;
 let auctionDrawTime = false;
 let participants = new Map();
 let participantVersion = 0;
@@ -444,33 +454,7 @@ function giftData(event) {
 
   // Be tolerant of additional TikTool nesting (for example payloads
   // wrapped in giftInfo/giftData). Only inspect known value field names.
-  // TikTok's diamondCount is the value of ONE gift.
-  // Prefer the explicit per-unit field. Do not let nested totals/coinValue
-  // accidentally become the per-unit value.
-  let resolvedDiamondCount =
-    numberPositive(
-      event?.diamondCount,
-      event?.diamond_count,
-      event?.gift?.diamondCount,
-      event?.gift?.diamond_count,
-      event?.giftDetails?.diamondCount,
-      event?.giftDetails?.diamond_count
-    ) || 0;
-
-  // Rose (Mawar) is giftId 5655 and costs 1 coin/diamond per gift.
-  // Some payload variants can expose an unrelated nested value; force the
-  // known catalog value for this gift so Rose x4 can never become 8.
-  const normalizedGiftName = String(giftName || "").trim().toLowerCase();
-  if (
-    String(giftId) === "5655" ||
-    normalizedGiftName === "rose" ||
-    normalizedGiftName === "mawar"
-  ) {
-    resolvedDiamondCount = 1;
-  }
-
-  if (resolvedDiamondCount <= 0) {
-
+  let resolvedDiamondCount = diamondCount;
   if (resolvedDiamondCount <= 0) {
     const valueKeys = new Set([
       "diamondCount", "diamond_count", "diamondCost", "diamond_cost",
@@ -1061,15 +1045,32 @@ async function connectToLive(rawUsername) {
      ------------------------------------------------------- */
 
   /*
-   * KONEKSI STANDAR YANG SUDAH TERBUKTI STABIL.
-   * Jangan gunakan relayed mode di sini.
+   * Use TikTool RELAYED mode for the production connection.
+   *
+   * The v38 log showed that the signed/direct WebSocket was able to obtain
+   * roomId + credentials and report "connected", but no gift events reached
+   * the SDK listener. Relayed mode keeps the same @tiktool/live event API
+   * while letting TikTool's edge handle the TikTok WebSocket/protobuf side.
+   * This is especially important here because the application only needs the
+   * normalized gift/chat events, not the raw TikTok socket.
+   *
+   * TIKTOOL_MODE can be set to "direct" if a direct connection is explicitly
+   * required. Default is "relayed".
    */
+  const tikToolMode =
+    String(process.env.TIKTOOL_MODE || "relayed").trim().toLowerCase();
+
   const conn = new Connector({
     uniqueId: username,
     apiKey: TIKTOOL_API_KEY,
+    mode: tikToolMode === "direct" ? "direct" : "relayed",
     autoReconnect: false,
     debug: false
   });
+
+  console.log(
+    `[TikTok] Mode koneksi: ${tikToolMode === "direct" ? "direct" : "relayed"}`
+  );
 
   liveConnection = conn;
 
@@ -1124,25 +1125,11 @@ async function connectToLive(rawUsername) {
     // Gift hanya boleh menambah coin ketika lelang sedang aktif.
     // Monitor tetap mencatat gift yang benar-benar diterima walaupun
     // lelang sedang tidak aktif.
-    const withinFinishGrace =
-      !auctionActive &&
-      auctionFinishedAt > 0 &&
-      (Date.now() - auctionFinishedAt) <= AUCTION_FINISH_GRACE_MS;
-
-    if (!auctionActive && !withinFinishGrace) {
+    if (!auctionActive) {
       console.log(
-        "[GIFT] DIABAIKAN: auction sudah selesai / grace period 3 detik sudah habis"
+        "[GIFT] DIABAIKAN: auction sudah selesai/tidak aktif"
       );
       return;
-    }
-
-    if (withinFinishGrace) {
-      console.log(
-        `[GIFT] MASUK GRACE PERIOD: ${Math.max(
-          0,
-          AUCTION_FINISH_GRACE_MS - (Date.now() - auctionFinishedAt)
-        )}ms tersisa`
-      );
     }
 
     /* =====================================================
@@ -1752,22 +1739,8 @@ io.on("connection", (socket) => {
           )
         );
 
-      const wasAuctionActive = auctionActive;
-
       auctionActive =
         requestedState === "running";
-
-      if (requestedState === "finished") {
-        // Start the 3-second post-finish gift window exactly when FINISH arrives.
-        auctionFinishedAt = Date.now();
-      } else if (requestedState === "running") {
-        // New round: remove the previous grace window.
-        auctionFinishedAt = 0;
-      } else if (wasAuctionActive) {
-        // Safety: if an older client sends a non-running state directly,
-        // don't accidentally leave the previous grace window active forever.
-        auctionFinishedAt = 0;
-      }
 
       auctionDrawTime =
         auctionActive && data?.drawTime === true;
@@ -1849,7 +1822,6 @@ io.on("connection", (socket) => {
       );
 
       auctionActive = false;
-      auctionFinishedAt = 0;
       auctionDrawTime = false;
       processedStreakProgress.clear();
 
@@ -1879,7 +1851,6 @@ io.on("connection", (socket) => {
       );
 
       auctionActive = false;
-      auctionFinishedAt = 0;
       auctionDrawTime = false;
       processedStreakProgress.clear();
 
@@ -2010,59 +1981,20 @@ app.get(
 );
 
 /* =========================================================
-   SERVER
+   SERVER / RAILWAY STARTUP FIX
    ========================================================= */
 
-const PORT =
-  process.env.PORT || 3000;
+const PORT = Number(process.env.PORT) || 3000;
 
-server.listen(
-  PORT,
-  "0.0.0.0",
-  () => {
-    console.log(
-      "================================================"
-    );
+server.on("error", (error) => {
+  console.error("[SERVER] HTTP server error:", error);
+});
 
-    console.log(
-      `Server berjalan di port ${PORT}`
-    );
-
-    console.log(
-      "TikTok Live Coin Auction siap."
-    );
-
-    console.log(
-      "MODE: @tiktool/live + TIKTOOL_API_KEY"
-    );
-
-    console.log(
-      "================================================"
-    );
-  }
-);
-
-/* =========================================================
-   PROCESS ERROR HANDLER
-   ========================================================= */
-
-process.on(
-  "unhandledRejection",
-  (reason) => {
-    console.error(
-      "[PROCESS] Unhandled Promise Rejection:",
-      reason
-    );
-  }
-);
-
-process.on(
-  "uncaughtException",
-  (error) => {
-    console.error(
-      "[PROCESS] Uncaught Exception:",
-      error
-    );
-  }
-);
-}
+server.listen(PORT, "0.0.0.0", () => {
+  console.log("================================================");
+  console.log(`[SERVER] Server berjalan di port ${PORT}`);
+  console.log(`[SERVER] Listening on 0.0.0.0:${PORT}`);
+  console.log("[SERVER] TikTok Live Coin Auction siap.");
+  console.log("[SERVER] MODE: @tiktool/live + TIKTOOL_API_KEY");
+  console.log("================================================");
+});

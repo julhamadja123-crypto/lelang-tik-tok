@@ -25,7 +25,7 @@ let activeUsername = null;
 let reconnectTimer = null;
 let liveCheckTimer = null;
 let manualDisconnect = false;
-const LIVE_CHECK_INTERVAL = 3000;
+const LIVE_CHECK_INTERVAL = 10000;
 
 /* =========================================================
    TIKTOK LIVE MONITOR
@@ -45,6 +45,8 @@ let tikTokReconnectCount = 0;
    ========================================================= */
 
 let auctionActive = false;
+let auctionFinishedAt = 0;
+const AUCTION_FINISH_GRACE_MS = 3000;
 let auctionDrawTime = false;
 let participants = new Map();
 let participantVersion = 0;
@@ -442,7 +444,33 @@ function giftData(event) {
 
   // Be tolerant of additional TikTool nesting (for example payloads
   // wrapped in giftInfo/giftData). Only inspect known value field names.
-  let resolvedDiamondCount = diamondCount;
+  // TikTok's diamondCount is the value of ONE gift.
+  // Prefer the explicit per-unit field. Do not let nested totals/coinValue
+  // accidentally become the per-unit value.
+  let resolvedDiamondCount =
+    numberPositive(
+      event?.diamondCount,
+      event?.diamond_count,
+      event?.gift?.diamondCount,
+      event?.gift?.diamond_count,
+      event?.giftDetails?.diamondCount,
+      event?.giftDetails?.diamond_count
+    ) || 0;
+
+  // Rose (Mawar) is giftId 5655 and costs 1 coin/diamond per gift.
+  // Some payload variants can expose an unrelated nested value; force the
+  // known catalog value for this gift so Rose x4 can never become 8.
+  const normalizedGiftName = String(giftName || "").trim().toLowerCase();
+  if (
+    String(giftId) === "5655" ||
+    normalizedGiftName === "rose" ||
+    normalizedGiftName === "mawar"
+  ) {
+    resolvedDiamondCount = 1;
+  }
+
+  if (resolvedDiamondCount <= 0) {
+
   if (resolvedDiamondCount <= 0) {
     const valueKeys = new Set([
       "diamondCount", "diamond_count", "diamondCost", "diamond_cost",
@@ -576,52 +604,15 @@ function giftData(event) {
      ------------------------------------------------------- */
 
   if (giftType === 1) {
-    /*
-     * FAST COMBO PATH:
-     * TikTool dapat mengirim progress combo bertahap (x1, x2, x3, ...).
-     * Versi sebelumnya menunggu repeatEnd=true sehingga coin baru masuk
-     * ketika combo selesai. Itu bisa terasa seperti delay beberapa detik.
-     *
-     * Sekarang yang diproses adalah DELTA repeatCount:
-     *   x1 -> +1
-     *   x2 -> +1
-     *   x3 -> +1
-     *   final x3 -> +0 (anti-double)
-     *
-     * Jadi coin masuk realtime tanpa menghitung combo dua kali.
-     */
-    const comboIdentity = [
-      String(user.userId || user.uniqueId || user.nickname || "viewer").trim().toLowerCase(),
-      String(giftId || giftName || "gift").trim().toLowerCase(),
-      String(transactionId || groupId || event.msgId || event.msg_id || "no-id")
-    ].join("|");
-
-    const streakKey = `streak:${comboIdentity}`;
-    const nowStreak = Date.now();
-    const previousProgress = processedStreakProgress.get(streakKey);
-    const previousCount =
-      previousProgress && nowStreak - previousProgress.updatedAt <= GIFT_TTL
-        ? Number(previousProgress.repeatCount) || 0
-        : 0;
-
-    const currentCount = Math.max(1, Math.floor(repeatCount));
-    const delta = Math.max(0, currentCount - previousCount);
-
-    if (delta <= 0) {
-      // Final event / repeated progress already accounted for.
-      if (repeatEnd) {
-        processedStreakProgress.delete(streakKey);
-      }
+    if (!repeatEnd) {
+      console.log(
+        `[GIFT] Combo progress diabaikan sampai final: @${user.uniqueId} | ${giftName} | x${repeatCount}`
+      );
       return null;
     }
 
-    processedStreakProgress.set(streakKey, {
-      repeatCount: currentCount,
-      updatedAt: nowStreak
-    });
-
-    // From this point on, coinValue uses only the NEW combo delta.
-    repeatCount = delta;
+    // repeatCount final = jumlah gift sebenarnya dalam combo.
+    repeatCount = Math.max(1, Math.floor(repeatCount));
   }
 
   /* -------------------------------------------------------
@@ -705,13 +696,6 @@ function giftData(event) {
     for (const [key, time] of processedGiftFingerprints.entries()) {
       if (now - time > GIFT_FINGERPRINT_TTL) {
         processedGiftFingerprints.delete(key);
-      }
-    }
-
-    for (const [key, progress] of processedStreakProgress.entries()) {
-      const updatedAt = Number(progress?.updatedAt) || 0;
-      if (!updatedAt || now - updatedAt > GIFT_TTL) {
-        processedStreakProgress.delete(key);
       }
     }
 
@@ -1157,11 +1141,25 @@ async function connectToLive(rawUsername) {
     // Gift hanya boleh menambah coin ketika lelang sedang aktif.
     // Monitor tetap mencatat gift yang benar-benar diterima walaupun
     // lelang sedang tidak aktif.
-    if (!auctionActive) {
+    const withinFinishGrace =
+      !auctionActive &&
+      auctionFinishedAt > 0 &&
+      (Date.now() - auctionFinishedAt) <= AUCTION_FINISH_GRACE_MS;
+
+    if (!auctionActive && !withinFinishGrace) {
       console.log(
-        "[GIFT] DIABAIKAN: auction sudah selesai/tidak aktif"
+        "[GIFT] DIABAIKAN: auction sudah selesai / grace period 3 detik sudah habis"
       );
       return;
+    }
+
+    if (withinFinishGrace) {
+      console.log(
+        `[GIFT] MASUK GRACE PERIOD: ${Math.max(
+          0,
+          AUCTION_FINISH_GRACE_MS - (Date.now() - auctionFinishedAt)
+        )}ms tersisa`
+      );
     }
 
     /* =====================================================
@@ -1771,8 +1769,22 @@ io.on("connection", (socket) => {
           )
         );
 
+      const wasAuctionActive = auctionActive;
+
       auctionActive =
         requestedState === "running";
+
+      if (requestedState === "finished") {
+        // Start the 3-second post-finish gift window exactly when FINISH arrives.
+        auctionFinishedAt = Date.now();
+      } else if (requestedState === "running") {
+        // New round: remove the previous grace window.
+        auctionFinishedAt = 0;
+      } else if (wasAuctionActive) {
+        // Safety: if an older client sends a non-running state directly,
+        // don't accidentally leave the previous grace window active forever.
+        auctionFinishedAt = 0;
+      }
 
       auctionDrawTime =
         auctionActive && data?.drawTime === true;
@@ -1854,6 +1866,7 @@ io.on("connection", (socket) => {
       );
 
       auctionActive = false;
+      auctionFinishedAt = 0;
       auctionDrawTime = false;
       processedStreakProgress.clear();
 
@@ -1883,6 +1896,7 @@ io.on("connection", (socket) => {
       );
 
       auctionActive = false;
+      auctionFinishedAt = 0;
       auctionDrawTime = false;
       processedStreakProgress.clear();
 

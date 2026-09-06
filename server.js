@@ -566,28 +566,57 @@ function giftData(event) {
   const createTime = event.createTime || event.create_time || event.timestamp || null;
 
   /* -------------------------------------------------------
-     GIFT STREAK / COMBO
+     GIFT STREAK / COMBO — FAST PATH
 
-     TikTool menjelaskan bahwa gift combo/streak mengirim beberapa
-     update dengan repeatCount yang terus naik, lalu SATU event final
-     dengan repeatEnd=true yang membawa jumlah combo final.
-
-     Untuk auction, jangan menghitung event progress satu per satu.
-     Ambil hanya event final dan gunakan repeatCount final sebagai
-     jumlah gift. TransactionId TikTool bersifat stabil untuk satu
-     combo sehingga event final yang terkirim ulang tetap ter-dedup.
+     Proses progress combo langsung. repeatCount adalah jumlah combo
+     kumulatif, jadi yang dimasukkan ke peserta hanya delta dari progress
+     terakhir agar tidak double-count. Tidak perlu menunggu repeatEnd.
      ------------------------------------------------------- */
 
+  let streakDelta = repeatCount;
+
   if (giftType === 1) {
-    if (!repeatEnd) {
-      console.log(
-        `[GIFT] Combo progress diabaikan sampai final: @${user.uniqueId} | ${giftName} | x${repeatCount}`
-      );
-      return null;
+    const streakSenderKey = String(
+      user.userId && user.userId !== "unknown"
+        ? user.userId
+        : user.uniqueId || user.nickname || "viewer"
+    ).trim().toLowerCase();
+    const streakGiftKey = String(giftId || giftName || "gift").trim().toLowerCase();
+    const streakIdentity =
+      transactionId ||
+      groupId ||
+      `${streakSenderKey}|${streakGiftKey}`;
+    const streakKey = `streak:${streakIdentity}`;
+    const streakNow = Date.now();
+    const previousStreak = processedStreakProgress.get(streakKey);
+
+    if (previousStreak && streakNow - previousStreak.at <= 5000) {
+      if (repeatCount <= previousStreak.repeatCount) {
+        console.log(
+          `[GIFT] Combo progress duplicate/tertinggal diabaikan: @${user.uniqueId} | ${giftName} | x${repeatCount}`
+        );
+        return null;
+      }
+      streakDelta = repeatCount - previousStreak.repeatCount;
     }
 
-    // repeatCount final = jumlah gift sebenarnya dalam combo.
-    repeatCount = Math.max(1, Math.floor(repeatCount));
+    processedStreakProgress.set(streakKey, {
+      repeatCount,
+      at: streakNow
+    });
+
+    if (processedStreakProgress.size > 1000) {
+      for (const [key, value] of processedStreakProgress.entries()) {
+        if (!value || streakNow - value.at > 10000) {
+          processedStreakProgress.delete(key);
+        }
+      }
+    }
+
+    if (streakDelta <= 0) return null;
+
+    // Gunakan delta agar x1,x2,x3 menghasilkan total 3, bukan 6.
+    repeatCount = streakDelta;
   }
 
   /* -------------------------------------------------------
@@ -1682,16 +1711,8 @@ io.on("connection", (socket) => {
           `[Auction] Grace 4 detik selesai -> COIN SERI (${coins[0]}) -> DRAW TIME 20 detik`
         );
 
-        // Kirim peserta TERLEBIH DAHULU supaya frontend sudah memiliki
-        // coin terbaru ketika event DRAW TIME diterima. Ini mencegah race
-        // condition: auction:state bisa tiba sebelum auction:participants.
-        io.emit("auction:participants", {
-          version: participantVersion,
-          participants: Array.from(participants.values())
-        });
-
-        // Deadline dibuat tepat saat DRAW TIME dimulai. Frontend menerima
-        // deadline yang sama sehingga countdown langsung aktif tanpa jeda.
+        // Kirim deadline Draw Time bersamaan dengan event agar frontend
+        // bisa mulai menghitung mundur seketika tanpa menunggu polling/tick lain.
         const drawTimeDeadline = Date.now() + 20000;
 
         io.emit("auction:state", {

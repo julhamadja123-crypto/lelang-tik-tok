@@ -1682,8 +1682,16 @@ io.on("connection", (socket) => {
           `[Auction] Grace 4 detik selesai -> COIN SERI (${coins[0]}) -> DRAW TIME 20 detik`
         );
 
-        // Kirim deadline Draw Time bersamaan dengan event agar frontend
-        // bisa mulai menghitung mundur seketika tanpa menunggu polling/tick lain.
+        // Kirim peserta TERLEBIH DAHULU supaya frontend sudah memiliki
+        // coin terbaru ketika event DRAW TIME diterima. Ini mencegah race
+        // condition: auction:state bisa tiba sebelum auction:participants.
+        io.emit("auction:participants", {
+          version: participantVersion,
+          participants: Array.from(participants.values())
+        });
+
+        // Deadline dibuat tepat saat DRAW TIME dimulai. Frontend menerima
+        // deadline yang sama sehingga countdown langsung aktif tanpa jeda.
         const drawTimeDeadline = Date.now() + 20000;
 
         io.emit("auction:state", {

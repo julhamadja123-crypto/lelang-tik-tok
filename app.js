@@ -725,8 +725,10 @@
       setAuctionUI("draw");
       renderTimer();
 
-      sendAuctionState("running", true);
-
+      // DRAW TIME dipicu oleh server setelah grace period.
+      // Jangan kirim balik "running + drawTime" ke server di sini,
+      // karena server akan mem-broadcast event yang sama lagi dan
+      // countdown bisa terus di-reset ke 20 detik.
       showToast("DRAW TIME dimulai — 20 detik");
 
       const tick = () => {
@@ -2239,11 +2241,15 @@
 
           if (data?.drawTime === true) {
             // Server starts DRAW TIME only after the 5-second grace check.
+            // If DRAW TIME is already running, do not restart it from a
+            // repeated/socket state broadcast.
             state.auction = "running";
-            state.drawTime = false;
-            state.timer = 0;
-            state.timerDeadline = null;
-            startDrawTime();
+            if (!state.drawTime) {
+              state.drawTime = false;
+              state.timer = 0;
+              state.timerDeadline = null;
+              startDrawTime();
+            }
           } else {
             if (
               previous !== "running" &&

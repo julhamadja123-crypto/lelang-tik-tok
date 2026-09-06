@@ -13,6 +13,14 @@
     const style = document.createElement("style");
     style.id = "coin-auction-mobile-ui";
     style.textContent = `
+      /* FINISHED: tetap terlihat jelas dan hijau */
+      #timer.finished-timer {
+        color: #22c55e !important;
+      }
+      .finished-note {
+        color: #22c55e !important;
+      }
+
       /* Tampilan peserta mobile: hanya ranking + nama + coin */
       #rankingList .participant-row {
         display: grid !important;
@@ -785,22 +793,18 @@
       state.drawTimeRunId =
         (state.drawTimeRunId || 0) + 1;
 
-      if (hasCoinTie()) {
-        // Masih seri -> ulangi Draw Time 20 detik.
-        state.timer = 20;
-        state.timerDeadline = null;
-        removeDrawTimeColor();
-        startDrawTime();
-        return;
-      }
-
-      // Coin sudah berbeda -> FINISHED.
+      // Server sekarang menjadi pengatur utama pergantian Draw Time.
+      // Jangan kirim FINISHED / restart lewat round-trip browser di sini,
+      // karena itu membuat jeda terlihat di layar. Jika server masih seri,
+      // server akan langsung mengirim DRAW TIME berikutnya.
       state.timer = 0;
       state.timerDeadline = null;
       removeDrawTimeColor();
       renderTimer();
 
-      finishAuction(true);
+      if (!hasCoinTie()) {
+        finishAuction(true);
+      }
     }
 
     /* =======================================================

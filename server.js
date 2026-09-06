@@ -58,6 +58,7 @@ let participantVersion = 0;
 const AUCTION_FINISH_GRACE_MS = 4000;
 let auctionFinishedAt = 0;
 let graceDrawCheckTimer = null;
+let drawTimeEndTimer = null;
 
 function getTopTwoTie() {
   const list = Array.from(participants.values());
@@ -71,6 +72,10 @@ function clearFinishGrace() {
   if (graceDrawCheckTimer) {
     clearTimeout(graceDrawCheckTimer);
     graceDrawCheckTimer = null;
+  }
+  if (drawTimeEndTimer) {
+    clearTimeout(drawTimeEndTimer);
+    drawTimeEndTimer = null;
   }
   auctionFinishedAt = 0;
 }
@@ -97,6 +102,32 @@ function startServerDrawTime(reason = "coin seri") {
     drawTimeDeadline,
     version: participantVersion
   });
+
+  // Server-authoritative Draw Time: when 20 seconds really end,
+  // immediately repeat if the top two are still tied. This removes
+  // the browser/socket round-trip gap between Draw Time rounds.
+  if (drawTimeEndTimer) clearTimeout(drawTimeEndTimer);
+  drawTimeEndTimer = setTimeout(() => {
+    drawTimeEndTimer = null;
+
+    if (!auctionActive || !auctionDrawTime) return;
+
+    auctionDrawTime = false;
+
+    if (getTopTwoTie()) {
+      startServerDrawTime("DRAW TIME 00:00 dan coin masih seri");
+      return;
+    }
+
+    // Coin sudah berbeda: FINISHED langsung.
+    auctionActive = false;
+    io.emit("auction:state", {
+      state: "finished",
+      active: false,
+      drawTime: false,
+      version: participantVersion
+    });
+  }, 20000);
 
   return true;
 }

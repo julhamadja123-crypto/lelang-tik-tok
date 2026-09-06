@@ -46,11 +46,96 @@ let tikTokReconnectCount = 0;
 
 let auctionActive = false;
 let auctionDrawTime = false;
-let auctionFinishedAt = 0;
-let graceDrawCheckTimer = null;
-const AUCTION_FINISH_GRACE_MS = 4000;
 let participants = new Map();
 let participantVersion = 0;
+
+// ---------------------------------------------------------
+// DRAW-TIME / FINISH GRACE
+// ---------------------------------------------------------
+// The browser can reach 00:00 a few milliseconds before the last
+// TikTok gift arrives. Keep a short 4-second server-side grace window.
+// IMPORTANT: grace is NOT a mandatory wait when the top two are already tied.
+const AUCTION_FINISH_GRACE_MS = 4000;
+let auctionFinishedAt = 0;
+let graceDrawCheckTimer = null;
+
+function getTopTwoTie() {
+  const list = Array.from(participants.values());
+  if (list.length < 2) return false;
+
+  list.sort((a, b) => (Number(b?.coins) || 0) - (Number(a?.coins) || 0));
+  return (Number(list[0]?.coins) || 0) === (Number(list[1]?.coins) || 0);
+}
+
+function clearFinishGrace() {
+  if (graceDrawCheckTimer) {
+    clearTimeout(graceDrawCheckTimer);
+    graceDrawCheckTimer = null;
+  }
+  auctionFinishedAt = 0;
+}
+
+function startServerDrawTime(reason = "coin seri") {
+  clearFinishGrace();
+
+  if (!getTopTwoTie()) {
+    console.log("[Auction] DRAW TIME tidak dimulai: coin belum seri.");
+    return false;
+  }
+
+  auctionActive = true;
+  auctionDrawTime = true;
+
+  const drawTimeDeadline = Date.now() + 20000;
+
+  console.log(`[Auction] ${reason} -> DRAW TIME 20 detik`);
+
+  io.emit("auction:state", {
+    state: "running",
+    active: true,
+    drawTime: true,
+    drawTimeDeadline,
+    version: participantVersion
+  });
+
+  return true;
+}
+
+function scheduleFinishGrace() {
+  clearFinishGrace();
+
+  // If the result is already tied at 00:00, DRAW TIME starts immediately.
+  if (getTopTwoTie()) {
+    startServerDrawTime("00:00 dan coin sudah seri");
+    return;
+  }
+
+  auctionFinishedAt = Date.now();
+
+  console.log(`[Auction] FINISHED -> grace ${AUCTION_FINISH_GRACE_MS / 1000} detik dimulai.`);
+
+  graceDrawCheckTimer = setTimeout(() => {
+    graceDrawCheckTimer = null;
+
+    if (auctionActive || auctionDrawTime || auctionFinishedAt <= 0) return;
+
+    if (getTopTwoTie()) {
+      startServerDrawTime("Grace 4 detik selesai dan coin seri");
+    } else {
+      auctionFinishedAt = 0;
+      console.log("[Auction] Grace selesai -> coin tidak seri -> FINISHED");
+    }
+  }, AUCTION_FINISH_GRACE_MS);
+}
+
+function checkGraceAfterGift() {
+  if (auctionFinishedAt <= 0 || auctionActive || auctionDrawTime) return;
+
+  // Do not wait for the remaining grace when a late gift makes the result tie.
+  if (getTopTwoTie()) {
+    startServerDrawTime("gift masuk saat grace dan coin langsung seri");
+  }
+}
 
 /* =========================================================
    GIFT DUPLICATE PROTECTION
@@ -566,57 +651,28 @@ function giftData(event) {
   const createTime = event.createTime || event.create_time || event.timestamp || null;
 
   /* -------------------------------------------------------
-     GIFT STREAK / COMBO — FAST PATH
+     GIFT STREAK / COMBO
 
-     Proses progress combo langsung. repeatCount adalah jumlah combo
-     kumulatif, jadi yang dimasukkan ke peserta hanya delta dari progress
-     terakhir agar tidak double-count. Tidak perlu menunggu repeatEnd.
+     TikTool menjelaskan bahwa gift combo/streak mengirim beberapa
+     update dengan repeatCount yang terus naik, lalu SATU event final
+     dengan repeatEnd=true yang membawa jumlah combo final.
+
+     Untuk auction, jangan menghitung event progress satu per satu.
+     Ambil hanya event final dan gunakan repeatCount final sebagai
+     jumlah gift. TransactionId TikTool bersifat stabil untuk satu
+     combo sehingga event final yang terkirim ulang tetap ter-dedup.
      ------------------------------------------------------- */
 
-  let streakDelta = repeatCount;
-
   if (giftType === 1) {
-    const streakSenderKey = String(
-      user.userId && user.userId !== "unknown"
-        ? user.userId
-        : user.uniqueId || user.nickname || "viewer"
-    ).trim().toLowerCase();
-    const streakGiftKey = String(giftId || giftName || "gift").trim().toLowerCase();
-    const streakIdentity =
-      transactionId ||
-      groupId ||
-      `${streakSenderKey}|${streakGiftKey}`;
-    const streakKey = `streak:${streakIdentity}`;
-    const streakNow = Date.now();
-    const previousStreak = processedStreakProgress.get(streakKey);
-
-    if (previousStreak && streakNow - previousStreak.at <= 5000) {
-      if (repeatCount <= previousStreak.repeatCount) {
-        console.log(
-          `[GIFT] Combo progress duplicate/tertinggal diabaikan: @${user.uniqueId} | ${giftName} | x${repeatCount}`
-        );
-        return null;
-      }
-      streakDelta = repeatCount - previousStreak.repeatCount;
+    if (!repeatEnd) {
+      console.log(
+        `[GIFT] Combo progress diabaikan sampai final: @${user.uniqueId} | ${giftName} | x${repeatCount}`
+      );
+      return null;
     }
 
-    processedStreakProgress.set(streakKey, {
-      repeatCount,
-      at: streakNow
-    });
-
-    if (processedStreakProgress.size > 1000) {
-      for (const [key, value] of processedStreakProgress.entries()) {
-        if (!value || streakNow - value.at > 10000) {
-          processedStreakProgress.delete(key);
-        }
-      }
-    }
-
-    if (streakDelta <= 0) return null;
-
-    // Gunakan delta agar x1,x2,x3 menghasilkan total 3, bukan 6.
-    repeatCount = streakDelta;
+    // repeatCount final = jumlah gift sebenarnya dalam combo.
+    repeatCount = Math.max(1, Math.floor(repeatCount));
   }
 
   /* -------------------------------------------------------
@@ -1145,27 +1201,11 @@ async function connectToLive(rawUsername) {
     // Gift hanya boleh menambah coin ketika lelang sedang aktif.
     // Monitor tetap mencatat gift yang benar-benar diterima walaupun
     // lelang sedang tidak aktif.
-    const giftNow = Date.now();
-    const finishAge =
-      auctionFinishedAt > 0 ? giftNow - auctionFinishedAt : Infinity;
-
-    const withinFinishGrace =
-      !auctionActive &&
-      auctionFinishedAt > 0 &&
-      finishAge >= 0 &&
-      finishAge <= AUCTION_FINISH_GRACE_MS;
-
-    if (!auctionActive && !withinFinishGrace) {
+    if (!auctionActive && auctionFinishedAt <= 0) {
       console.log(
-        `[GIFT] DIABAIKAN: auction sudah selesai / grace ${AUCTION_FINISH_GRACE_MS / 1000} detik sudah habis`
+        "[GIFT] DIABAIKAN: auction sudah selesai/tidak aktif"
       );
       return;
-    }
-
-    if (withinFinishGrace) {
-      console.log(
-        `[GIFT] MASUK GRACE ${AUCTION_FINISH_GRACE_MS / 1000} DETIK: ${Math.max(0, AUCTION_FINISH_GRACE_MS - finishAge)}ms tersisa`
-      );
     }
 
     /* =====================================================
@@ -1297,18 +1337,6 @@ async function connectToLive(rawUsername) {
 
     participantVersion += 1;
 
-    // Selama grace setelah FINISHED, jangan tunggu timer grace.
-    // Begitu gift membuat minimal 2 peserta dengan coin tertinggi sama,
-    // DRAW TIME langsung dimulai.
-    if (withinFinishGrace && !auctionActive) {
-      // Gift yang masuk selama grace tetap diterima.
-      // Jika gift tersebut membuat 2 peserta dengan coin tertinggi menjadi sama,
-      // langsung mulai DRAW TIME tanpa menunggu grace 4 detik selesai.
-      if (isTopCoinTie()) {
-        startDrawTimeNow("gift masuk saat grace -> coin seri");
-      }
-    }
-
     /* =====================================================
        PAYLOAD GIFT
        ===================================================== */
@@ -1345,7 +1373,31 @@ async function connectToLive(rawUsername) {
       }
     );
 
+    /*
+     * Snapshot seluruh peserta dikirim sesaat setelah event utama.
+     * Ini mencegah Array.from(...) + serialisasi daftar peserta
+     * menahan jalur gift ketika peserta sudah banyak.
+     * Tidak mengubah perhitungan coin maupun urutan event utama.
+     */
+    // Capture version/snapshot sekarang agar snapshot lama tidak dapat
+    // menimpa coin terbaru ketika beberapa gift masuk sangat cepat.
+    // Kirim snapshot authoritative segera setelah participant diperbarui.
+    // Tidak ditunda dengan setImmediate agar client langsung menerima
+    // daftar peserta terbaru setelah gift diproses.
+    io.emit(
+      "auction:participants",
+      {
+        version:
+          participantVersion,
 
+        participants:
+          Array.from(participants.values())
+      }
+    );
+
+    // A late gift during the 4-second grace can create a tie.
+    // Start DRAW TIME immediately instead of waiting for the grace timer.
+    checkGraceAfterGift();
   };
 
   // Standard TikTool event.
@@ -1625,28 +1677,10 @@ async function connectToLive(rawUsername) {
       err
     );
 
-    setTikTokState(
-      "reconnecting",
-      `Gagal terhubung @${username}: ${friendly}. Mencoba reconnect...`,
+    emitStatus(
+      `Gagal terhubung @${username}: ${friendly}`,
       false
     );
-
-    if (!manualDisconnect && activeUsername === username && !reconnectTimer) {
-      tikTokReconnectCount += 1;
-      reconnectTimer = setTimeout(() => {
-        reconnectTimer = null;
-        if (!manualDisconnect && activeUsername === username) {
-          connectToLive(username).catch((e) => {
-            tikTokLastError = formatError(e);
-            setTikTokState(
-              "reconnecting",
-              `Reconnect gagal: ${tikTokLastError}`,
-              false
-            );
-          });
-        }
-      }, 1500);
-    }
 
     throw new Error(
       friendly
@@ -1691,61 +1725,6 @@ io.on("connection", (socket) => {
       serverTime: Date.now()
     }
   );
-
-  function isTopCoinTie() {
-    const list = Array.from(participants.values());
-    if (list.length < 2) return false;
-
-    const coins = list
-      .map(p => Number(p?.coins) || 0)
-      .sort((a, b) => b - a);
-
-    return coins[0] === coins[1];
-  }
-
-  function startDrawTimeNow(reason = "tie") {
-    if (auctionActive || auctionDrawTime || !isTopCoinTie()) return false;
-
-    auctionActive = true;
-    auctionDrawTime = true;
-    auctionFinishedAt = 0;
-    clearTimeout(graceDrawCheckTimer);
-    graceDrawCheckTimer = null;
-
-    const drawTimeStartedAt = Date.now();
-    const drawTimeDeadline = drawTimeStartedAt + 20000;
-
-    console.log(
-      `[Auction] ${reason} -> COIN SERI -> DRAW TIME 20 detik langsung`
-    );
-
-    io.emit("auction:state", {
-      state: "running",
-      active: true,
-      drawTime: true,
-      drawTimeStartedAt,
-      drawTimeDeadline,
-      drawTimeSeconds: 20,
-      version: participantVersion
-    });
-
-    return true;
-  }
-
-  function scheduleGraceDrawCheck() {
-    clearTimeout(graceDrawCheckTimer);
-    graceDrawCheckTimer = null;
-
-    // Tidak lagi wajib menunggu 4 detik. Ini hanya fallback jika peserta
-    // belum lengkap saat FINISHED diterima. Begitu 2 peserta coin sama ada,
-    // DRAW TIME dimulai langsung dari handler gift di bawah.
-    if (startDrawTimeNow("FINISHED / pengecekan langsung")) return;
-
-    graceDrawCheckTimer = setTimeout(() => {
-      graceDrawCheckTimer = null;
-      startDrawTimeNow("fallback grace 4 detik");
-    }, AUCTION_FINISH_GRACE_MS);
-  }
 
   /* =======================================================
      AUCTION STATE
@@ -1840,44 +1819,36 @@ io.on("connection", (socket) => {
           )
         );
 
-      const wasAuctionActive = auctionActive;
-
-      auctionActive =
-        requestedState === "running";
-
       if (requestedState === "finished") {
-        auctionFinishedAt = Date.now();
+        auctionActive = false;
         auctionDrawTime = false;
+        processedStreakProgress.clear();
 
-        // PENTING: jika tepat saat timer 00:00 sudah ada minimal 2 peserta
-        // dengan coin tertinggi yang sama, JANGAN masuk/menunggu grace 4 detik.
-        // Langsung pindah ke DRAW TIME 20 detik.
-        // Grace 4 detik tetap dipakai hanya sebagai fallback untuk gift yang
-        // datang terlambat setelah FINISHED ketika saat 00:00 belum seri.
-        clearTimeout(graceDrawCheckTimer);
-        graceDrawCheckTimer = null;
+        // Tell the browser that the main countdown ended, then keep the
+        // server open for late TikTok gifts for up to 4 seconds.
+        io.emit("auction:state", {
+          state: "finished",
+          active: false,
+          drawTime: false,
+          version: participantVersion
+        });
 
-        if (!startDrawTimeNow("FINISHED 00:00 -> coin seri")) {
-          graceDrawCheckTimer = setTimeout(() => {
-            graceDrawCheckTimer = null;
-            startDrawTimeNow("fallback grace 4 detik");
-          }, AUCTION_FINISH_GRACE_MS);
-        }
-      } else if (requestedState === "running") {
-        clearTimeout(graceDrawCheckTimer);
-        graceDrawCheckTimer = null;
-        auctionFinishedAt = 0;
-      } else if (wasAuctionActive) {
-        clearTimeout(graceDrawCheckTimer);
-        graceDrawCheckTimer = null;
-        auctionFinishedAt = 0;
+        scheduleFinishGrace();
+        return;
       }
 
-      auctionDrawTime =
-        auctionActive && data?.drawTime === true;
-
-      if (!auctionDrawTime) {
+      if (requestedState === "idle" || requestedState === "paused") {
+        clearFinishGrace();
+        auctionActive = requestedState === "paused" ? true : false;
+        auctionDrawTime = false;
         processedStreakProgress.clear();
+      } else {
+        auctionActive = true;
+        auctionDrawTime = data?.drawTime === true;
+
+        if (auctionDrawTime) {
+          clearFinishGrace();
+        }
       }
 
       console.log(
@@ -1887,17 +1858,11 @@ io.on("connection", (socket) => {
       io.emit(
         "auction:state",
         {
-          state:
-            requestedState,
-
-          active:
-            auctionActive,
-
-          drawTime:
-            auctionDrawTime,
-
-          version:
-            participantVersion
+          state: requestedState,
+          active: auctionActive,
+          drawTime: auctionDrawTime,
+          drawTimeDeadline: data?.drawTimeDeadline || undefined,
+          version: participantVersion
         }
       );
     }
@@ -1910,8 +1875,7 @@ io.on("connection", (socket) => {
   socket.on(
     "auction:reset",
     () => {
-      clearTimeout(graceDrawCheckTimer);
-      graceDrawCheckTimer = null;
+      clearFinishGrace();
       participants.clear();
 
       participantVersion += 1;
@@ -1954,8 +1918,8 @@ io.on("connection", (socket) => {
         }
       );
 
+      clearFinishGrace();
       auctionActive = false;
-      auctionFinishedAt = 0;
       auctionDrawTime = false;
       processedStreakProgress.clear();
 
@@ -1984,11 +1948,9 @@ io.on("connection", (socket) => {
         "[Socket] Disconnect TikTok."
       );
 
+      clearFinishGrace();
       auctionActive = false;
-      auctionFinishedAt = 0;
       auctionDrawTime = false;
-      clearTimeout(graceDrawCheckTimer);
-      graceDrawCheckTimer = null;
       processedStreakProgress.clear();
 
       await stopConnection();
@@ -2016,48 +1978,6 @@ io.on("connection", (socket) => {
       );
     }
   );
-});
-
-/* =========================================================
-   PROCESS SAFETY — TikTok WebSocket
-   ========================================================= */
-
-process.on("uncaughtException", (err) => {
-  const message = String(err?.message || err || "");
-  const isTikTokWebSocketClose =
-    /WebSocket was closed before (?:the )?connection was established/i.test(message);
-
-  if (!isTikTokWebSocketClose) {
-    console.error("[PROCESS] Uncaught Exception:", err);
-    return;
-  }
-
-  console.warn(
-    "[TikTok] WebSocket menutup sebelum established — proses server dipertahankan dan koneksi akan reconnect."
-  );
-
-  if (!manualDisconnect && activeUsername && !reconnectTimer) {
-    tikTokConnectionState = "reconnecting";
-    emitStatus(
-      `TikTok LIVE @${activeUsername} reconnecting setelah WebSocket tertutup...`,
-      false
-    );
-
-    tikTokReconnectCount += 1;
-    reconnectTimer = setTimeout(() => {
-      reconnectTimer = null;
-      if (!manualDisconnect && activeUsername) {
-        connectToLive(activeUsername).catch((e) => {
-          tikTokLastError = formatError(e);
-          setTikTokState(
-            "reconnecting",
-            `Reconnect gagal: ${tikTokLastError}`,
-            false
-          );
-        });
-      }
-    }, 1500);
-  }
 });
 
 /* =========================================================

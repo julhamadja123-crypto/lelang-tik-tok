@@ -703,13 +703,9 @@
       el.timer.classList.remove("draw-time-active");
     }
 
-    function startDrawTime(serverDeadline = null, forceServerDraw = false) {
+    function startDrawTime(serverDeadline = null) {
       if (state.auction !== "running") return false;
-
-      // Jika server sudah menyatakan DRAW TIME dimulai, jangan menunggu
-      // participant update berikutnya. Server sudah melakukan pengecekan tie
-      // setelah grace period, jadi countdown harus aktif SEKETIKA.
-      if (!forceServerDraw && !hasCoinTie()) return false;
+      if (!hasCoinTie()) return false;
 
       stopTimer();
 
@@ -732,7 +728,10 @@
       setAuctionUI("draw");
       renderTimer();
 
-      sendAuctionState("running", true);
+      // Jangan kirim ulang state DRAW TIME ke server di sini.
+      // Server sudah mengirim state + deadline saat Draw Time dimulai.
+      // Mengirim balik akan membuat server mem-broadcast ulang state dan
+      // dapat mereset countdown ke 20 detik.
 
       showToast("DRAW TIME dimulai — 20 detik");
 
@@ -784,13 +783,18 @@
         return;
       }
 
-      // Coin berubah sebelum 00:00 tidak langsung finish.
+      // PENTING: perubahan coin selama DRAW TIME TIDAK BOLEH
+      // menghentikan countdown atau langsung FINISHED.
+      // Pemeriksaan hasil hanya dilakukan tepat ketika countdown
+      // sudah mencapai 00:00.
+      const tiedAtZero = hasCoinTie();
+
       state.drawTime = false;
       state.drawTimeRunId =
         (state.drawTimeRunId || 0) + 1;
 
-      if (hasCoinTie()) {
-        // Masih seri -> ulangi Draw Time 20 detik.
+      if (tiedAtZero) {
+        // Masih seri tepat pada 00:00 -> ulangi Draw Time 20 detik.
         state.timer = 20;
         state.timerDeadline = null;
         removeDrawTimeColor();
@@ -798,7 +802,7 @@
         return;
       }
 
-      // Coin sudah berbeda -> FINISHED.
+      // Coin sudah berbeda tepat pada 00:00 -> baru FINISHED.
       state.timer = 0;
       state.timerDeadline = null;
       removeDrawTimeColor();
@@ -2256,8 +2260,7 @@
             startDrawTime(
               Number.isFinite(serverDrawDeadline) && serverDrawDeadline > Date.now()
                 ? serverDrawDeadline
-                : null,
-              true
+                : null
             );
           } else {
             if (

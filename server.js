@@ -48,7 +48,7 @@ let auctionActive = false;
 let auctionDrawTime = false;
 let auctionFinishedAt = 0;
 let graceDrawCheckTimer = null;
-const AUCTION_FINISH_GRACE_MS = 5000;
+const AUCTION_FINISH_GRACE_MS = 4000;
 let participants = new Map();
 let participantVersion = 0;
 
@@ -1658,7 +1658,7 @@ io.on("connection", (socket) => {
     graceDrawCheckTimer = setTimeout(() => {
       graceDrawCheckTimer = null;
 
-      // Only evaluate the tie after the full 5-second grace period.
+      // Only evaluate the tie after the full 4-second grace period.
       if (auctionActive || auctionFinishedAt <= 0) return;
 
       const list = Array.from(participants.values());
@@ -1679,7 +1679,7 @@ io.on("connection", (socket) => {
         auctionFinishedAt = 0;
 
         console.log(
-          `[Auction] Grace 5 detik selesai -> COIN SERI (${coins[0]}) -> DRAW TIME 20 detik`
+          `[Auction] Grace 4 detik selesai -> COIN SERI (${coins[0]}) -> DRAW TIME 20 detik`
         );
 
         io.emit("auction:state", {
@@ -1690,7 +1690,7 @@ io.on("connection", (socket) => {
         });
       } else {
         console.log(
-          `[Auction] Grace 5 detik selesai -> coin tidak seri -> tetap FINISHED`
+          `[Auction] Grace 4 detik selesai -> coin tidak seri -> tetap FINISHED`
         );
       }
     }, AUCTION_FINISH_GRACE_MS);

@@ -482,6 +482,61 @@
 
 }
 
+
+/* =========================================================
+   BUTTON TAP FEEDBACK + MOBILE CLICK FIX
+   ========================================================= */
+.controls,
+.controls * {
+  pointer-events: auto !important;
+}
+
+.controls {
+  position: relative !important;
+  z-index: 50 !important;
+}
+
+.control,
+.connect-btn,
+.disconnect-btn,
+.save-settings,
+.icon-btn {
+  position: relative !important;
+  z-index: 51 !important;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  cursor: pointer;
+  transition: transform .12s ease, filter .12s ease, box-shadow .12s ease !important;
+}
+
+.control:active,
+.connect-btn:active,
+.disconnect-btn:active,
+.save-settings:active,
+.icon-btn:active,
+.control.is-pressed,
+.connect-btn.is-pressed,
+.disconnect-btn.is-pressed,
+.save-settings.is-pressed,
+.icon-btn.is-pressed {
+  transform: scale(.96) !important;
+  filter: brightness(1.18) !important;
+}
+
+@keyframes buttonTapPulse {
+  0% { transform: scale(1); }
+  45% { transform: scale(.94); }
+  100% { transform: scale(1); }
+}
+
+.control.is-pressed,
+.connect-btn.is-pressed,
+.disconnect-btn.is-pressed,
+.save-settings.is-pressed,
+.icon-btn.is-pressed {
+  animation: buttonTapPulse .18s ease-out !important;
+}
+
 </style>
 
 </head>

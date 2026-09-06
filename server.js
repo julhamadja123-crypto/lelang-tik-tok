@@ -1302,7 +1302,9 @@ async function connectToLive(rawUsername) {
         gift
       }
     );
-};
+
+
+  };
 
   // Standard TikTool event.
   conn.on("gift", handleGiftEvent);
@@ -1581,10 +1583,28 @@ async function connectToLive(rawUsername) {
       err
     );
 
-    emitStatus(
-      `Gagal terhubung @${username}: ${friendly}`,
+    setTikTokState(
+      "reconnecting",
+      `Gagal terhubung @${username}: ${friendly}. Mencoba reconnect...`,
       false
     );
+
+    if (!manualDisconnect && activeUsername === username && !reconnectTimer) {
+      tikTokReconnectCount += 1;
+      reconnectTimer = setTimeout(() => {
+        reconnectTimer = null;
+        if (!manualDisconnect && activeUsername === username) {
+          connectToLive(username).catch((e) => {
+            tikTokLastError = formatError(e);
+            setTikTokState(
+              "reconnecting",
+              `Reconnect gagal: ${tikTokLastError}`,
+              false
+            );
+          });
+        }
+      }, 1500);
+    }
 
     throw new Error(
       friendly
@@ -1875,6 +1895,48 @@ io.on("connection", (socket) => {
       );
     }
   );
+});
+
+/* =========================================================
+   PROCESS SAFETY — TikTok WebSocket
+   ========================================================= */
+
+process.on("uncaughtException", (err) => {
+  const message = String(err?.message || err || "");
+  const isTikTokWebSocketClose =
+    /WebSocket was closed before (?:the )?connection was established/i.test(message);
+
+  if (!isTikTokWebSocketClose) {
+    console.error("[PROCESS] Uncaught Exception:", err);
+    return;
+  }
+
+  console.warn(
+    "[TikTok] WebSocket menutup sebelum established — proses server dipertahankan dan koneksi akan reconnect."
+  );
+
+  if (!manualDisconnect && activeUsername && !reconnectTimer) {
+    tikTokConnectionState = "reconnecting";
+    emitStatus(
+      `TikTok LIVE @${activeUsername} reconnecting setelah WebSocket tertutup...`,
+      false
+    );
+
+    tikTokReconnectCount += 1;
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null;
+      if (!manualDisconnect && activeUsername) {
+        connectToLive(activeUsername).catch((e) => {
+          tikTokLastError = formatError(e);
+          setTikTokState(
+            "reconnecting",
+            `Reconnect gagal: ${tikTokLastError}`,
+            false
+          );
+        });
+      }
+    }, 1500);
+  }
 });
 
 /* =========================================================

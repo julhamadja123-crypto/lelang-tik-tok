@@ -81,6 +81,13 @@
         text-shadow: 0 0 12px rgba(250, 204, 21, 0.35) !important;
       }
 
+      /* FINISHED: tampil hijau */
+      #timer.finished-timer,
+      .finished-note {
+        color: #22c55e !important;
+        text-shadow: 0 0 12px rgba(34, 197, 94, 0.30) !important;
+      }
+
       /* Sembunyikan panel aktivitas pada layar HP agar fokus ke peserta */
       @media (max-width: 700px) {
         #activityList,

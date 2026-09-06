@@ -576,15 +576,52 @@ function giftData(event) {
      ------------------------------------------------------- */
 
   if (giftType === 1) {
-    if (!repeatEnd) {
-      console.log(
-        `[GIFT] Combo progress diabaikan sampai final: @${user.uniqueId} | ${giftName} | x${repeatCount}`
-      );
+    /*
+     * FAST COMBO PATH:
+     * TikTool dapat mengirim progress combo bertahap (x1, x2, x3, ...).
+     * Versi sebelumnya menunggu repeatEnd=true sehingga coin baru masuk
+     * ketika combo selesai. Itu bisa terasa seperti delay beberapa detik.
+     *
+     * Sekarang yang diproses adalah DELTA repeatCount:
+     *   x1 -> +1
+     *   x2 -> +1
+     *   x3 -> +1
+     *   final x3 -> +0 (anti-double)
+     *
+     * Jadi coin masuk realtime tanpa menghitung combo dua kali.
+     */
+    const comboIdentity = [
+      String(user.userId || user.uniqueId || user.nickname || "viewer").trim().toLowerCase(),
+      String(giftId || giftName || "gift").trim().toLowerCase(),
+      String(transactionId || groupId || event.msgId || event.msg_id || "no-id")
+    ].join("|");
+
+    const streakKey = `streak:${comboIdentity}`;
+    const nowStreak = Date.now();
+    const previousProgress = processedStreakProgress.get(streakKey);
+    const previousCount =
+      previousProgress && nowStreak - previousProgress.updatedAt <= GIFT_TTL
+        ? Number(previousProgress.repeatCount) || 0
+        : 0;
+
+    const currentCount = Math.max(1, Math.floor(repeatCount));
+    const delta = Math.max(0, currentCount - previousCount);
+
+    if (delta <= 0) {
+      // Final event / repeated progress already accounted for.
+      if (repeatEnd) {
+        processedStreakProgress.delete(streakKey);
+      }
       return null;
     }
 
-    // repeatCount final = jumlah gift sebenarnya dalam combo.
-    repeatCount = Math.max(1, Math.floor(repeatCount));
+    processedStreakProgress.set(streakKey, {
+      repeatCount: currentCount,
+      updatedAt: nowStreak
+    });
+
+    // From this point on, coinValue uses only the NEW combo delta.
+    repeatCount = delta;
   }
 
   /* -------------------------------------------------------
@@ -668,6 +705,13 @@ function giftData(event) {
     for (const [key, time] of processedGiftFingerprints.entries()) {
       if (now - time > GIFT_FINGERPRINT_TTL) {
         processedGiftFingerprints.delete(key);
+      }
+    }
+
+    for (const [key, progress] of processedStreakProgress.entries()) {
+      const updatedAt = Number(progress?.updatedAt) || 0;
+      if (!updatedAt || now - updatedAt > GIFT_TTL) {
+        processedStreakProgress.delete(key);
       }
     }
 

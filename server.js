@@ -2,18 +2,6 @@ const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
 
-/* =========================================================
-   EARLY PROCESS ERROR HANDLERS
-   Railway startup errors are logged before app initialization.
-   TikTok connection logic is unchanged.
-   ========================================================= */
-process.on("unhandledRejection", (reason) => {
-  console.error("[PROCESS] Unhandled Promise Rejection:", reason);
-});
-process.on("uncaughtException", (error) => {
-  console.error("[PROCESS] Uncaught Exception:", error);
-});
-
 const app = express();
 const server = http.createServer(app);
 
@@ -58,6 +46,8 @@ let tikTokReconnectCount = 0;
 
 let auctionActive = false;
 let auctionDrawTime = false;
+let auctionFinishedAt = 0;
+const AUCTION_FINISH_GRACE_MS = 5000;
 let participants = new Map();
 let participantVersion = 0;
 
@@ -1125,11 +1115,22 @@ async function connectToLive(rawUsername) {
     // Gift hanya boleh menambah coin ketika lelang sedang aktif.
     // Monitor tetap mencatat gift yang benar-benar diterima walaupun
     // lelang sedang tidak aktif.
-    if (!auctionActive) {
+    const withinFinishGrace =
+      !auctionActive &&
+      auctionFinishedAt > 0 &&
+      (Date.now() - auctionFinishedAt) <= AUCTION_FINISH_GRACE_MS;
+
+    if (!auctionActive && !withinFinishGrace) {
       console.log(
-        "[GIFT] DIABAIKAN: auction sudah selesai/tidak aktif"
+        "[GIFT] DIABAIKAN: auction sudah selesai / grace period 5 detik sudah habis"
       );
       return;
+    }
+
+    if (withinFinishGrace) {
+      console.log(
+        `[GIFT] MASUK GRACE 5 DETIK: ${Math.max(0, AUCTION_FINISH_GRACE_MS - (Date.now() - auctionFinishedAt))}ms tersisa`
+      );
     }
 
     /* =====================================================
@@ -1739,8 +1740,18 @@ io.on("connection", (socket) => {
           )
         );
 
+      const wasAuctionActive = auctionActive;
+
       auctionActive =
         requestedState === "running";
+
+      if (requestedState === "finished") {
+        auctionFinishedAt = Date.now();
+      } else if (requestedState === "running") {
+        auctionFinishedAt = 0;
+      } else if (wasAuctionActive) {
+        auctionFinishedAt = 0;
+      }
 
       auctionDrawTime =
         auctionActive && data?.drawTime === true;
@@ -1822,6 +1833,7 @@ io.on("connection", (socket) => {
       );
 
       auctionActive = false;
+      auctionFinishedAt = 0;
       auctionDrawTime = false;
       processedStreakProgress.clear();
 
@@ -1851,6 +1863,7 @@ io.on("connection", (socket) => {
       );
 
       auctionActive = false;
+      auctionFinishedAt = 0;
       auctionDrawTime = false;
       processedStreakProgress.clear();
 
@@ -1981,20 +1994,58 @@ app.get(
 );
 
 /* =========================================================
-   SERVER / RAILWAY STARTUP FIX
+   SERVER
    ========================================================= */
 
-const PORT = Number(process.env.PORT) || 3000;
+const PORT =
+  process.env.PORT || 3000;
 
-server.on("error", (error) => {
-  console.error("[SERVER] HTTP server error:", error);
-});
+server.listen(
+  PORT,
+  "0.0.0.0",
+  () => {
+    console.log(
+      "================================================"
+    );
 
-server.listen(PORT, "0.0.0.0", () => {
-  console.log("================================================");
-  console.log(`[SERVER] Server berjalan di port ${PORT}`);
-  console.log(`[SERVER] Listening on 0.0.0.0:${PORT}`);
-  console.log("[SERVER] TikTok Live Coin Auction siap.");
-  console.log("[SERVER] MODE: @tiktool/live + TIKTOOL_API_KEY");
-  console.log("================================================");
-});
+    console.log(
+      `Server berjalan di port ${PORT}`
+    );
+
+    console.log(
+      "TikTok Live Coin Auction siap."
+    );
+
+    console.log(
+      "MODE: @tiktool/live + TIKTOOL_API_KEY"
+    );
+
+    console.log(
+      "================================================"
+    );
+  }
+);
+
+/* =========================================================
+   PROCESS ERROR HANDLER
+   ========================================================= */
+
+process.on(
+  "unhandledRejection",
+  (reason) => {
+    console.error(
+      "[PROCESS] Unhandled Promise Rejection:",
+      reason
+    );
+  }
+);
+
+process.on(
+  "uncaughtException",
+  (error) => {
+    console.error(
+      "[PROCESS] Uncaught Exception:",
+      error
+    );
+  }
+);

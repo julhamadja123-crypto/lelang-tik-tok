@@ -1301,7 +1301,12 @@ async function connectToLive(rawUsername) {
     // Begitu gift membuat minimal 2 peserta dengan coin tertinggi sama,
     // DRAW TIME langsung dimulai.
     if (withinFinishGrace && !auctionActive) {
-      startDrawTimeNow("gift masuk saat grace");
+      // Gift yang masuk selama grace tetap diterima.
+      // Jika gift tersebut membuat 2 peserta dengan coin tertinggi menjadi sama,
+      // langsung mulai DRAW TIME tanpa menunggu grace 4 detik selesai.
+      if (isTopCoinTie()) {
+        startDrawTimeNow("gift masuk saat grace -> coin seri");
+      }
     }
 
     /* =====================================================
@@ -1843,7 +1848,21 @@ io.on("connection", (socket) => {
       if (requestedState === "finished") {
         auctionFinishedAt = Date.now();
         auctionDrawTime = false;
-        scheduleGraceDrawCheck();
+
+        // PENTING: jika tepat saat timer 00:00 sudah ada minimal 2 peserta
+        // dengan coin tertinggi yang sama, JANGAN masuk/menunggu grace 4 detik.
+        // Langsung pindah ke DRAW TIME 20 detik.
+        // Grace 4 detik tetap dipakai hanya sebagai fallback untuk gift yang
+        // datang terlambat setelah FINISHED ketika saat 00:00 belum seri.
+        clearTimeout(graceDrawCheckTimer);
+        graceDrawCheckTimer = null;
+
+        if (!startDrawTimeNow("FINISHED 00:00 -> coin seri")) {
+          graceDrawCheckTimer = setTimeout(() => {
+            graceDrawCheckTimer = null;
+            startDrawTimeNow("fallback grace 4 detik");
+          }, AUCTION_FINISH_GRACE_MS);
+        }
       } else if (requestedState === "running") {
         clearTimeout(graceDrawCheckTimer);
         graceDrawCheckTimer = null;

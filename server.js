@@ -1154,32 +1154,26 @@ async function connectToLive(rawUsername) {
      ------------------------------------------------------- */
 
   /*
-   * Use TikTool RELAYED mode for the production connection.
+   * Gunakan mode DIRECT yang sebelumnya stabil untuk event gift.
    *
-   * The v38 log showed that the signed/direct WebSocket was able to obtain
-   * roomId + credentials and report "connected", but no gift events reached
-   * the SDK listener. Relayed mode keeps the same @tiktool/live event API
-   * while letting TikTool's edge handle the TikTok WebSocket/protobuf side.
-   * This is especially important here because the application only needs the
-   * normalized gift/chat events, not the raw TikTok socket.
-   *
-   * TIKTOOL_MODE can be set to "direct" if a direct connection is explicitly
-   * required. Default is "relayed".
+   * Versi stable sebelumnya memakai WebSocket direct, autoReconnect, dan
+   * maxReconnectAttempts. Pertahankan konfigurasi itu agar event gift
+   * TikTok tetap masuk ke listener @tiktool/live.
    */
-  const tikToolMode =
-    String(process.env.TIKTOOL_MODE || "relayed").trim().toLowerCase();
 
+  // RESTORE MODE YANG SEBELUMNYA STABIL: direct + reconnect internal TikTool.
+  // Jangan memakai relayed sebagai default karena pada deployment terakhir
+  // connector terlihat connected tetapi tidak menerima event gift.
   const conn = new Connector({
     uniqueId: username,
     apiKey: TIKTOOL_API_KEY,
-    mode: tikToolMode === "direct" ? "direct" : "relayed",
-    autoReconnect: false,
+    autoReconnect: true,
+    maxReconnectAttempts: 5,
+    mode: "direct",
     debug: false
   });
 
-  console.log(
-    `[TikTok] Mode koneksi: ${tikToolMode === "direct" ? "direct" : "relayed"}`
-  );
+  console.log("[TikTok] Mode koneksi: direct (stable)");
 
   liveConnection = conn;
 

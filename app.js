@@ -775,7 +775,11 @@
         }
       };
 
-      tick();
+      // Pastikan angka pertama yang tampil selalu 20:00.
+      // Jangan biarkan perhitungan deadline pada tick pertama mengubahnya
+      // sebelum frame awal 20 detik sempat tampil.
+      renderTimer();
+
       state.timerInterval = setInterval(tick, 100);
 
       return true;

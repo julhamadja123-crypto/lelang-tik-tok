@@ -720,13 +720,15 @@ function giftData(event) {
   if (isCombo) {
     repeatCount = Math.max(1, Math.floor(repeatCount));
 
-    // transactionId biasanya stabil sepanjang satu combo. groupId dan
-    // createTime menjadi fallback untuk transport yang tidak menyediakan
-    // transactionId.
-    comboKey = transactionId
-      ? `tx:${transactionId}|${user.userId || user.uniqueId || user.nickname}|${giftId || giftName}`
-      : groupId
-        ? `group:${groupId}|${user.userId || user.uniqueId || user.nickname}|${giftId || giftName}`
+    // Prefer groupId when available because it normally identifies the
+    // same combo across the primary gift channel and generic event channel.
+    // Some transports can expose different transaction/message IDs for the
+    // same combo; choosing transactionId first could therefore count the
+    // same xN progress twice.
+    comboKey = groupId
+      ? `group:${groupId}|${user.userId || user.uniqueId || user.nickname}|${giftId || giftName}`
+      : transactionId
+        ? `tx:${transactionId}|${user.userId || user.uniqueId || user.nickname}|${giftId || giftName}`
         : createTime
           ? `time:${createTime}|${user.userId || user.uniqueId || user.nickname}|${giftId || giftName}`
           : null;
@@ -781,10 +783,9 @@ function giftData(event) {
   /*
    * Prioritas ID:
    *
-   * 1. transactionId
-   * 2. msgId
-   * 3. groupId + user + gift + repeatCount
-   * 4. fallback event signature
+   * 1. transactionId/msgId (normal gift)
+   * 2. groupId (combo/streak)
+   * 3. fallback event signature
    */
 
   let eventKey;
@@ -793,8 +794,13 @@ function giftData(event) {
    * IMPORTANT: transactionId/msgId/groupId alone are NOT guaranteed to be
    * unique for every gift update. Using them alone can discard a legitimate
    * gift, which makes the participant appear not to receive coins.
-   * Include the sender + gift + repeat state in the dedupe key.
-   * For streak gifts, repeatCount is already converted to the NEW delta above.
+   *
+   * For NORMAL gifts, repeat state is intentionally NOT part of the primary
+   * transaction/msg key. Some TikTok/TikTool transports can report the same
+   * one-shot gift with a different repeatEnd flag. That must still be one gift.
+   *
+   * For COMBO gifts, repeatCount remains part of the streak-progress logic
+   * above, so each NEW repeat is still counted exactly once.
    */
   const senderKey = String(
     user.userId && user.userId !== "unknown"
@@ -804,10 +810,15 @@ function giftData(event) {
   const giftKey = String(giftId || giftName || "gift").trim().toLowerCase();
   const repeatKey = `${repeatCount}|${repeatEnd ? 1 : 0}`;
 
+  // NORMAL gift: same transaction/message = same gift even if transport
+  // metadata such as repeatEnd differs between the two delivery paths.
+  // COMBO gift: keep repeat state because x1 -> x2 is a legitimate increment.
+  const primaryRepeatKey = isCombo ? `|${repeatKey}` : "";
+
   if (transactionId) {
-    eventKey = `transaction:${transactionId}|${senderKey}|${giftKey}|${repeatKey}`;
+    eventKey = `transaction:${transactionId}|${senderKey}|${giftKey}${primaryRepeatKey}`;
   } else if (msgId) {
-    eventKey = `msg:${msgId}|${senderKey}|${giftKey}|${repeatKey}`;
+    eventKey = `msg:${msgId}|${senderKey}|${giftKey}${primaryRepeatKey}`;
   } else if (groupId) {
     // groupId dapat dipakai untuk beberapa update/gift dalam combo.
     // Jangan jadikan groupId saja sebagai ID unik selama 60 detik karena

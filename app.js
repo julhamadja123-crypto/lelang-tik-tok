@@ -751,11 +751,16 @@
           return;
         }
 
+        // Perbedaan jam server/browser tidak boleh membuat awal Draw Time
+        // terbaca 21 detik. Nilai awal selalu dibatasi maksimum 20.
         const remaining =
-          Math.max(
-            0,
-            Math.ceil(
-              (deadline - Date.now()) / 1000
+          Math.min(
+            20,
+            Math.max(
+              0,
+              Math.ceil(
+                (deadline - Date.now()) / 1000
+              )
             )
           );
 
@@ -2319,8 +2324,13 @@
           }
         }
 
+        // Server mengirim state "running" saat Draw Time aktif.
+        // Jangan sampai label tersebut menimpa tulisan DRAW TIME.
         setAuctionUI(
-          next
+          state.drawTime === true &&
+          next === "running"
+            ? "draw"
+            : next
         );
 
         renderTimer();

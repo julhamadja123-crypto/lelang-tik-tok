@@ -184,10 +184,14 @@ function checkGraceAfterGift() {
 const processedGiftEvents = new Map();
 const processedGiftFingerprints = new Map();
 const processedStreakProgress = new Map();
+// Protect against the same normal gift arriving through both TikTool
+// `gift` and generic `event` transports with different IDs.
+const processedCrossTransportGifts = new Map();
 let processedGiftEventsCleanupAt = 0;
 
 const GIFT_TTL = 60 * 1000;
 const GIFT_FINGERPRINT_TTL = 1500;
+const CROSS_TRANSPORT_TTL = 2500;
 // TikTok/TikTool can occasionally deliver the same normal gift through
 // two channels with different transaction/message IDs. Keep a very short
 // semantic guard for that case; combo/streak gifts use their own delta logic.
@@ -853,6 +857,12 @@ function giftData(event) {
       }
     }
 
+    for (const [key, info] of processedCrossTransportGifts.entries()) {
+      if (!info || now - info.at > CROSS_TRANSPORT_TTL) {
+        processedCrossTransportGifts.delete(key);
+      }
+    }
+
     processedGiftEventsCleanupAt = now + 5000;
   }
 
@@ -1179,6 +1189,7 @@ async function connectToLiveInternal(rawUsername) {
   processedGiftEvents.clear();
   processedGiftFingerprints.clear();
   processedStreakProgress.clear();
+  processedCrossTransportGifts.clear();
   processedGiftEventsCleanupAt = 0;
 
   manualDisconnect = false;
@@ -1266,7 +1277,7 @@ async function connectToLiveInternal(rawUsername) {
   // listener. Without this guard, one 1-coin gift can be counted twice.
   const handledGiftObjects = new WeakSet();
 
-  const handleGiftEvent = (incomingEvent) => {
+  const handleGiftEvent = (incomingEvent, deliveryChannel = "gift") => {
     if (incomingEvent && typeof incomingEvent === "object") {
       if (handledGiftObjects.has(incomingEvent)) {
         console.log("[GIFT] DUPLICATE listener event diabaikan");
@@ -1299,6 +1310,40 @@ async function connectToLiveInternal(rawUsername) {
         "[GIFT] event diterima tetapi gift tidak valid/complete atau duplicate/progress combo"
       );
       return;
+    }
+
+    /* -----------------------------------------------------
+       CROSS-TRANSPORT DUPLICATE GUARD
+       -----------------------------------------------------
+       TikTool pada mode relayed kadang mengantarkan SATU gift yang sama
+       melalui listener `gift` dan channel generic `event`. Kedua payload
+       dapat memiliki object/transaction/msg ID berbeda sehingga guard ID
+       biasa tidak selalu cukup.
+
+       Jangan dedup semua gift berdasarkan sender+gift saja: dua gift sah
+       dari orang yang sama tetap harus dihitung. Guard ini hanya aktif bila
+       gift yang sama terlihat dari CHANNEL YANG BERBEDA dalam waktu singkat.
+    ----------------------------------------------------- */
+    const crossTransportKey = !gift.isCombo
+      ? `cross:${String(gift.userId || gift.uniqueId || gift.username || gift.nickname || "viewer").trim().toLowerCase()}|${String(gift.giftId || gift.giftName || "gift").trim().toLowerCase()}|normal`
+      : null;
+
+    if (crossTransportKey) {
+      const previousCross = processedCrossTransportGifts.get(crossTransportKey);
+      if (
+        previousCross &&
+        previousCross.channel !== deliveryChannel &&
+        eventReceivedAt - previousCross.at <= CROSS_TRANSPORT_TTL
+      ) {
+        console.log(
+          `[GIFT] DUPLICATE cross-transport diabaikan: ${crossTransportKey} | ${previousCross.channel} -> ${deliveryChannel}`
+        );
+        return;
+      }
+      processedCrossTransportGifts.set(crossTransportKey, {
+        at: eventReceivedAt,
+        channel: deliveryChannel
+      });
     }
 
     noteTikTokEvent("gift");
@@ -1521,7 +1566,7 @@ async function connectToLiveInternal(rawUsername) {
   };
 
   // Standard TikTool event.
-  conn.on("gift", handleGiftEvent);
+  conn.on("gift", (event) => handleGiftEvent(event, "gift"));
 
   // Lightweight diagnostics: confirms that the live socket is actually
   // delivering named events. This does not alter auction processing.
@@ -1579,7 +1624,7 @@ async function connectToLiveInternal(rawUsername) {
     // Some @tiktool/live transports deliver the gift ONLY through the
     // generic "event" channel. The primary "gift" listener and this
     // compatibility path share the same duplicate protection.
-    handleGiftEvent(candidate);
+    handleGiftEvent(candidate, "event");
   });
 
   // TikTool v3 juga menyediakan streamEnd saat creator benar-benar

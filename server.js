@@ -440,7 +440,9 @@ function userData(event) {
 
   const uniqueId =
     user.uniqueId ||
+    user.unique_id ||
     event?.uniqueId ||
+    event?.unique_id ||
     event?.nickname ||
     "Viewer";
 
@@ -804,10 +806,16 @@ function giftData(event) {
    * Include the sender + gift + repeat state in the dedupe key.
    * For streak gifts, repeatCount is already converted to the NEW delta above.
    */
+  // Gunakan uniqueId TikTok sebagai identitas dedup utama karena
+  // wrapper/transport TikTool kadang mengirim userId berbeda atau hanya
+  // mengisi userId pada salah satu salinan event. uniqueId tetap stabil
+  // untuk viewer yang sama sehingga salinan tersebut tidak dihitung 2x.
   const senderKey = String(
-    user.userId && user.userId !== "unknown"
-      ? user.userId
-      : user.uniqueId || user.nickname || "viewer"
+    user.uniqueId && user.uniqueId !== "Viewer"
+      ? user.uniqueId
+      : user.userId && user.userId !== "unknown"
+        ? user.userId
+        : user.nickname || "viewer"
   ).trim().toLowerCase();
   const giftKey = String(giftId || giftName || "gift").trim().toLowerCase();
   // Gift NON-COMBO adalah satu transaksi/gift, bukan dua event berbeda
@@ -1325,7 +1333,7 @@ async function connectToLiveInternal(rawUsername) {
        gift yang sama terlihat dari CHANNEL YANG BERBEDA dalam waktu singkat.
     ----------------------------------------------------- */
     const crossTransportKey = !gift.isCombo
-      ? `cross:${String(gift.userId || gift.uniqueId || gift.username || gift.nickname || "viewer").trim().toLowerCase()}|${String(gift.giftId || gift.giftName || "gift").trim().toLowerCase()}|normal`
+      ? `cross:${String(gift.uniqueId || gift.username || gift.userId || gift.nickname || "viewer").trim().toLowerCase()}|${String(gift.giftId || gift.giftName || "gift").trim().toLowerCase()}|normal`
       : null;
 
     if (crossTransportKey) {

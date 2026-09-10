@@ -21,12 +21,15 @@ app.use(express.static(__dirname));
 
 let TikTokLiveConnection = null;
 let liveConnection = null;
-let fastGiftSocket = null;
-let fastGiftSocketGeneration = 0;
 let activeUsername = null;
 let reconnectTimer = null;
 let liveCheckTimer = null;
 let manualDisconnect = false;
+
+// Prevent two browser/socket connect requests from replacing a healthy
+// TikTok connection while the first connection is still being established.
+let connectRequestInFlight = null;
+let connectRequestUsername = null;
 const LIVE_CHECK_INTERVAL = 10000;
 
 /* =========================================================
@@ -1072,122 +1075,10 @@ function startLiveStatusMonitor() {
 }
 
 /* =========================================================
-   FAST GIFT WEBSOCKET FALLBACK
-   =========================================================
-   The SDK connection remains untouched. This second, documented
-   TikTool WebSocket is used only as a fast gift/event path when the
-   SDK transport reports CONNECTED but does not dispatch gift events.
-   Duplicate protection in giftData() prevents double-counting when
-   both transports deliver the same gift.
-   ========================================================= */
-
-function closeFastGiftSocket() {
-  fastGiftSocketGeneration += 1;
-  const ws = fastGiftSocket;
-  fastGiftSocket = null;
-
-  if (!ws) return;
-
-  try {
-    if (typeof ws.close === "function") ws.close();
-    else if (typeof ws.terminate === "function") ws.terminate();
-  } catch (err) {
-    console.warn("[TikTokFastGift] close:", err?.message || err);
-  }
-}
-
-function startFastGiftSocket(username, handleGiftEvent) {
-  closeFastGiftSocket();
-
-  const apiKey = String(process.env.TIKTOOL_API_KEY || "").trim();
-  if (!apiKey || !username || typeof handleGiftEvent !== "function") return;
-
-  const generation = fastGiftSocketGeneration;
-  const url =
-    `wss://api.tik.tools?uniqueId=${encodeURIComponent(username)}` +
-    `&apiKey=${encodeURIComponent(apiKey)}`;
-
-  let WebSocketCtor = globalThis.WebSocket;
-
-  try {
-    if (!WebSocketCtor) {
-      WebSocketCtor = require("ws");
-    }
-  } catch (err) {
-    console.warn("[TikTokFastGift] WebSocket module tidak tersedia:", err?.message || err);
-    return;
-  }
-
-  try {
-    const ws = new WebSocketCtor(url);
-    fastGiftSocket = ws;
-
-    const onOpen = () => {
-      if (generation !== fastGiftSocketGeneration) return;
-      console.log(`[TikTokFastGift] FAST GIFT WS CONNECTED @${username}`);
-    };
-
-    const onMessage = (raw) => {
-      if (generation !== fastGiftSocketGeneration) return;
-
-      try {
-        const text =
-          typeof raw === "string"
-            ? raw
-            : Buffer.isBuffer(raw)
-              ? raw.toString("utf8")
-              : raw?.data !== undefined
-                ? (typeof raw.data === "string" ? raw.data : Buffer.from(raw.data).toString("utf8"))
-                : String(raw || "");
-
-        if (!text) return;
-
-        const packet = JSON.parse(text);
-        const type = String(packet?.event || packet?.type || "").toLowerCase();
-
-        if (type === "gift") {
-          console.log("[TikTokFastGift] GIFT EVENT -> auction fast path");
-          handleGiftEvent(packet?.data && typeof packet.data === "object" ? packet.data : packet);
-        }
-      } catch (err) {
-        console.warn("[TikTokFastGift] parse event:", err?.message || err);
-      }
-    };
-
-    const onClose = () => {
-      if (generation !== fastGiftSocketGeneration) return;
-      if (fastGiftSocket === ws) fastGiftSocket = null;
-      console.warn(`[TikTokFastGift] FAST GIFT WS terputus @${username}`);
-    };
-
-    const onError = (err) => {
-      if (generation !== fastGiftSocketGeneration) return;
-      console.warn("[TikTokFastGift] WS error:", err?.message || err);
-    };
-
-    if (typeof ws.on === "function") {
-      ws.on("open", onOpen);
-      ws.on("message", onMessage);
-      ws.on("close", onClose);
-      ws.on("error", onError);
-    } else {
-      ws.addEventListener("open", onOpen);
-      ws.addEventListener("message", onMessage);
-      ws.addEventListener("close", onClose);
-      ws.addEventListener("error", onError);
-    }
-  } catch (err) {
-    console.warn("[TikTokFastGift] gagal membuka FAST GIFT WS:", err?.message || err);
-    fastGiftSocket = null;
-  }
-}
-
-/* =========================================================
    STOP TIKTOK CONNECTION
    ========================================================= */
 
 async function stopConnection() {
-  closeFastGiftSocket();
   clearTimeout(reconnectTimer);
   clearTimeout(liveCheckTimer);
   liveCheckTimer = null;
@@ -1217,7 +1108,7 @@ async function stopConnection() {
    BAGIAN KONEKSI DIPERTAHANKAN
    ========================================================= */
 
-async function connectToLive(rawUsername) {
+async function connectToLiveInternal(rawUsername) {
   const Connector =
     await loadTikTokConnector();
 
@@ -1308,7 +1199,7 @@ async function connectToLive(rawUsername) {
     debug: false
   });
 
-  console.log("[TikTok] Mode koneksi: SDK + FAST GIFT WebSocket (stable connection + fast gift path)");
+  console.log("[TikTok] Mode koneksi: direct (stable gift path)");
 
   liveConnection = conn;
 
@@ -1332,23 +1223,15 @@ async function connectToLive(rawUsername) {
 
     const event = unwrapTikTokEvent(incomingEvent);
 
-    console.log(
-      "[GIFT] RAW EVENT diterima",
-      JSON.stringify({
-        giftId: event?.giftId,
-        giftName: event?.giftName,
-        diamondCount: event?.diamondCount,
-        repeatCount: event?.repeatCount,
-        repeatEnd: event?.repeatEnd,
-        giftType: event?.giftType,
-        combo: event?.combo,
-        user: event?.user?.uniqueId || event?.uniqueId,
-        type: event?.type,
-        event: event?.event
-      })
-    );
-
     // FAST PATH: process the gift immediately; no artificial delay.
+    // Keep Railway logging lightweight so a burst of gifts cannot spend
+    // unnecessary time serializing the complete raw TikTok payload.
+    console.log(
+      `[GIFT] RAW @${event?.user?.uniqueId || event?.uniqueId || "Viewer"} | ` +
+      `${event?.giftName || event?.gift?.name || "Gift"} | ` +
+      `diamond=${event?.diamondCount ?? event?.diamond_count ?? "?"} | ` +
+      `repeat=${event?.repeatCount ?? event?.repeat_count ?? 1}`
+    );
 
     /* -----------------------------------------------------
        PARSE GIFT
@@ -1551,6 +1434,19 @@ async function connectToLive(rawUsername) {
       }
     );
 
+    // Authoritative leaderboard snapshot. Some frontend versions listen to
+    // auction:participants rather than participant:update. Send it in the
+    // same synchronous gift path so the new coin appears immediately.
+    io.emit(
+      "auction:participants",
+      {
+        version:
+          participantVersion,
+        participants:
+          Array.from(participants.values())
+      }
+    );
+
     /*
      * Snapshot seluruh peserta dikirim sesaat setelah event utama.
      * Ini mencegah Array.from(...) + serialisasi daftar peserta
@@ -1573,12 +1469,6 @@ async function connectToLive(rawUsername) {
 
   // Standard TikTool event.
   conn.on("gift", handleGiftEvent);
-
-  // FAST GIFT PATH: use TikTool's documented raw WebSocket in parallel.
-  // This does not replace the stable SDK connection; it only guarantees
-  // gift delivery when the SDK socket is connected but its named-event
-  // emitter is silent. giftData() deduplicates same gifts across both paths.
-  startFastGiftSocket(username, handleGiftEvent);
 
   // Lightweight diagnostics: confirms that the live socket is actually
   // delivering named events. This does not alter auction processing.
@@ -1746,25 +1636,15 @@ async function connectToLive(rawUsername) {
 
     tikTokReconnectCount += 1;
 
-    reconnectTimer =
-      setTimeout(() => {
-        if (
-          !manualDisconnect &&
-          activeUsername
-        ) {
-          connectToLive(
-            activeUsername
-          ).catch((err) => {
-            const friendly = formatError(err);
-            tikTokLastError = friendly;
-            setTikTokState(
-              "reconnecting",
-              `Reconnect gagal: ${friendly}`,
-              false
-            );
-          });
-        }
-      }, 5000);
+    // @tiktool/live is already configured with autoReconnect.
+    // Do NOT call connectToLive() here: that function first disconnects
+    // the current connector, which can create the "Koneksi TikTok
+    // digantikan oleh koneksi lain" loop seen on Railway.
+    // Leave the same connector alive so its internal reconnect can restore
+    // the WebSocket without replacing the gift listener.
+    console.log(
+      `[TikTok] Menunggu autoReconnect @${activeUsername} tanpa membuat connector baru.`
+    );
   });
 
   /* =======================================================
@@ -1871,6 +1751,44 @@ async function connectToLive(rawUsername) {
   }
 }
 
+/*
+ * Single-flight wrapper. A second socket/browser request for the same
+ * username must wait for the first request instead of stopping/replacing
+ * its connector. A different username is allowed to replace the old one.
+ */
+async function connectToLive(rawUsername) {
+  const username = cleanUsername(rawUsername);
+
+  if (!username) {
+    throw new Error("Username TikTok kosong.");
+  }
+
+  if (
+    connectRequestInFlight &&
+    connectRequestUsername === username
+  ) {
+    console.log(
+      `[TikTok] Menunggu koneksi yang sedang berjalan @${username}.`
+    );
+    return connectRequestInFlight;
+  }
+
+  connectRequestUsername = username;
+
+  const request = connectToLiveInternal(username);
+  connectRequestInFlight = request;
+
+  try {
+    return await request;
+  } finally {
+    if (connectRequestInFlight === request) {
+      connectRequestInFlight = null;
+      connectRequestUsername = null;
+    }
+  }
+}
+
+
 /* =========================================================
    SOCKET CONNECTION
    ========================================================= */
@@ -1966,6 +1884,41 @@ io.on("connection", (socket) => {
           throw new Error(
             "Masukkan username TikTok terlebih dahulu."
           );
+        }
+
+        const requestedUsername = cleanUsername(data.username);
+
+        // Do not let a second click / duplicate browser event tear down
+        // the connection that is already connecting or connected.
+        if (
+          requestedUsername &&
+          requestedUsername === activeUsername &&
+          liveConnection &&
+          ["connecting", "connected_waiting", "connected", "reconnecting"].includes(
+            tikTokConnectionState
+          )
+        ) {
+          console.log(
+            `[TikTok] Duplicate connect request ignored for @${requestedUsername}`
+          );
+          socket.emit("live:status", {
+            message:
+              tikTokConnectionState === "connected"
+                ? `TikTok TERHUBUNG ke @${requestedUsername}`
+                : `TikTok @${requestedUsername} sedang ${tikTokConnectionState}...`,
+            ok: tikTokConnectionState === "connected",
+            username: activeUsername,
+            phase: tikTokConnectionState,
+            eventCount: tikTokEventCount,
+            giftCount: tikTokGiftCount,
+            lastEventAt: tikTokLastEventAt || null,
+            lastGiftAt: tikTokLastGiftAt || null,
+            connectedAt: tikTokConnectedAt || null,
+            reconnectCount: tikTokReconnectCount,
+            error: tikTokLastError || null,
+            serverTime: Date.now()
+          });
+          return;
         }
 
         await connectToLive(
@@ -2301,7 +2254,7 @@ server.listen(
     );
 
     console.log(
-      "MODE: @tiktool/live + FAST GIFT WS + TIKTOOL_API_KEY"
+      "MODE: @tiktool/live + TIKTOOL_API_KEY"
     );
 
     console.log(

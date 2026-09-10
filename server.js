@@ -1226,13 +1226,6 @@ async function connectToLiveInternal(rawUsername) {
     // FAST PATH: process the gift immediately; no artificial delay.
     // Keep Railway logging lightweight so a burst of gifts cannot spend
     // unnecessary time serializing the complete raw TikTok payload.
-    console.log(
-      `[GIFT] RAW @${event?.user?.uniqueId || event?.uniqueId || "Viewer"} | ` +
-      `${event?.giftName || event?.gift?.name || "Gift"} | ` +
-      `diamond=${event?.diamondCount ?? event?.diamond_count ?? "?"} | ` +
-      `repeat=${event?.repeatCount ?? event?.repeat_count ?? 1}`
-    );
-
     /* -----------------------------------------------------
        PARSE GIFT
        -----------------------------------------------------
@@ -1254,10 +1247,6 @@ async function connectToLiveInternal(rawUsername) {
     }
 
     noteTikTokEvent("gift");
-
-    console.log(
-      `[GIFT] GIFT VALID | auctionActive=${auctionActive} | drawTime=${auctionDrawTime} | ${gift.giftName} x${gift.repeatCount}`
-    );
 
     // Gift hanya boleh menambah coin ketika lelang sedang aktif.
     // Monitor tetap mencatat gift yang benar-benar diterima walaupun
@@ -1434,33 +1423,23 @@ async function connectToLiveInternal(rawUsername) {
       }
     );
 
-    // Authoritative leaderboard snapshot. Some frontend versions listen to
-    // auction:participants rather than participant:update. Send it in the
-    // same synchronous gift path so the new coin appears immediately.
-    io.emit(
-      "auction:participants",
-      {
-        version:
-          participantVersion,
-        participants:
-          Array.from(participants.values())
-      }
-    );
-
     /*
-     * Snapshot seluruh peserta dikirim sesaat setelah event utama.
-     * Ini mencegah Array.from(...) + serialisasi daftar peserta
-     * menahan jalur gift ketika peserta sudah banyak.
-     * Tidak mengubah perhitungan coin maupun urutan event utama.
+     * FAST PATH: jangan serialisasi seluruh leaderboard secara sinkron pada
+     * jalur gift. `participant:update` di atas sudah membawa participant
+     * terbaru dan menjadi event utama untuk leaderboard.
+     *
+     * Untuk kompatibilitas frontend lama yang masih mendengarkan
+     * `auction:participants`, kirim snapshot setelah callback gift selesai
+     * sehingga tidak menahan TikTok -> participant:update.
      */
-    // Capture version/snapshot sekarang agar snapshot lama tidak dapat
-    // menimpa coin terbaru ketika beberapa gift masuk sangat cepat.
-    // Kirim snapshot authoritative segera setelah participant diperbarui.
-    // Tidak ditunda dengan setImmediate agar client langsung menerima
-    // daftar peserta terbaru setelah gift diproses.
-    // Jangan kirim snapshot penuh pada setiap gift.
-    // Snapshot tetap tersedia saat client connect/reconnect; untuk gift
-    // aktif cukup participant:update agar jalur TikTok -> UI lebih ringan.
+    const snapshotVersion = participantVersion;
+    const snapshotParticipants = Array.from(participants.values());
+    setImmediate(() => {
+      io.emit("auction:participants", {
+        version: snapshotVersion,
+        participants: snapshotParticipants
+      });
+    });
 
     // A late gift during the 4-second grace can create a tie.
     // Start DRAW TIME immediately instead of waiting for the grace timer.

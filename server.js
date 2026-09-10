@@ -25,6 +25,11 @@ let activeUsername = null;
 let reconnectTimer = null;
 let liveCheckTimer = null;
 let manualDisconnect = false;
+
+// Prevent two browser/socket connect requests from replacing a healthy
+// TikTok connection while the first connection is still being established.
+let connectRequestInFlight = null;
+let connectRequestUsername = null;
 const LIVE_CHECK_INTERVAL = 10000;
 
 /* =========================================================
@@ -1103,7 +1108,7 @@ async function stopConnection() {
    BAGIAN KONEKSI DIPERTAHANKAN
    ========================================================= */
 
-async function connectToLive(rawUsername) {
+async function connectToLiveInternal(rawUsername) {
   const Connector =
     await loadTikTokConnector();
 
@@ -1218,23 +1223,15 @@ async function connectToLive(rawUsername) {
 
     const event = unwrapTikTokEvent(incomingEvent);
 
-    console.log(
-      "[GIFT] RAW EVENT diterima",
-      JSON.stringify({
-        giftId: event?.giftId,
-        giftName: event?.giftName,
-        diamondCount: event?.diamondCount,
-        repeatCount: event?.repeatCount,
-        repeatEnd: event?.repeatEnd,
-        giftType: event?.giftType,
-        combo: event?.combo,
-        user: event?.user?.uniqueId || event?.uniqueId,
-        type: event?.type,
-        event: event?.event
-      })
-    );
-
     // FAST PATH: process the gift immediately; no artificial delay.
+    // Keep Railway logging lightweight so a burst of gifts cannot spend
+    // unnecessary time serializing the complete raw TikTok payload.
+    console.log(
+      `[GIFT] RAW @${event?.user?.uniqueId || event?.uniqueId || "Viewer"} | ` +
+      `${event?.giftName || event?.gift?.name || "Gift"} | ` +
+      `diamond=${event?.diamondCount ?? event?.diamond_count ?? "?"} | ` +
+      `repeat=${event?.repeatCount ?? event?.repeat_count ?? 1}`
+    );
 
     /* -----------------------------------------------------
        PARSE GIFT
@@ -1437,6 +1434,19 @@ async function connectToLive(rawUsername) {
       }
     );
 
+    // Authoritative leaderboard snapshot. Some frontend versions listen to
+    // auction:participants rather than participant:update. Send it in the
+    // same synchronous gift path so the new coin appears immediately.
+    io.emit(
+      "auction:participants",
+      {
+        version:
+          participantVersion,
+        participants:
+          Array.from(participants.values())
+      }
+    );
+
     /*
      * Snapshot seluruh peserta dikirim sesaat setelah event utama.
      * Ini mencegah Array.from(...) + serialisasi daftar peserta
@@ -1626,25 +1636,15 @@ async function connectToLive(rawUsername) {
 
     tikTokReconnectCount += 1;
 
-    reconnectTimer =
-      setTimeout(() => {
-        if (
-          !manualDisconnect &&
-          activeUsername
-        ) {
-          connectToLive(
-            activeUsername
-          ).catch((err) => {
-            const friendly = formatError(err);
-            tikTokLastError = friendly;
-            setTikTokState(
-              "reconnecting",
-              `Reconnect gagal: ${friendly}`,
-              false
-            );
-          });
-        }
-      }, 5000);
+    // @tiktool/live is already configured with autoReconnect.
+    // Do NOT call connectToLive() here: that function first disconnects
+    // the current connector, which can create the "Koneksi TikTok
+    // digantikan oleh koneksi lain" loop seen on Railway.
+    // Leave the same connector alive so its internal reconnect can restore
+    // the WebSocket without replacing the gift listener.
+    console.log(
+      `[TikTok] Menunggu autoReconnect @${activeUsername} tanpa membuat connector baru.`
+    );
   });
 
   /* =======================================================
@@ -1751,6 +1751,44 @@ async function connectToLive(rawUsername) {
   }
 }
 
+/*
+ * Single-flight wrapper. A second socket/browser request for the same
+ * username must wait for the first request instead of stopping/replacing
+ * its connector. A different username is allowed to replace the old one.
+ */
+async function connectToLive(rawUsername) {
+  const username = cleanUsername(rawUsername);
+
+  if (!username) {
+    throw new Error("Username TikTok kosong.");
+  }
+
+  if (
+    connectRequestInFlight &&
+    connectRequestUsername === username
+  ) {
+    console.log(
+      `[TikTok] Menunggu koneksi yang sedang berjalan @${username}.`
+    );
+    return connectRequestInFlight;
+  }
+
+  connectRequestUsername = username;
+
+  const request = connectToLiveInternal(username);
+  connectRequestInFlight = request;
+
+  try {
+    return await request;
+  } finally {
+    if (connectRequestInFlight === request) {
+      connectRequestInFlight = null;
+      connectRequestUsername = null;
+    }
+  }
+}
+
+
 /* =========================================================
    SOCKET CONNECTION
    ========================================================= */
@@ -1846,6 +1884,41 @@ io.on("connection", (socket) => {
           throw new Error(
             "Masukkan username TikTok terlebih dahulu."
           );
+        }
+
+        const requestedUsername = cleanUsername(data.username);
+
+        // Do not let a second click / duplicate browser event tear down
+        // the connection that is already connecting or connected.
+        if (
+          requestedUsername &&
+          requestedUsername === activeUsername &&
+          liveConnection &&
+          ["connecting", "connected_waiting", "connected", "reconnecting"].includes(
+            tikTokConnectionState
+          )
+        ) {
+          console.log(
+            `[TikTok] Duplicate connect request ignored for @${requestedUsername}`
+          );
+          socket.emit("live:status", {
+            message:
+              tikTokConnectionState === "connected"
+                ? `TikTok TERHUBUNG ke @${requestedUsername}`
+                : `TikTok @${requestedUsername} sedang ${tikTokConnectionState}...`,
+            ok: tikTokConnectionState === "connected",
+            username: activeUsername,
+            phase: tikTokConnectionState,
+            eventCount: tikTokEventCount,
+            giftCount: tikTokGiftCount,
+            lastEventAt: tikTokLastEventAt || null,
+            lastGiftAt: tikTokLastGiftAt || null,
+            connectedAt: tikTokConnectedAt || null,
+            reconnectCount: tikTokReconnectCount,
+            error: tikTokLastError || null,
+            serverTime: Date.now()
+          });
+          return;
         }
 
         await connectToLive(

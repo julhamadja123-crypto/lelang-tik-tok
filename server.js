@@ -723,12 +723,16 @@ function giftData(event) {
     // transactionId biasanya stabil sepanjang satu combo. groupId dan
     // createTime menjadi fallback untuk transport yang tidak menyediakan
     // transactionId.
-    comboKey = transactionId
-      ? `tx:${transactionId}|${user.userId || user.uniqueId || user.nickname}|${giftId || giftName}`
-      : groupId
-        ? `group:${groupId}|${user.userId || user.uniqueId || user.nickname}|${giftId || giftName}`
-        : createTime
-          ? `time:${createTime}|${user.userId || user.uniqueId || user.nickname}|${giftId || giftName}`
+    // Untuk satu combo, TikTool dapat mengirim update progress/final
+    // dengan transactionId yang berbeda. Karena itu identitas combo harus
+    // memakai identitas yang lebih stabil terlebih dahulu: groupId lalu
+    // createTime, baru transactionId sebagai fallback.
+    comboKey = groupId
+      ? `group:${groupId}|${user.userId || user.uniqueId || user.nickname}|${giftId || giftName}`
+      : createTime
+        ? `time:${createTime}|${user.userId || user.uniqueId || user.nickname}|${giftId || giftName}`
+        : transactionId
+          ? `tx:${transactionId}|${user.userId || user.uniqueId || user.nickname}|${giftId || giftName}`
           : null;
 
     if (comboKey) {

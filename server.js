@@ -706,7 +706,12 @@ function giftData(event) {
      ------------------------------------------------------- */
 
   if (isCombo) {
-    if (!repeatEnd && repeatCount > 1) {
+    // TikTok/TikTool sends the same streak in two stages: a progress
+    // event (repeatEnd=false) and a final event (repeatEnd=true).
+    // NEVER count the progress event, even when repeatCount is 1.
+    // Otherwise a single 1-coin gift can become 2 coins when the final
+    // event arrives immediately afterwards.
+    if (!repeatEnd) {
       console.log(
         `[GIFT] Combo progress diabaikan sampai final: @${user.uniqueId} | ${giftName} | x${repeatCount}`
       );

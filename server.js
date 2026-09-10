@@ -714,8 +714,14 @@ function giftData(event) {
      COIN VALUE
      ------------------------------------------------------- */
 
+  // COIN PESERTA = NILAI COIN/DIAMOND GIFT TIKTOK.
+  // Gift biasa (non-combo) TIDAK boleh dikalikan repeatCount.
+  // Hanya gift streak/combo (giftType === 1) yang memakai repeatCount
+  // final sebagai jumlah gift yang benar-benar terkirim.
   const coinValue =
-    resolvedDiamondCount * repeatCount;
+    giftType === 1
+      ? resolvedDiamondCount * repeatCount
+      : resolvedDiamondCount;
 
   if (
     !Number.isFinite(coinValue) ||
@@ -1413,16 +1419,9 @@ async function connectToLive(rawUsername) {
     // Kirim snapshot authoritative segera setelah participant diperbarui.
     // Tidak ditunda dengan setImmediate agar client langsung menerima
     // daftar peserta terbaru setelah gift diproses.
-    io.emit(
-      "auction:participants",
-      {
-        version:
-          participantVersion,
-
-        participants:
-          Array.from(participants.values())
-      }
-    );
+    // Jangan kirim snapshot penuh pada setiap gift.
+    // Snapshot tetap tersedia saat client connect/reconnect; untuk gift
+    // aktif cukup participant:update agar jalur TikTok -> UI lebih ringan.
 
     // A late gift during the 4-second grace can create a tie.
     // Start DRAW TIME immediately instead of waiting for the grace timer.

@@ -521,69 +521,40 @@ function giftData(event) {
   // object bertingkat. Ambil field yang benar-benar merepresentasikan
   // nilai gift sebelum memakai fallback generik. Jangan memakai
   // repeatCount sebagai coin karena itu hanya jumlah pengulangan gift.
+  // IMPORTANT: use TikTool's explicit diamondCount as the canonical
+  // per-gift value. Fields such as coinValue/coins/coinCount can be
+  // cumulative or wrapper-derived values and were the main suspect for
+  // the first 1-coin gift becoming 2. Never use those fields as the
+  // primary coin source.
   const diamondCount = numberPositive(
     event.diamondCount,
     event.diamond_count,
     event.diamondCost,
     event.diamond_cost,
-    event.coinValue,
-    event.coin_value,
-    event.coinCount,
-    event.coin_count,
-    event.coins,
-    event.diamondValue,
-    event.diamond_value,
-    event.coin,
-    event.coin_value_total,
 
     event.gift?.diamondCount,
     event.gift?.diamond_count,
     event.gift?.diamondCost,
     event.gift?.diamond_cost,
-    event.gift?.coinValue,
-    event.gift?.coin_value,
-    event.gift?.coinCount,
-    event.gift?.coin_count,
-    event.gift?.coins,
-    event.gift?.diamondValue,
-    event.gift?.diamond_value,
-    event.gift?.coin,
 
     event.giftDetails?.diamondCount,
     event.giftDetails?.diamond_count,
     event.giftDetails?.diamondCost,
     event.giftDetails?.diamond_cost,
-    event.giftDetails?.coinValue,
-    event.giftDetails?.coin_value,
-    event.giftDetails?.coinCount,
-    event.giftDetails?.coin_count,
-    event.giftDetails?.coins,
-    event.giftDetails?.diamondValue,
-    event.giftDetails?.diamond_value,
-    event.giftDetails?.coin,
 
     event.extendedGiftInfo?.diamondCount,
     event.extendedGiftInfo?.diamond_count,
     event.extendedGiftInfo?.diamondCost,
-    event.extendedGiftInfo?.diamond_cost,
-    event.extendedGiftInfo?.coinValue,
-    event.extendedGiftInfo?.coin_value,
-    event.extendedGiftInfo?.coinCount,
-    event.extendedGiftInfo?.coin_count,
-    event.extendedGiftInfo?.coins,
-    event.extendedGiftInfo?.diamondValue,
-    event.extendedGiftInfo?.diamond_value,
-    event.extendedGiftInfo?.coin
+    event.extendedGiftInfo?.diamond_cost
   );
 
   // Be tolerant of additional TikTool nesting (for example payloads
-  // wrapped in giftInfo/giftData). Only inspect known value field names.
+  // wrapped in giftInfo/giftData). Only inspect explicit diamond-value
+  // fields; never infer the participant coin total from cumulative fields.
   let resolvedDiamondCount = diamondCount;
   if (resolvedDiamondCount <= 0) {
     const valueKeys = new Set([
-      "diamondCount", "diamond_count", "diamondCost", "diamond_cost",
-      "coinValue", "coin_value", "coinCount", "coin_count", "coins",
-      "diamondValue", "diamond_value", "coin"
+      "diamondCount", "diamond_count", "diamondCost", "diamond_cost"
     ]);
 
     const scanGiftValue = (value, depth = 0, seen = new Set()) => {
@@ -693,7 +664,8 @@ function giftData(event) {
 
   if (resolvedDiamondCount <= 0) {
     console.log(
-      `[GIFT] ${giftName} diabaikan: nilai coin/diamond tidak ditemukan pada payload.`
+      `[GIFT] ${giftName} diabaikan: diamondCount/diamondCost tidak ditemukan. ` +
+      `coinValue/coins tidak dipakai sebagai fallback agar tidak terjadi double/cumulative coin.`
     );
 
     return null;
@@ -1016,7 +988,7 @@ function giftData(event) {
      ------------------------------------------------------- */
 
   console.log(
-    `[GIFT] @${user.uniqueId} | ${giftName} | ${resolvedDiamondCount} x ${repeatCount} = ${coinValue}`
+    `[GIFT] @${user.uniqueId} | ${giftName} | diamond=${resolvedDiamondCount} | repeat=${repeatCount} | combo=${isCombo} | +${coinValue}`
   );
 
   /* -------------------------------------------------------

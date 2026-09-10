@@ -907,7 +907,13 @@ function giftData(event) {
    * Hanya berlaku sangat singkat agar dua gift sah yang dikirim terpisah
    * tetap dapat dihitung.
    */
-  const semanticFingerprint = null;
+  // Cross-transport guard: the same TikTok gift can arrive through both
+  // `gift` and generic `event` with different message/transaction IDs.
+  // createTime gives a stable identity when available. Without it, use a
+  // very short guard so legitimate later gifts are still counted.
+  const semanticFingerprint = fingerprintTime
+    ? `semantic:${senderKey}|${giftKey}|${resolvedDiamondCount}|${isCombo ? repeatCount : "normal"}|${fingerprintTime}`
+    : `semantic-fast:${senderKey}|${giftKey}|${resolvedDiamondCount}|${isCombo ? repeatCount : "normal"}`;
 
   if (
     giftFingerprint &&
@@ -941,7 +947,7 @@ function giftData(event) {
 
     if (
       previousSemanticTime &&
-      now - previousSemanticTime <= GIFT_SEMANTIC_TTL
+      now - previousSemanticTime <= (fingerprintTime ? GIFT_SEMANTIC_TTL : 120)
     ) {
       console.log(
         `[GIFT] DUPLICATE semantic diabaikan: ${semanticFingerprint}`

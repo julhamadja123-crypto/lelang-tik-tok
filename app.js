@@ -2417,103 +2417,12 @@
           `[GIFT] participant diterima: @${gift.participant.uniqueId || gift.participant.username || "Viewer"} = ${Number(gift.participant.coins) || 0} coin`
         );
 
-        // Server mengirim participant lengkap dengan total coin.
-        // Merge berdasarkan identitas agar perubahan userId TikTok
-        // tidak membuat peserta baru/terpisah di layar.
-        const incomingParticipant = {
-          ...(gift.participant || {})
-        };
-
-        let key = participantKey(incomingParticipant);
-        let existing = state.participants.get(key);
-
-        if (!existing) {
-          const incomingUnique =
-            String(
-              incomingParticipant.uniqueId ||
-              incomingParticipant.username ||
-              ""
-            ).trim().toLowerCase();
-
-          if (incomingUnique) {
-            for (const [existingKey, p] of state.participants.entries()) {
-              const existingUnique =
-                String(
-                  p?.uniqueId ||
-                  p?.username ||
-                  ""
-                ).trim().toLowerCase();
-
-              if (existingUnique && existingUnique === incomingUnique) {
-                key = existingKey;
-                existing = p;
-                break;
-              }
-            }
-          }
-        }
-
-        const existingCoins = Number(existing?.coins) || 0;
-        const incomingCoins = Number(incomingParticipant.coins);
-
-        // Server sudah menghitung TOTAL coin peserta.
-        // Jangan tambahkan gift.coinValue lagi di browser karena event
-        // yang sama juga dikirim melalui auction:participant:update.
-        // Penambahan kedua inilah yang dapat membuat 1 coin menjadi 2.
-        const safeCoins = Number.isFinite(incomingCoins)
-          ? Math.max(incomingCoins, existingCoins)
-          : existingCoins;
-
-        const mergedParticipant = {
-          ...(existing || {}),
-          ...incomingParticipant,
-          coins: safeCoins,
-          userId:
-            incomingParticipant.userId ||
-            existing?.userId ||
-            "unknown",
-          uniqueId:
-            incomingParticipant.uniqueId ||
-            existing?.uniqueId ||
-            incomingParticipant.username ||
-            "unknown",
-          username:
-            incomingParticipant.username ||
-            existing?.username ||
-            incomingParticipant.uniqueId ||
-            "unknown",
-          nickname:
-            incomingParticipant.nickname ||
-            existing?.nickname ||
-            "Viewer",
-          avatar:
-            incomingParticipant.avatar ||
-            existing?.avatar ||
-            null,
-          joinedAt:
-            existing?.joinedAt ||
-            incomingParticipant.joinedAt ||
-            Date.now()
-        };
-
-        state.participants.set(
-          key,
-          mergedParticipant
-        );
-
-        renderParticipants();
-
         /*
-         * DRAW TIME:
-         * Gift tetap diproses selama DRAW TIME.
-         * PERUBAHAN COIN TIDAK BOLEH mengakhiri DRAW TIME lebih awal.
-         * Hasil hanya diperiksa ketika timer benar-benar mencapai 00:00.
+         * Server sudah mengirim participant:update sebagai jalur utama
+         * perubahan leaderboard. Jangan merge/render participant dua kali
+         * di sini karena event live:gift dan participant:update berasal dari
+         * gift yang sama. live:gift hanya dipakai untuk activity/log.
          */
-
-        /*
-         * Tidak ada popup gift.
-         */
-
         addActivity(
           gift
         );

@@ -642,6 +642,13 @@ function giftData(event) {
     0;
 
   const giftType = Number(giftTypeRaw) || 0;
+  const isCombo =
+    giftType === 1 ||
+    event.combo === true ||
+    event.combo === 1 ||
+    event.combo === "1" ||
+    event.gift?.combo === true ||
+    event.gift?.combo === 1;
 
   /* -------------------------------------------------------
      REPEAT END
@@ -698,7 +705,7 @@ function giftData(event) {
      combo sehingga event final yang terkirim ulang tetap ter-dedup.
      ------------------------------------------------------- */
 
-  if (giftType === 1) {
+  if (isCombo) {
     if (!repeatEnd && repeatCount > 1) {
       console.log(
         `[GIFT] Combo progress diabaikan sampai final: @${user.uniqueId} | ${giftName} | x${repeatCount}`
@@ -719,7 +726,7 @@ function giftData(event) {
   // Hanya gift streak/combo (giftType === 1) yang memakai repeatCount
   // final sebagai jumlah gift yang benar-benar terkirim.
   const coinValue =
-    giftType === 1
+    isCombo
       ? resolvedDiamondCount * repeatCount
       : resolvedDiamondCount;
 
@@ -859,7 +866,7 @@ function giftData(event) {
    * tetap dapat dihitung.
    */
   const semanticFingerprint =
-    giftType !== 1
+    !isCombo
       ? `semantic:${senderKey}|${giftKey}|${resolvedDiamondCount}|${repeatCount}`
       : null;
 
@@ -952,6 +959,7 @@ function giftData(event) {
     coinValue,
 
     giftType,
+    combo: isCombo,
     repeatEnd,
 
     msgId,
@@ -1177,11 +1185,11 @@ async function connectToLive(rawUsername) {
     apiKey: TIKTOOL_API_KEY,
     autoReconnect: true,
     maxReconnectAttempts: 5,
-    mode: "relayed",
+    mode: "direct",
     debug: false
   });
 
-  console.log("[TikTok] Mode koneksi: relayed (gift-event fix)");
+  console.log("[TikTok] Mode koneksi: direct (stable gift path)");
 
   liveConnection = conn;
 
@@ -1204,6 +1212,22 @@ async function connectToLive(rawUsername) {
     }
 
     const event = unwrapTikTokEvent(incomingEvent);
+
+    console.log(
+      "[GIFT] RAW EVENT diterima",
+      JSON.stringify({
+        giftId: event?.giftId,
+        giftName: event?.giftName,
+        diamondCount: event?.diamondCount,
+        repeatCount: event?.repeatCount,
+        repeatEnd: event?.repeatEnd,
+        giftType: event?.giftType,
+        combo: event?.combo,
+        user: event?.user?.uniqueId || event?.uniqueId,
+        type: event?.type,
+        event: event?.event
+      })
+    );
 
     // FAST PATH: process the gift immediately; no artificial delay.
 

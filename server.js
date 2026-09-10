@@ -1390,6 +1390,39 @@ async function connectToLiveInternal(rawUsername) {
       });
     }
 
+    /*
+     * HARD RECEIPT GUARD FOR NORMAL GIFTS
+     *
+     * Some TikTool relayed deliveries can arrive as a second event after
+     * the short rapid-replay window and with fresh transport IDs. A normal
+     * gift must never be applied twice merely because its transport metadata
+     * changed. Keep a semantic receipt for the sender+gift for the same
+     * upstream event timestamp when available; when no timestamp exists,
+     * use a short sender+gift receipt window. This guard is server-side, so
+     * the participant total can only be incremented once per actual receipt.
+     */
+    if (!gift.isCombo) {
+      const receiptTime =
+        gift.createTime !== null && gift.createTime !== undefined && String(gift.createTime).trim() !== ""
+          ? String(gift.createTime).trim()
+          : null;
+      const receiptKey = receiptTime
+        ? `receipt:${String(gift.uniqueId || gift.username || gift.userId || gift.nickname || "viewer").trim().toLowerCase()}|${String(gift.giftId || gift.giftName || "gift").trim().toLowerCase()}|${receiptTime}`
+        : null;
+
+      if (receiptKey) {
+        const previousReceipt = processedCrossTransportGifts.get(receiptKey);
+        if (previousReceipt) {
+          console.log(`[GIFT] DUPLICATE receipt diabaikan: ${receiptKey}`);
+          return;
+        }
+        processedCrossTransportGifts.set(receiptKey, {
+          at: eventReceivedAt,
+          channel: deliveryChannel
+        });
+      }
+    }
+
     noteTikTokEvent("gift");
 
     // Diagnostic only: measure upstream delivery delay without changing

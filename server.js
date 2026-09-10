@@ -190,12 +190,14 @@ const processedCrossTransportGifts = new Map();
 let processedGiftEventsCleanupAt = 0;
 
 const GIFT_TTL = 60 * 1000;
-const GIFT_FINGERPRINT_TTL = 1500;
-const CROSS_TRANSPORT_TTL = 2500;
+const GIFT_FINGERPRINT_TTL = 5000;
+const CROSS_TRANSPORT_TTL = 5000;
 // TikTok/TikTool can occasionally deliver the same normal gift through
-// two channels with different transaction/message IDs. Keep a very short
-// semantic guard for that case; combo/streak gifts use their own delta logic.
-const GIFT_SEMANTIC_TTL = 1500;
+// two channels with different transaction/message IDs. Keep a short semantic guard for that case; combo/streak gifts use their own delta logic.
+const GIFT_SEMANTIC_TTL = 5000;
+// TikTool can replay the first normal gift with a different event ID after
+// the initial delivery. The longer semantic window prevents that replay
+// from becoming a second coin while still keeping combo handling separate.
 
 /* =========================================================
    LOAD TIKTOK CONNECTOR
@@ -980,7 +982,7 @@ function giftData(event) {
 
     if (
       previousSemanticTime &&
-      now - previousSemanticTime <= (fingerprintTime ? GIFT_SEMANTIC_TTL : 1500)
+      now - previousSemanticTime <= GIFT_SEMANTIC_TTL
     ) {
       console.log(
         `[GIFT] DUPLICATE semantic diabaikan: ${semanticFingerprint}`
@@ -1349,6 +1351,40 @@ async function connectToLiveInternal(rawUsername) {
         return;
       }
       processedCrossTransportGifts.set(crossTransportKey, {
+        at: eventReceivedAt,
+        channel: deliveryChannel
+      });
+    }
+
+    /*
+     * FINAL RAPID-REPLAY GUARD FOR NORMAL GIFTS
+     *
+     * Beberapa versi TikTool mengirim salinan gift pertama melalui listener
+     * yang SAMA, tetapi dengan transactionId/msgId/createTime berbeda.
+     * Karena itu guard cross-transport di atas tidak menangkapnya.
+     *
+     * Hanya untuk NON-COMBO dan hanya jendela sangat pendek (1200 ms).
+     * Tujuannya menangkap replay event yang identik secara semantik tanpa
+     * menahan gift normal yang dikirim beberapa detik kemudian.
+     */
+    if (!gift.isCombo) {
+      const rapidKey =
+        `rapid:${String(gift.uniqueId || gift.username || gift.userId || gift.nickname || "viewer").trim().toLowerCase()}` +
+        `|${String(gift.giftId || gift.giftName || "gift").trim().toLowerCase()}`;
+
+      const previousRapid = processedCrossTransportGifts.get(rapidKey);
+
+      if (
+        previousRapid &&
+        eventReceivedAt - previousRapid.at <= 1200
+      ) {
+        console.log(
+          `[GIFT] DUPLICATE rapid-replay diabaikan: ${rapidKey} | +${eventReceivedAt - previousRapid.at}ms`
+        );
+        return;
+      }
+
+      processedCrossTransportGifts.set(rapidKey, {
         at: eventReceivedAt,
         channel: deliveryChannel
       });

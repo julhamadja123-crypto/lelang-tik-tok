@@ -195,7 +195,7 @@ const CROSS_TRANSPORT_TTL = 2500;
 // TikTok/TikTool can occasionally deliver the same normal gift through
 // two channels with different transaction/message IDs. Keep a very short
 // semantic guard for that case; combo/streak gifts use their own delta logic.
-const GIFT_SEMANTIC_TTL = 300;
+const GIFT_SEMANTIC_TTL = 1500;
 
 /* =========================================================
    LOAD TIKTOK CONNECTOR
@@ -972,7 +972,7 @@ function giftData(event) {
 
     if (
       previousSemanticTime &&
-      now - previousSemanticTime <= (fingerprintTime ? GIFT_SEMANTIC_TTL : 120)
+      now - previousSemanticTime <= (fingerprintTime ? GIFT_SEMANTIC_TTL : 1500)
     ) {
       console.log(
         `[GIFT] DUPLICATE semantic diabaikan: ${semanticFingerprint}`

@@ -698,46 +698,73 @@ function giftData(event) {
   const createTime = event.createTime || event.create_time || event.timestamp || null;
 
   /* -------------------------------------------------------
-     GIFT STREAK / COMBO
+     GIFT STREAK / COMBO — FAST INCREMENTAL MODE
 
-     TikTool menjelaskan bahwa gift combo/streak mengirim beberapa
-     update dengan repeatCount yang terus naik, lalu SATU event final
-     dengan repeatEnd=true yang membawa jumlah combo final.
+     Jangan menunggu repeatEnd=true. TikTok/TikTool dapat mengirim
+     progress x1 lebih dulu lalu final x1 beberapa detik kemudian.
+     Menunggu final membuat gift terlihat terlambat di leaderboard.
 
-     Untuk auction, jangan menghitung event progress satu per satu.
-     Ambil hanya event final dan gunakan repeatCount final sebagai
-     jumlah gift. TransactionId TikTool bersifat stabil untuk satu
-     combo sehingga event final yang terkirim ulang tetap ter-dedup.
+     Sekarang setiap kenaikan repeatCount langsung dihitung sebagai DELTA:
+       x1 -> +1 gift
+       x2 -> +1 gift lagi
+       x3 -> +1 gift lagi
+       final x3 -> +0 (sudah pernah dihitung)
+
+     Dengan cara ini gift langsung masuk peserta, tetapi final event
+     tidak menggandakan coin.
      ------------------------------------------------------- */
 
-  if (isCombo) {
-    // TikTok/TikTool sends the same streak in two stages: a progress
-    // event (repeatEnd=false) and a final event (repeatEnd=true).
-    // NEVER count the progress event, even when repeatCount is 1.
-    // Otherwise a single 1-coin gift can become 2 coins when the final
-    // event arrives immediately afterwards.
-    if (!repeatEnd) {
-      console.log(
-        `[GIFT] Combo progress diabaikan sampai final: @${user.uniqueId} | ${giftName} | x${repeatCount}`
-      );
-      return null;
-    }
+  let comboKey = null;
+  let comboDelta = 0;
 
-    // repeatCount final = jumlah gift sebenarnya dalam combo.
+  if (isCombo) {
     repeatCount = Math.max(1, Math.floor(repeatCount));
+
+    // transactionId biasanya stabil sepanjang satu combo. groupId dan
+    // createTime menjadi fallback untuk transport yang tidak menyediakan
+    // transactionId.
+    comboKey = transactionId
+      ? `tx:${transactionId}|${user.userId || user.uniqueId || user.nickname}|${giftId || giftName}`
+      : groupId
+        ? `group:${groupId}|${user.userId || user.uniqueId || user.nickname}|${giftId || giftName}`
+        : createTime
+          ? `time:${createTime}|${user.userId || user.uniqueId || user.nickname}|${giftId || giftName}`
+          : null;
+
+    if (comboKey) {
+      const previousRepeat = Number(processedStreakProgress.get(comboKey) || 0);
+      comboDelta = repeatCount - previousRepeat;
+
+      if (comboDelta <= 0) {
+        console.log(
+          `[GIFT] Combo update sudah diproses: @${user.uniqueId} | ${giftName} | x${repeatCount} | final=${repeatEnd}`
+        );
+        return null;
+      }
+
+      processedStreakProgress.set(comboKey, repeatCount);
+
+      console.log(
+        `[GIFT-FAST] Combo @${user.uniqueId} | ${giftName} | x${repeatCount} | delta=${comboDelta} | final=${repeatEnd}`
+      );
+    } else {
+      // Jika transport benar-benar tidak menyediakan identitas combo,
+      // proses event pertama agar gift tidak tertahan. Event berikutnya
+      // tetap dilindungi oleh duplicate/fingerprint guard.
+      comboDelta = 1;
+    }
   }
 
   /* -------------------------------------------------------
      COIN VALUE
      ------------------------------------------------------- */
 
-  // COIN PESERTA = NILAI COIN/DIAMOND GIFT TIKTOK.
-  // Gift biasa (non-combo) TIDAK boleh dikalikan repeatCount.
-  // Hanya gift streak/combo (giftType === 1) yang memakai repeatCount
-  // final sebagai jumlah gift yang benar-benar terkirim.
+  // Coin peserta = nilai coin/diamond TikTok.
+  // Gift biasa tetap 1:1. Combo hanya menambahkan DELTA gift yang belum
+  // pernah diproses sehingga tidak double.
   const coinValue =
     isCombo
-      ? resolvedDiamondCount * repeatCount
+      ? resolvedDiamondCount * comboDelta
       : resolvedDiamondCount;
 
   if (

@@ -975,6 +975,7 @@ function giftData(event) {
     msgId,
     transactionId,
     groupId,
+    createTime,
 
     avatar: user.avatar
   };
@@ -1221,6 +1222,7 @@ async function connectToLiveInternal(rawUsername) {
       handledGiftObjects.add(incomingEvent);
     }
 
+    const eventReceivedAt = Date.now();
     const event = unwrapTikTokEvent(incomingEvent);
 
     // FAST PATH: process the gift immediately; no artificial delay.
@@ -1247,6 +1249,26 @@ async function connectToLiveInternal(rawUsername) {
     }
 
     noteTikTokEvent("gift");
+
+    // Diagnostic only: measure upstream delivery delay without changing
+    // the TikTok connection or gift-processing logic.
+    const rawCreateTime = gift.createTime || null;
+    let upstreamGiftDelayMs = null;
+    if (rawCreateTime !== null && rawCreateTime !== undefined && rawCreateTime !== "") {
+      const numericCreateTime = Number(rawCreateTime);
+      if (Number.isFinite(numericCreateTime)) {
+        const createTimeMs = numericCreateTime < 100000000000
+          ? numericCreateTime * 1000
+          : numericCreateTime;
+        if (createTimeMs > 0) {
+          upstreamGiftDelayMs = Math.max(0, eventReceivedAt - createTimeMs);
+        }
+      }
+    }
+    console.log(
+      `[GIFT-FAST] @${gift.uniqueId || gift.username || "Viewer"} | serverReceive=${eventReceivedAt}` +
+      (upstreamGiftDelayMs !== null ? ` | upstreamDelay=${upstreamGiftDelayMs}ms` : "")
+    );
 
     // Gift hanya boleh menambah coin ketika lelang sedang aktif.
     // Monitor tetap mencatat gift yang benar-benar diterima walaupun
@@ -1393,6 +1415,8 @@ async function connectToLiveInternal(rawUsername) {
 
     const payload = {
       ...gift,
+      serverReceivedAt: eventReceivedAt,
+      upstreamGiftDelayMs,
 
       participant,
 

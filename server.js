@@ -184,6 +184,11 @@ function checkGraceAfterGift() {
 const processedGiftEvents = new Map();
 const processedGiftFingerprints = new Map();
 const processedStreakProgress = new Map();
+// Cross-channel guard: the same gift can arrive once on `gift` and once on
+// generic `event` with different IDs. Keep the source in the ledger so two
+// legitimate gifts from the same viewer are still allowed when they arrive
+// through the same channel.
+const processedCrossChannelGifts = new Map();
 let processedGiftEventsCleanupAt = 0;
 
 const GIFT_TTL = 60 * 1000;
@@ -191,7 +196,7 @@ const GIFT_FINGERPRINT_TTL = 1500;
 // TikTok/TikTool can occasionally deliver the same normal gift through
 // two channels with different transaction/message IDs. Keep a very short
 // semantic guard for that case; combo/streak gifts use their own delta logic.
-const GIFT_SEMANTIC_TTL = 300;
+const GIFT_SEMANTIC_TTL = 500;
 
 /* =========================================================
    LOAD TIKTOK CONNECTOR
@@ -720,15 +725,13 @@ function giftData(event) {
   if (isCombo) {
     repeatCount = Math.max(1, Math.floor(repeatCount));
 
-    // Prefer groupId when available because it normally identifies the
-    // same combo across the primary gift channel and generic event channel.
-    // Some transports can expose different transaction/message IDs for the
-    // same combo; choosing transactionId first could therefore count the
-    // same xN progress twice.
-    comboKey = groupId
-      ? `group:${groupId}|${user.userId || user.uniqueId || user.nickname}|${giftId || giftName}`
-      : transactionId
-        ? `tx:${transactionId}|${user.userId || user.uniqueId || user.nickname}|${giftId || giftName}`
+    // transactionId biasanya stabil sepanjang satu combo. groupId dan
+    // createTime menjadi fallback untuk transport yang tidak menyediakan
+    // transactionId.
+    comboKey = transactionId
+      ? `tx:${transactionId}|${user.userId || user.uniqueId || user.nickname}|${giftId || giftName}`
+      : groupId
+        ? `group:${groupId}|${user.userId || user.uniqueId || user.nickname}|${giftId || giftName}`
         : createTime
           ? `time:${createTime}|${user.userId || user.uniqueId || user.nickname}|${giftId || giftName}`
           : null;
@@ -783,9 +786,10 @@ function giftData(event) {
   /*
    * Prioritas ID:
    *
-   * 1. transactionId/msgId (normal gift)
-   * 2. groupId (combo/streak)
-   * 3. fallback event signature
+   * 1. transactionId
+   * 2. msgId
+   * 3. groupId + user + gift + repeatCount
+   * 4. fallback event signature
    */
 
   let eventKey;
@@ -794,13 +798,8 @@ function giftData(event) {
    * IMPORTANT: transactionId/msgId/groupId alone are NOT guaranteed to be
    * unique for every gift update. Using them alone can discard a legitimate
    * gift, which makes the participant appear not to receive coins.
-   *
-   * For NORMAL gifts, repeat state is intentionally NOT part of the primary
-   * transaction/msg key. Some TikTok/TikTool transports can report the same
-   * one-shot gift with a different repeatEnd flag. That must still be one gift.
-   *
-   * For COMBO gifts, repeatCount remains part of the streak-progress logic
-   * above, so each NEW repeat is still counted exactly once.
+   * Include the sender + gift + repeat state in the dedupe key.
+   * For streak gifts, repeatCount is already converted to the NEW delta above.
    */
   const senderKey = String(
     user.userId && user.userId !== "unknown"
@@ -810,15 +809,19 @@ function giftData(event) {
   const giftKey = String(giftId || giftName || "gift").trim().toLowerCase();
   const repeatKey = `${repeatCount}|${repeatEnd ? 1 : 0}`;
 
-  // NORMAL gift: same transaction/message = same gift even if transport
-  // metadata such as repeatEnd differs between the two delivery paths.
-  // COMBO gift: keep repeat state because x1 -> x2 is a legitimate increment.
-  const primaryRepeatKey = isCombo ? `|${repeatKey}` : "";
-
+  // Untuk gift BIASA, repeatCount/repeatEnd bukan identitas gift.
+  // TikTok/TikTool kadang mengirim ulang event yang sama dengan state
+  // repeat yang berubah sedikit. Jika repeatKey dimasukkan ke eventKey,
+  // event duplikat tersebut dianggap gift baru dan coin bisa menjadi 2x.
+  // Combo tetap memakai repeat progress di bawah melalui comboKey.
   if (transactionId) {
-    eventKey = `transaction:${transactionId}|${senderKey}|${giftKey}${primaryRepeatKey}`;
+    eventKey = isCombo
+      ? `transaction:${transactionId}|${senderKey}|${giftKey}|${repeatKey}`
+      : `transaction:${transactionId}|${senderKey}|${giftKey}`;
   } else if (msgId) {
-    eventKey = `msg:${msgId}|${senderKey}|${giftKey}${primaryRepeatKey}`;
+    eventKey = isCombo
+      ? `msg:${msgId}|${senderKey}|${giftKey}|${repeatKey}`
+      : `msg:${msgId}|${senderKey}|${giftKey}`;
   } else if (groupId) {
     // groupId dapat dipakai untuk beberapa update/gift dalam combo.
     // Jangan jadikan groupId saja sebagai ID unik selama 60 detik karena
@@ -855,6 +858,12 @@ function giftData(event) {
       }
     }
 
+    for (const [key, entry] of processedCrossChannelGifts.entries()) {
+      if (!entry || now - entry.time > 5000) {
+        processedCrossChannelGifts.delete(key);
+      }
+    }
+
     processedGiftEventsCleanupAt = now + 5000;
   }
 
@@ -881,7 +890,9 @@ function giftData(event) {
       : null;
 
   const giftFingerprint = fingerprintTime
-    ? `fingerprint:${senderKey}|${giftKey}|${resolvedDiamondCount}|${repeatCount}|${repeatEnd ? 1 : 0}|${fingerprintTime}`
+    ? (isCombo
+        ? `fingerprint:${senderKey}|${giftKey}|${resolvedDiamondCount}|${repeatCount}|${repeatEnd ? 1 : 0}|${fingerprintTime}`
+        : `fingerprint:${senderKey}|${giftKey}|${resolvedDiamondCount}|${fingerprintTime}`)
     : null;
 
   /*
@@ -915,7 +926,7 @@ function giftData(event) {
    */
   const semanticFingerprint =
     !isCombo
-      ? `semantic:${senderKey}|${giftKey}|${resolvedDiamondCount}|${repeatCount}`
+      ? `semantic:${senderKey}|${giftKey}|${resolvedDiamondCount}`
       : null;
 
   if (
@@ -944,7 +955,7 @@ function giftData(event) {
     }
   }
 
-  if (semanticFingerprint) {
+  if (semanticFingerprint && !fingerprintTime) {
     const previousSemanticTime =
       processedGiftFingerprints.get(semanticFingerprint);
 
@@ -975,7 +986,7 @@ function giftData(event) {
     processedGiftFingerprints.set(transportFingerprint, now);
   }
 
-  if (semanticFingerprint) {
+  if (semanticFingerprint && !fingerprintTime) {
     processedGiftFingerprints.set(semanticFingerprint, now);
   }
 
@@ -1254,7 +1265,7 @@ async function connectToLiveInternal(rawUsername) {
   // listener. Without this guard, one 1-coin gift can be counted twice.
   const handledGiftObjects = new WeakSet();
 
-  const handleGiftEvent = (incomingEvent) => {
+  const handleGiftEvent = (incomingEvent, sourceChannel = "gift") => {
     if (incomingEvent && typeof incomingEvent === "object") {
       if (handledGiftObjects.has(incomingEvent)) {
         console.log("[GIFT] DUPLICATE listener event diabaikan");
@@ -1287,6 +1298,44 @@ async function connectToLiveInternal(rawUsername) {
         "[GIFT] event diterima tetapi gift tidak valid/complete atau duplicate/progress combo"
       );
       return;
+    }
+
+    /* -----------------------------------------------------
+       CROSS-CHANNEL DUPLICATE GUARD
+       -----------------------------------------------------
+       TikTool kadang mengirim satu gift lewat `gift` lalu mengulang
+       payload yang sama lewat generic `event`, tetapi transactionId/msgId
+       dapat berbeda. WeakSet tidak menangkapnya karena objeknya berbeda.
+
+       Kunci memakai pengirim + gift + nilai + waktu upstream. Karena sender
+       ada di kunci, gift bersamaan dari peserta berbeda tidak akan saling
+       terhapus. Jika createTime tidak tersedia, jangan gunakan guard ini;
+       biarkan ID/fingerprint biasa yang menentukan.
+    */
+    const crossTimeRaw = gift.createTime;
+    let crossTime = null;
+    if (crossTimeRaw !== null && crossTimeRaw !== undefined && String(crossTimeRaw).trim() !== "") {
+      const n = Number(crossTimeRaw);
+      if (Number.isFinite(n) && n > 0) {
+        crossTime = n < 100000000000 ? n * 1000 : n;
+      } else {
+        crossTime = String(crossTimeRaw).trim();
+      }
+    }
+
+    if (crossTime !== null) {
+      const crossSender = String(gift.userId || gift.uniqueId || gift.username || gift.nickname || "viewer").trim().toLowerCase();
+      const crossGift = String(gift.giftId || gift.giftName || "gift").trim().toLowerCase();
+      const crossKey = `cross:${crossSender}|${crossGift}|${Number(gift.diamondCount) || 0}|${crossTime}|${gift.repeatCount || 1}|${gift.combo ? 1 : 0}`;
+      const previousCross = processedCrossChannelGifts.get(crossKey);
+      const nowCross = Date.now();
+
+      if (previousCross && previousCross.source !== sourceChannel && nowCross - previousCross.time <= 5000) {
+        console.log(`[GIFT] DUPLICATE cross-channel diabaikan: ${crossKey}`);
+        return;
+      }
+
+      processedCrossChannelGifts.set(crossKey, { time: nowCross, source: sourceChannel });
     }
 
     noteTikTokEvent("gift");
@@ -1570,7 +1619,7 @@ async function connectToLiveInternal(rawUsername) {
     // Some @tiktool/live transports deliver the gift ONLY through the
     // generic "event" channel. The primary "gift" listener and this
     // compatibility path share the same duplicate protection.
-    handleGiftEvent(candidate);
+    handleGiftEvent(candidate, "event");
   });
 
   // TikTool v3 juga menyediakan streamEnd saat creator benar-benar
@@ -2087,6 +2136,7 @@ io.on("connection", (socket) => {
       processedGiftEvents.clear();
       processedGiftFingerprints.clear();
       processedStreakProgress.clear();
+      processedCrossChannelGifts.clear();
       processedGiftEventsCleanupAt = 0;
 
       io.emit(

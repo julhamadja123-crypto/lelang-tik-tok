@@ -699,7 +699,7 @@ function giftData(event) {
      ------------------------------------------------------- */
 
   if (giftType === 1) {
-    if (!repeatEnd) {
+    if (!repeatEnd && repeatCount > 1) {
       console.log(
         `[GIFT] Combo progress diabaikan sampai final: @${user.uniqueId} | ${giftName} | x${repeatCount}`
       );
@@ -1171,11 +1171,11 @@ async function connectToLive(rawUsername) {
     apiKey: TIKTOOL_API_KEY,
     autoReconnect: true,
     maxReconnectAttempts: 5,
-    mode: "direct",
+    mode: "relayed",
     debug: false
   });
 
-  console.log("[TikTok] Mode koneksi: direct (stable)");
+  console.log("[TikTok] Mode koneksi: relayed (gift-event fix)");
 
   liveConnection = conn;
 
@@ -1431,6 +1431,12 @@ async function connectToLive(rawUsername) {
 
   // Standard TikTool event.
   conn.on("gift", handleGiftEvent);
+
+  // Lightweight diagnostics: confirms that the live socket is actually
+  // delivering named events. This does not alter auction processing.
+  for (const eventName of ["roomInfo", "like", "member", "social", "subscribe", "viewerCount"]) {
+    conn.on(eventName, () => noteTikTokEvent(eventName));
+  }
 
   // Compatibility with transports that expose all events via `event`.
   // Only use this fallback when the event transport is actually needed.

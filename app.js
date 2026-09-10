@@ -2418,11 +2418,49 @@
         );
 
         /*
-         * Server sudah mengirim participant:update sebagai jalur utama
-         * perubahan leaderboard. Jangan merge/render participant dua kali
-         * di sini karena event live:gift dan participant:update berasal dari
-         * gift yang sama. live:gift hanya dipakai untuk activity/log.
+         * FAST DISPLAY: participant pada live:gift adalah snapshot
+         * authoritative dari server. Tampilkan langsung agar gift terlihat
+         * secepat event socket tiba. PENTING: jangan pernah menambahkan
+         * gift.coinValue di browser; server sudah menghitung total coin.
+         * participant:update yang datang sesudahnya tetap menjadi sinkronisasi
+         * authoritative dan tidak menambah coin lagi.
          */
+        const incoming = { ...gift.participant };
+        let key = participantKey(incoming);
+        let existing = state.participants.get(key);
+
+        if (!existing) {
+          const incomingUnique = String(
+            incoming.uniqueId || incoming.username || ""
+          ).trim().toLowerCase();
+
+          if (incomingUnique) {
+            for (const [existingKey, p] of state.participants.entries()) {
+              const existingUnique = String(
+                p?.uniqueId || p?.username || ""
+              ).trim().toLowerCase();
+
+              if (existingUnique && existingUnique === incomingUnique) {
+                key = existingKey;
+                existing = p;
+                break;
+              }
+            }
+          }
+        }
+
+        const incomingCoins = Number(incoming.coins);
+        const existingCoins = Number(existing?.coins) || 0;
+
+        state.participants.set(key, {
+          ...(existing || {}),
+          ...incoming,
+          coins: Number.isFinite(incomingCoins)
+            ? Math.max(incomingCoins, existingCoins)
+            : existingCoins
+        });
+        renderParticipants();
+
         addActivity(
           gift
         );

@@ -1480,22 +1480,19 @@ async function connectToLiveInternal(rawUsername) {
     );
 
     /*
-     * FAST PATH: jangan serialisasi seluruh leaderboard secara sinkron pada
-     * jalur gift. `participant:update` di atas sudah membawa participant
-     * terbaru dan menjadi event utama untuk leaderboard.
+     * IMPORTANT:
+     * Jangan mengirim `auction:participants` lagi setelah setiap gift.
      *
-     * Untuk kompatibilitas frontend lama yang masih mendengarkan
-     * `auction:participants`, kirim snapshot setelah callback gift selesai
-     * sehingga tidak menahan TikTok -> participant:update.
+     * `auction:participant:update` di atas SUDAH membawa participant terbaru.
+     * Mengirim snapshot leaderboard kedua untuk gift yang sama membuat
+     * frontend yang masih memproses kedua event dapat menerapkan perubahan
+     * dua kali. Gejalanya persis seperti:
+     *   gift sensei = 1 -> ketika gift peserta lain masuk, sensei menjadi 2.
+     *
+     * Snapshot `auction:participants` tetap dikirim saat socket baru connect
+     * dan saat reset, jadi state awal tetap aman. Jalur gift sekarang hanya
+     * memakai satu event update agar 1 gift = 1 perubahan coin.
      */
-    const snapshotVersion = participantVersion;
-    const snapshotParticipants = Array.from(participants.values());
-    setImmediate(() => {
-      io.emit("auction:participants", {
-        version: snapshotVersion,
-        participants: snapshotParticipants
-      });
-    });
 
     // A late gift during the 4-second grace can create a tie.
     // Start DRAW TIME immediately instead of waiting for the grace timer.

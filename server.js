@@ -911,9 +911,20 @@ function giftData(event) {
   // `gift` and generic `event` with different message/transaction IDs.
   // createTime gives a stable identity when available. Without it, use a
   // very short guard so legitimate later gifts are still counted.
+  // IMPORTANT: for normal gifts, NEVER include coin/diamond value in the
+  // cross-transport semantic key. The same 1-coin gift can arrive through
+  // different TikTool wrappers with inconsistent value fields (for example
+  // one wrapper may expose a cumulative coinValue). If the value is part of
+  // the key, that second delivery can bypass dedupe and turn 1 coin into 2.
+  // For combo gifts, repeatCount remains part of the identity because each
+  // new repeatCount represents a legitimate incremental gift.
   const semanticFingerprint = fingerprintTime
-    ? `semantic:${senderKey}|${giftKey}|${resolvedDiamondCount}|${isCombo ? repeatCount : "normal"}|${fingerprintTime}`
-    : `semantic-fast:${senderKey}|${giftKey}|${resolvedDiamondCount}|${isCombo ? repeatCount : "normal"}`;
+    ? (isCombo
+        ? `semantic-combo:${senderKey}|${giftKey}|${repeatCount}|${fingerprintTime}`
+        : `semantic-normal:${senderKey}|${giftKey}|${fingerprintTime}`)
+    : (isCombo
+        ? `semantic-fast-combo:${senderKey}|${giftKey}|${repeatCount}`
+        : `semantic-fast-normal:${senderKey}|${giftKey}`);
 
   if (
     giftFingerprint &&

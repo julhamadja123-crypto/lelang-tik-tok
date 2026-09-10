@@ -807,8 +807,11 @@
       removeDrawTimeColor();
       renderTimer();
 
+      // Server adalah sumber utama pergantian Draw Time -> FINISHED.
+      // Jangan mengirim FINISHED dari browser di sini karena dapat berpacu
+      // dengan event Draw Time berikutnya dari server.
       if (!hasCoinTie()) {
-        finishAuction(true);
+        renderTimer();
       }
     }
 
@@ -847,9 +850,11 @@
         const isFinished =
           state.auction === "finished";
 
+        // Saat benar-benar selesai, tulisan FINISHED menggantikan 00:00.
+        // Ukuran mengikuti CSS timer yang sudah ada; hanya warna dibuat hijau.
         el.timer.textContent =
           isFinished
-            ? "00:00"
+            ? "FINISHED"
             : formatTime(state.timer);
 
         el.timer.classList.toggle(
@@ -2303,8 +2308,14 @@
             next === "idle" ||
             next === "finished"
           ) {
-
             removeExtraTimeColor();
+
+            if (next === "finished") {
+              state.drawTime = false;
+              state.timer = 0;
+              state.timerDeadline = null;
+              removeDrawTimeColor();
+            }
           }
         }
 

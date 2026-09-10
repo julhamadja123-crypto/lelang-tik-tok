@@ -123,6 +123,8 @@ function startServerDrawTime(reason = "coin seri") {
 
     // Coin sudah berbeda: FINISHED langsung.
     auctionActive = false;
+    auctionDrawTime = false;
+    auctionFinishedAt = 0;
     io.emit("auction:state", {
       state: "finished",
       active: false,
@@ -1852,6 +1854,13 @@ io.on("connection", (socket) => {
         );
 
       if (requestedState === "finished") {
+        // A delayed FINISHED from the browser must never cancel a
+        // server-authoritative DRAW TIME that has already started.
+        if (auctionDrawTime && auctionActive) {
+          console.log("[Auction] FINISHED stale diabaikan karena DRAW TIME sedang aktif.");
+          return;
+        }
+
         auctionActive = false;
         auctionDrawTime = false;
         drawTimeDeadline = 0;

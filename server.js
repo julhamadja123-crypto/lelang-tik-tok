@@ -1329,6 +1329,13 @@ async function connectToLiveInternal(rawUsername) {
       return;
     }
 
+    // Mark the primary channel only after giftData() has produced a valid
+    // gift. This keeps the generic event fallback available when TikTool
+    // sends an incomplete named `gift` wrapper.
+    if (deliveryChannel === "gift") {
+      lastPrimaryGiftAt = eventReceivedAt;
+    }
+
     /* -----------------------------------------------------
        CROSS-TRANSPORT DUPLICATE GUARD
        -----------------------------------------------------
@@ -1651,7 +1658,11 @@ async function connectToLiveInternal(rawUsername) {
 
   // Standard TikTool event. This is the authoritative/fast gift path.
   conn.on("gift", (event) => {
-    lastPrimaryGiftAt = Date.now();
+    // Do not mark the primary path as successful until handleGiftEvent()
+    // confirms that the payload contains a valid gift. Some TikTool
+    // transports emit a named "gift" event with an incomplete wrapper;
+    // marking it here would suppress the generic fallback and make the
+    // gift disappear entirely.
     handleGiftEvent(event, "gift");
   });
 

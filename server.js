@@ -200,6 +200,12 @@ const GIFT_RECEIPT_TTL = 60 * 1000;
 // TikTok/TikTool can occasionally deliver the same normal gift through
 // two channels with different transaction/message IDs. Keep a short semantic guard for that case; combo/streak gifts use their own delta logic.
 const GIFT_SEMANTIC_TTL = 1200;
+// Once the normal `gift` listener has delivered a gift, the generic `event`
+// channel is treated as a fallback only. A duplicate can arrive there later
+// with fresh IDs and otherwise bypass the ID guards. This timestamp lets the
+// primary path win without adding any delay to real gifts.
+let lastPrimaryGiftAt = 0;
+const GENERIC_GIFT_FALLBACK_TTL = 10000;
 // TikTool can replay the first normal gift with a different event ID after
 // the initial delivery. The longer semantic window prevents that replay
 // from becoming a second coin while still keeping combo handling separate.
@@ -1643,8 +1649,11 @@ async function connectToLiveInternal(rawUsername) {
     checkGraceAfterGift();
   };
 
-  // Standard TikTool event.
-  conn.on("gift", (event) => handleGiftEvent(event, "gift"));
+  // Standard TikTool event. This is the authoritative/fast gift path.
+  conn.on("gift", (event) => {
+    lastPrimaryGiftAt = Date.now();
+    handleGiftEvent(event, "gift");
+  });
 
   // Lightweight diagnostics: confirms that the live socket is actually
   // delivering named events. This does not alter auction processing.
@@ -1697,6 +1706,16 @@ async function connectToLiveInternal(rawUsername) {
     if (type !== "gift") return;
 
     console.log("[GIFT] diterima melalui generic event channel");
+
+    // IMPORTANT:
+    // If the primary `gift` listener has delivered a gift recently, the
+    // generic event is almost certainly the same TikTok gift relayed again.
+    // Do not process it a second time. There is no delay here: the primary
+    // gift was already processed immediately above.
+    if (lastPrimaryGiftAt > 0 && Date.now() - lastPrimaryGiftAt <= GENERIC_GIFT_FALLBACK_TTL) {
+      console.log("[GIFT] generic event diabaikan: primary gift path aktif");
+      return;
+    }
 
     // IMPORTANT:
     // The primary `gift` listener is the authoritative gift path.

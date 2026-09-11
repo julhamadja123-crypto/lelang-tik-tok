@@ -195,7 +195,7 @@ let processedGiftEventsCleanupAt = 0;
 
 const GIFT_TTL = 60 * 1000;
 const GIFT_FINGERPRINT_TTL = 5000;
-const CROSS_TRANSPORT_TTL = 5000;
+const CROSS_TRANSPORT_TTL = 750;
 const GIFT_RECEIPT_TTL = 60 * 1000;
 // TikTok/TikTool can occasionally deliver the same normal gift through
 // two channels with different transaction/message IDs. Keep a short semantic guard for that case; combo/streak gifts use their own delta logic.
@@ -204,14 +204,14 @@ const GIFT_SEMANTIC_TTL = 1200;
 // ulang gift yang sama beberapa detik kemudian dengan ID transport baru.
 // Guard ini hanya aktif ketika event baru datang dari jalur primary yang sama
 // dan participant/gift yang sama; combo tidak disentuh.
-const LATE_NORMAL_REPLAY_TTL = 15000;
+const LATE_NORMAL_REPLAY_TTL = 2500;
 const recentNormalGiftReceipts = new Map();
 // Once the normal `gift` listener has delivered a gift, the generic `event`
 // channel is treated as a fallback only. A duplicate can arrive there later
 // with fresh IDs and otherwise bypass the ID guards. This timestamp lets the
 // primary path win without adding any delay to real gifts.
 let lastPrimaryGiftAt = 0;
-const GENERIC_GIFT_FALLBACK_TTL = 10000;
+const GENERIC_GIFT_FALLBACK_TTL = 750;
 // TikTool can replay the first normal gift with a different event ID after
 // the initial delivery. The longer semantic window prevents that replay
 // from becoming a second coin while still keeping combo handling separate.
@@ -1071,7 +1071,7 @@ function giftData(event) {
         : `semantic-normal:${senderKey}|${giftKey}|${fingerprintTime}`)
     : (isCombo
         ? `semantic-fast-combo:${senderKey}|${giftKey}|${repeatCount}`
-        : `semantic-fast-normal:${senderKey}|${giftKey}`);
+        : null);
 
   if (
     giftFingerprint &&
@@ -1090,7 +1090,7 @@ function giftData(event) {
 
     if (
       previousTransportTime &&
-      now - previousTransportTime <= 750
+      now - previousTransportTime <= 300
     ) {
       console.log(
         `[GIFT] DUPLICATE transport diabaikan: ${transportFingerprint}`
@@ -1542,34 +1542,20 @@ async function connectToLiveInternal(rawUsername) {
      * replay. Guard hanya berlaku pada primary `gift` channel; generic event
      * sudah memiliki fallback guard tersendiri.
      */
-    if (!gift.isCombo && deliveryChannel === "gift") {
+    if (!gift.isCombo && deliveryChannel === "gift" && gift.createTime) {
+      // createTime is the upstream event identity. Do not block a second
+      // legitimate identical gift from the same viewer merely because it
+      // uses the same giftId/giftName.
       const lateReplayKey =
         `late:${String(gift.uniqueId || gift.username || gift.userId || gift.nickname || "viewer").trim().toLowerCase()}` +
-        `|${String(gift.giftId || gift.giftName || "gift").trim().toLowerCase()}`;
-
+        `|${String(gift.giftId || gift.giftName || "gift").trim().toLowerCase()}` +
+        `|${String(gift.createTime).trim()}`;
       const previousLateReceipt = recentNormalGiftReceipts.get(lateReplayKey);
-
-      if (previousLateReceipt) {
-        const elapsed = eventReceivedAt - previousLateReceipt.at;
-        const metadataChanged =
-          String(previousLateReceipt.transactionId || "") !== String(gift.transactionId || "") ||
-          String(previousLateReceipt.msgId || "") !== String(gift.msgId || "") ||
-          String(previousLateReceipt.createTime || "") !== String(gift.createTime || "");
-
-        if (elapsed >= 1500 && elapsed <= LATE_NORMAL_REPLAY_TTL && metadataChanged) {
-          console.log(
-            `[GIFT] LATE REPLAY diabaikan: ${lateReplayKey} | +${elapsed}ms | metadata transport berubah`
-          );
-          return;
-        }
+      if (previousLateReceipt && eventReceivedAt - previousLateReceipt.at <= LATE_NORMAL_REPLAY_TTL) {
+        console.log(`[GIFT] LATE REPLAY diabaikan: ${lateReplayKey}`);
+        return;
       }
-
-      recentNormalGiftReceipts.set(lateReplayKey, {
-        at: eventReceivedAt,
-        transactionId: gift.transactionId || null,
-        msgId: gift.msgId || null,
-        createTime: gift.createTime || null
-      });
+      recentNormalGiftReceipts.set(lateReplayKey, { at: eventReceivedAt });
     }
 
     /*
@@ -2086,8 +2072,7 @@ async function connectToLiveInternal(rawUsername) {
     // Do not process it a second time. There is no delay here: the primary
     // gift was already processed immediately above.
     if (lastPrimaryGiftAt > 0 && Date.now() - lastPrimaryGiftAt <= GENERIC_GIFT_FALLBACK_TTL) {
-      console.log("[GIFT] generic event diabaikan: primary gift path aktif");
-      return;
+      console.log("[GIFT] generic fallback diperiksa oleh duplicate guard");
     }
 
     // IMPORTANT:

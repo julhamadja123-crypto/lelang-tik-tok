@@ -274,6 +274,12 @@ function emitStatus(message, ok = false, extra = {}) {
     message,
     ok,
     username: activeUsername,
+    displayUsername: activeUsername ? `@${activeUsername}` : "",
+    connectionLabel: tikTokConnectionState === "connected"
+      ? "TERHUBUNG"
+      : tikTokConnectionState === "reconnecting"
+        ? "MENYAMBUNG KEMBALI"
+        : "BELUM TERHUBUNG",
     phase: tikTokConnectionState,
     eventCount: tikTokEventCount,
     giftCount: tikTokGiftCount,
@@ -871,7 +877,20 @@ function hasPositiveGiftValue(value, depth = 0, seen = new Set()) {
 }
 
 function isUsableGenericGiftPayload(value) {
-  return Boolean(value && typeof value === "object" && hasPositiveGiftValue(value));
+  if (!value || typeof value !== "object") return false;
+  if (hasPositiveGiftValue(value)) return true;
+
+  // A valid gift frame can contain giftId + sender but omit diamondCount.
+  // Allow it through when the official cached catalog can price that ID.
+  const idCandidates = [
+    value.giftId, value.gift_id,
+    value.gift?.giftId, value.gift?.gift_id,
+    value.giftDetails?.giftId, value.giftDetails?.gift_id,
+    value.giftInfo?.giftId, value.giftInfo?.gift_id,
+    value.giftData?.giftId, value.giftData?.gift_id
+  ];
+
+  return idCandidates.some((id) => getCatalogDiamondCount(id) > 0);
 }
 
 function userData(event) {
@@ -918,6 +937,97 @@ function userData(event) {
     nickname: String(nickname),
     avatar
   };
+}
+
+/* =========================================================
+   GIFT CATALOG FALLBACK
+   =========================================================
+   Some TikTool generic/raw frames can carry giftId + sender but omit
+   diamondCount on the frame. The official TikTool gift catalog contains
+   the per-unit diamond value by gift ID. Cache it in memory so the live
+   gift path stays fast and never waits on an HTTP request.
+
+   IMPORTANT:
+   - This is NOT gift-name mapping.
+   - The key is TikTok giftId and the value is the official diamond_count.
+   - repeatCount is NEVER used as the coin value.
+   ========================================================= */
+
+const giftCatalogById = new Map();
+let giftCatalogLoadedAt = 0;
+let giftCatalogRefreshPromise = null;
+const GIFT_CATALOG_TTL = 6 * 60 * 60 * 1000;
+
+async function refreshGiftCatalog(force = false) {
+  if (!force && giftCatalogLoadedAt > 0 && Date.now() - giftCatalogLoadedAt < GIFT_CATALOG_TTL) {
+    return giftCatalogById;
+  }
+
+  if (giftCatalogRefreshPromise) return giftCatalogRefreshPromise;
+
+  const apiKey = String(process.env.TIKTOOL_API_KEY || '').trim();
+  if (!apiKey) return giftCatalogById;
+
+  giftCatalogRefreshPromise = (async () => {
+    try {
+      const response = await fetch('https://api.tik.tools/webcast/gift_info', {
+        headers: {
+          Accept: 'application/json',
+          'x-api-key': apiKey
+        }
+      });
+
+      if (!response.ok) {
+        console.warn(`[GIFT CATALOG] HTTP ${response.status} - fallback katalog tidak diperbarui.`);
+        return giftCatalogById;
+      }
+
+      const json = await response.json();
+      const gifts = Array.isArray(json?.data?.gifts) ? json.data.gifts : [];
+
+      let loaded = 0;
+      for (const item of gifts) {
+        const id = String(item?.id ?? item?.giftId ?? item?.gift_id ?? '').trim();
+        const diamond = Number(
+          item?.diamond_count ??
+          item?.diamondCount ??
+          item?.diamondCost ??
+          item?.diamond_cost
+        );
+
+        if (id && Number.isFinite(diamond) && diamond > 0) {
+          giftCatalogById.set(id, diamond);
+          loaded += 1;
+        }
+      }
+
+      if (loaded > 0) {
+        giftCatalogLoadedAt = Date.now();
+        console.log(`[GIFT CATALOG] ${loaded} gift price berhasil dicache.`);
+      } else {
+        console.warn('[GIFT CATALOG] Tidak ada gift price valid pada response.');
+      }
+    } catch (err) {
+      console.warn('[GIFT CATALOG] gagal refresh:', err?.message || err);
+    } finally {
+      giftCatalogRefreshPromise = null;
+    }
+
+    return giftCatalogById;
+  })();
+
+  return giftCatalogRefreshPromise;
+}
+
+function getCatalogDiamondCount(giftId) {
+  if (!giftId) return 0;
+  const value = Number(giftCatalogById.get(String(giftId).trim()) || 0);
+  return Number.isFinite(value) && value > 0 ? value : 0;
+}
+
+function startGiftCatalogWarmup() {
+  // Never block TikTok connection or gift processing on this request.
+  refreshGiftCatalog(false).catch(() => {});
 }
 
 /* =========================================================
@@ -986,16 +1096,22 @@ function giftData(event) {
     event.diamond_count,
     event.diamondCost,
     event.diamond_cost,
+    event.diamondValue,
+    event.diamond_value,
 
     event.gift?.diamondCount,
     event.gift?.diamond_count,
     event.gift?.diamondCost,
     event.gift?.diamond_cost,
+    event.gift?.diamondValue,
+    event.gift?.diamond_value,
 
     event.giftDetails?.diamondCount,
     event.giftDetails?.diamond_count,
     event.giftDetails?.diamondCost,
     event.giftDetails?.diamond_cost,
+    event.giftDetails?.diamondValue,
+    event.giftDetails?.diamond_value,
 
     event.extendedGiftInfo?.diamondCount,
     event.extendedGiftInfo?.diamond_count,
@@ -1006,11 +1122,15 @@ function giftData(event) {
     event.giftInfo?.diamond_count,
     event.giftInfo?.diamondCost,
     event.giftInfo?.diamond_cost,
+    event.giftInfo?.diamondValue,
+    event.giftInfo?.diamond_value,
 
     event.giftData?.diamondCount,
     event.giftData?.diamond_count,
     event.giftData?.diamondCost,
-    event.giftData?.diamond_cost
+    event.giftData?.diamond_cost,
+    event.giftData?.diamondValue,
+    event.giftData?.diamond_value
   );
 
   // Be tolerant of additional TikTool nesting (for example payloads
@@ -1019,7 +1139,8 @@ function giftData(event) {
   let resolvedDiamondCount = diamondCount;
   if (resolvedDiamondCount <= 0) {
     const valueKeys = new Set([
-      "diamondCount", "diamond_count", "diamondCost", "diamond_cost"
+      "diamondCount", "diamond_count", "diamondCost", "diamond_cost",
+      "diamondValue", "diamond_value"
     ]);
 
     const scanGiftValue = (value, depth = 0, seen = new Set()) => {
@@ -1049,6 +1170,22 @@ function giftData(event) {
     };
 
     scanGiftValue(event);
+  }
+
+  // LAST SAFE RECOVERY: if this is a real gift payload with a giftId but
+  // the generic frame omitted diamondCount, use the cached official catalog.
+  // This keeps the live path immediate and avoids guessing from gift names.
+  if (resolvedDiamondCount <= 0 && giftId) {
+    const catalogDiamond = getCatalogDiamondCount(giftId);
+    if (catalogDiamond > 0) {
+      resolvedDiamondCount = catalogDiamond;
+      console.log(
+        `[GIFT] catalog fallback aktif: giftId=${giftId} diamond=${catalogDiamond}`
+      );
+    } else {
+      // Refresh in the background for newly released gifts. Do not wait here.
+      refreshGiftCatalog(false).catch(() => {});
+    }
   }
 
   /*
@@ -2187,7 +2324,15 @@ async function connectToLiveInternal(rawUsername) {
     // importantly, prevents partial generic events from competing with the
     // working primary `gift` listener.
     if (!isUsableGenericGiftPayload(giftCandidate)) {
-      console.log("[GIFT] generic event non-gift/partial -> diabaikan (coin/diamond=0)");
+      const partialId =
+        giftCandidate?.giftId ??
+        giftCandidate?.gift_id ??
+        giftCandidate?.gift?.giftId ??
+        giftCandidate?.gift?.gift_id ??
+        null;
+      console.log(
+        `[GIFT] generic event non-gift/partial -> diabaikan (coin/diamond=0, giftId=${partialId || "-"})`
+      );
       return;
     }
 
@@ -2297,6 +2442,8 @@ async function connectToLiveInternal(rawUsername) {
       true,
       { roomId: conn.roomId || state?.roomId || null }
     );
+
+    startGiftCatalogWarmup();
   });
 
   /* =======================================================
@@ -2405,6 +2552,10 @@ async function connectToLiveInternal(rawUsername) {
       tikTokConnectionState = "connected";
       tikTokConnectedAt = Date.now();
     }
+
+    // Warm the official gift catalog in background. This never blocks connect()
+    // and is only used if a raw/generic gift frame arrives without diamondCount.
+    startGiftCatalogWarmup();
 
     if (tikTokConnectionState === "connected") {
       emitStatus(

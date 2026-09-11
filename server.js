@@ -184,6 +184,11 @@ function checkGraceAfterGift() {
 const processedGiftEvents = new Map();
 const processedGiftFingerprints = new Map();
 const processedStreakProgress = new Map();
+// TikTool can send the same combo twice as progress/final events with different
+// createTime/transport IDs. Remember the latest non-final combo state briefly
+// so final replay cannot add the same coin again.
+const recentComboReceipts = new Map();
+const COMBO_REPLAY_TTL = 10000;
 // Protect against the same normal gift arriving through both TikTool
 // `gift` and generic `event` transports with different IDs.
 const processedCrossTransportGifts = new Map();
@@ -846,6 +851,26 @@ function giftData(event) {
     if (comboKey) {
       const previousRepeat = Number(processedStreakProgress.get(comboKey) || 0);
 
+      // TikTool's progress event and final event can have different createTime
+      // values, causing the old comboKey to differ even though they are the
+      // same 1-gift combo. If a final event repeats a repeatCount already
+      // accepted as a non-final event from the same sender/gift, suppress it.
+      // This is deliberately limited to the short replay window and does not
+      // affect separate gifts sent later.
+      const comboReceiptKey = `combo-replay:${String(user.uniqueId || user.userId || user.nickname || "viewer").trim().toLowerCase()}|${String(giftId || giftName || "gift").trim().toLowerCase()}`;
+      const recentCombo = recentComboReceipts.get(comboReceiptKey);
+      if (
+        recentCombo &&
+        !recentCombo.final &&
+        repeatCount <= Number(recentCombo.repeat || 0) &&
+        Date.now() - recentCombo.at <= COMBO_REPLAY_TTL
+      ) {
+        console.log(
+          `[GIFT] DUPLICATE combo final/replay diabaikan: ${comboReceiptKey} | x${repeatCount} | final=${repeatEnd}`
+        );
+        return null;
+      }
+
       // FAST + SAFE FIRST GIFT:
       // TikTool can occasionally label the very first Rose event as a
       // streak/combo and report repeatCount > 1 even though the viewer has
@@ -996,6 +1021,12 @@ function giftData(event) {
       }
     }
 
+    for (const [key, info] of recentComboReceipts.entries()) {
+      if (!info || now - info.at > COMBO_REPLAY_TTL) {
+        recentComboReceipts.delete(key);
+      }
+    }
+
     processedGiftEventsCleanupAt = now + 5000;
   }
 
@@ -1137,6 +1168,15 @@ function giftData(event) {
   // Commit combo progress only after all duplicate guards pass.
   if (isCombo && comboKey) {
     processedStreakProgress.set(comboKey, repeatCount);
+  }
+
+  if (isCombo) {
+    const comboReceiptKey = `combo-replay:${String(user.uniqueId || user.userId || user.nickname || "viewer").trim().toLowerCase()}|${String(giftId || giftName || "gift").trim().toLowerCase()}`;
+    recentComboReceipts.set(comboReceiptKey, {
+      at: now,
+      repeat: repeatCount,
+      final: Boolean(repeatEnd)
+    });
   }
 
   /* -------------------------------------------------------
@@ -1327,6 +1367,7 @@ async function connectToLiveInternal(rawUsername) {
   processedGiftEvents.clear();
   processedGiftFingerprints.clear();
   processedStreakProgress.clear();
+      recentComboReceipts.clear();
   processedCrossTransportGifts.clear();
   processedGiftReceipts.clear();
   recentNormalGiftReceipts.clear();
@@ -2540,6 +2581,7 @@ io.on("connection", (socket) => {
         auctionDrawTime = false;
         drawTimeDeadline = 0;
         processedStreakProgress.clear();
+      recentComboReceipts.clear();
 
         // Tell the browser that the main countdown ended, then keep the
         // server open for late TikTok gifts for up to 4 seconds.
@@ -2560,6 +2602,7 @@ io.on("connection", (socket) => {
         auctionDrawTime = false;
         drawTimeDeadline = 0;
         processedStreakProgress.clear();
+      recentComboReceipts.clear();
       } else {
         auctionActive = true;
         auctionDrawTime = data?.drawTime === true;
@@ -2611,6 +2654,7 @@ io.on("connection", (socket) => {
       processedGiftEvents.clear();
       processedGiftFingerprints.clear();
       processedStreakProgress.clear();
+      recentComboReceipts.clear();
       processedGiftEventsCleanupAt = 0;
 
       io.emit(
@@ -2641,6 +2685,7 @@ io.on("connection", (socket) => {
       auctionActive = false;
       auctionDrawTime = false;
       processedStreakProgress.clear();
+      recentComboReceipts.clear();
 
       io.emit(
         "auction:state",
@@ -2671,6 +2716,7 @@ io.on("connection", (socket) => {
       auctionActive = false;
       auctionDrawTime = false;
       processedStreakProgress.clear();
+      recentComboReceipts.clear();
 
       await stopConnection();
 

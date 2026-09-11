@@ -560,6 +560,54 @@ function findGiftPayload(value, depth = 0, seen = new Set()) {
   return null;
 }
 
+
+/* =========================================================
+   RAW / GENERIC EVENT NORMALIZER
+   =========================================================
+   Some @tiktool/live builds expose the underlying websocket envelope on
+   the generic `event` channel. Depending on the transport, the payload can
+   be a plain object, JSON text, a nested data/payload wrapper, or an object
+   whose useful fields only become enumerable after JSON serialization.
+
+   This helper is ONLY for gift extraction. It does not alter the TikTok
+   connection itself.
+========================================================= */
+function normalizeRawEventCandidate(value) {
+  if (value === null || value === undefined) return null;
+
+  if (typeof value === "string") {
+    const text = value.trim();
+    if (!text) return null;
+
+    try {
+      const parsed = JSON.parse(text);
+      return parsed && typeof parsed === "object" ? parsed : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  if (typeof value !== "object") return null;
+
+  // First use the object as-is. This preserves references for the normal
+  // fast path and lets findGiftPayload walk ordinary plain objects.
+  const direct = findGiftPayload(value);
+  if (direct) return direct;
+
+  // A few transport objects expose their data through non-standard/non-
+  // enumerable properties. JSON serialization is a safe read-only way to
+  // obtain the wire-shaped object when available.
+  try {
+    const serialized = JSON.stringify(value);
+    if (serialized && serialized !== "{}") {
+      const parsed = JSON.parse(serialized);
+      return findGiftPayload(parsed) || parsed;
+    }
+  } catch (_) {}
+
+  return null;
+}
+
 function userData(event) {
   event = unwrapTikTokEvent(event);
   const user = event?.user || {};
@@ -2025,38 +2073,70 @@ async function connectToLiveInternal(rawUsername) {
   }
 
   // Compatibility with transports that expose all events via `event`.
-  // Only use this fallback when the event transport is actually needed.
-  // The normal "gift" listener remains the primary/fast path.
+  // IMPORTANT: some @tiktool/live builds emit the raw websocket envelope
+  // here even when the named `gift` listener is silent. Always inspect BOTH
+  // arguments and normalize the actual gift payload before giving up.
   conn.on("event", (incomingEvent, maybePayload) => {
-    /*
-     * @tiktool/live documents the generic event channel as:
-     *   event.type === "gift"
-     *
-     * Some adapters instead expose (type, payload), while raw/relayed
-     * transports can expose { event: "gift", data: {...} }.
-     * Normalize all three forms before deciding whether this is a gift.
-     */
-    let candidate = incomingEvent;
+    const candidates = [];
 
+    if (incomingEvent !== undefined) candidates.push(incomingEvent);
+    if (maybePayload !== undefined) candidates.push(maybePayload);
+
+    // Support the common `(eventName, payload)` form as well as
+    // `{ event, data }` / `{ type, payload }` envelopes.
     if (
       typeof incomingEvent === "string" &&
       maybePayload !== undefined
     ) {
-      candidate = {
+      candidates.unshift({
         type: incomingEvent,
         data: maybePayload
-      };
-    } else if (
+      });
+    }
+
+    if (
       incomingEvent === undefined &&
       maybePayload !== undefined
     ) {
-      candidate = maybePayload;
+      candidates.unshift(maybePayload);
     }
 
-    const event = unwrapTikTokEvent(candidate);
+    let candidate = null;
+    let giftCandidate = null;
+
+    for (const rawCandidate of candidates) {
+      const normalized = normalizeRawEventCandidate(rawCandidate);
+      if (!candidate && normalized) candidate = normalized;
+
+      const found =
+        normalizeRawEventCandidate(rawCandidate) ||
+        findGiftPayload(rawCandidate);
+
+      if (found) {
+        giftCandidate = found;
+        break;
+      }
+    }
+
+    // Also inspect a combined envelope. This catches transports where the
+    // event type is supplied in arg #1 and the actual gift is arg #2.
+    if (!giftCandidate && candidates.length > 1) {
+      const combined = {
+        event:
+          typeof incomingEvent === "string" ? incomingEvent : undefined,
+        data: maybePayload !== undefined ? maybePayload : incomingEvent
+      };
+      giftCandidate = normalizeRawEventCandidate(combined);
+    }
+
+    const event =
+      candidate ||
+      (typeof incomingEvent === "object" ? incomingEvent : {}) ||
+      {};
+
     const type = String(
-      candidate?.event ||
-      candidate?.type ||
+      incomingEvent?.event ||
+      incomingEvent?.type ||
       event?.event ||
       event?.type ||
       (typeof incomingEvent === "string" ? incomingEvent : "") ||
@@ -2066,33 +2146,16 @@ async function connectToLiveInternal(rawUsername) {
     if (type === "streamend") {
       handleStreamEnd(
         conn,
-        event?.reason || candidate?.data?.reason || "creator_offline"
+        event?.reason || event?.data?.reason || "creator_offline"
       );
       return;
     }
 
-    /*
-     * Some TikTool builds emit the generic `event` channel without a
-     * reliable event/type field. The Railway RAW EVENT log can therefore
-     * show `event` even though the payload itself is already a GiftEvent.
-     *
-     * Do not require type === "gift" when the payload itself clearly has
-     * gift fields. handleGiftEvent() remains the single gate for parsing,
-     * deduplication and coin updates.
-     */
-    const rawGiftCandidate = unwrapTikTokEvent(candidate);
-    const extractedGiftCandidate = findGiftPayload(candidate);
-
-    const giftShaped = Boolean(
-      extractedGiftCandidate ||
-      findGiftPayload(rawGiftCandidate)
-    );
-
-    if (type !== "gift" && !giftShaped) {
-      // Keep this diagnostic small: it tells us the generic event arrived
-      // but did not contain a recognizable gift payload.
-      if (String(type || "").includes("gift")) {
-        console.log("[GIFT] generic gift event tidak dapat diekstrak");
+    if (!giftCandidate) {
+      // Keep diagnostics concise. We intentionally do not print full raw
+      // payloads because they may contain a large amount of room metadata.
+      if (type === "gift" || type.includes("gift")) {
+        console.log("[GIFT] generic event bertipe gift tetapi payload tidak dapat diekstrak");
       }
       return;
     }
@@ -2103,39 +2166,57 @@ async function connectToLiveInternal(rawUsername) {
         : "[GIFT] gift-shaped payload diterima melalui generic event channel"
     );
 
-    /*
-     * Use the deepest actual gift object, not the outer `event` wrapper.
-     * This is the important fallback for relayed/generic payloads.
-     */
-    const genericGiftEvent =
-      extractedGiftCandidate ||
-      findGiftPayload(rawGiftCandidate) ||
-      rawGiftCandidate ||
-      candidate;
-
-    // IMPORTANT:
-    // If the primary `gift` listener has delivered a gift recently, the
-    // generic event is almost certainly the same TikTok gift relayed again.
-    // Do not process it a second time. There is no delay here: the primary
-    // gift was already processed immediately above.
-    if (lastPrimaryGiftAt > 0 && Date.now() - lastPrimaryGiftAt <= GENERIC_GIFT_FALLBACK_TTL) {
+    // The same gift can arrive through both `gift` and `event`. If the
+    // primary listener already succeeded very recently, let it remain the
+    // authoritative path. This prevents a 1-coin gift becoming 2 coins.
+    if (
+      lastPrimaryGiftAt > 0 &&
+      Date.now() - lastPrimaryGiftAt <= GENERIC_GIFT_FALLBACK_TTL
+    ) {
       console.log("[GIFT] generic event diabaikan: primary gift path aktif");
       return;
     }
 
-    // IMPORTANT:
-    // The primary `gift` listener is the authoritative gift path.
-    // The generic `event` channel is kept only as a compatibility fallback.
-    // If a transport exposes the same gift on both channels, processing both
-    // paths can make a 1-coin gift become 2 coins. The shared receipt guards
-    // above protect most cases, but the generic channel can rewrite transport
-    // metadata (including createTime), so it can evade ID-based dedupe.
-    // Do NOT process generic gift events when the normal `gift` listener is
-    // active; the primary listener already receives the same TikTool gift.
-    // Process generic gift events as a compatibility fallback.
-    // The shared duplicate guards in handleGiftEvent() prevent the same
-    // TikTok gift from being counted twice when it also arrives on `gift`.
-    handleGiftEvent(genericGiftEvent, "event");
+    handleGiftEvent(giftCandidate, "event");
+  });
+
+  /*
+   * RAW MESSAGE FALLBACK
+   *
+   * A small number of connector builds expose the underlying websocket frame
+   * as `message` instead of forwarding it through the generic `event`
+   * listener. If a message is a gift envelope, feed ONLY that gift into the
+   * existing single handler. All duplicate protection remains centralized in
+   * handleGiftEvent(), so this cannot create a second coin for the same gift.
+   */
+  conn.on("message", (rawMessage) => {
+    const giftCandidate = normalizeRawEventCandidate(rawMessage);
+    if (!giftCandidate) return;
+
+    const type = String(
+      giftCandidate?.event ||
+      giftCandidate?.type ||
+      ""
+    ).toLowerCase();
+
+    const actualGift =
+      type === "gift"
+        ? (findGiftPayload(giftCandidate) || giftCandidate)
+        : findGiftPayload(giftCandidate);
+
+    if (!actualGift) return;
+
+    console.log("[GIFT] gift-shaped payload diterima melalui raw message channel");
+
+    if (
+      lastPrimaryGiftAt > 0 &&
+      Date.now() - lastPrimaryGiftAt <= GENERIC_GIFT_FALLBACK_TTL
+    ) {
+      console.log("[GIFT] raw message diabaikan: primary gift path aktif");
+      return;
+    }
+
+    handleGiftEvent(actualGift, "raw:message");
   });
 
   // TikTool v3 juga menyediakan streamEnd saat creator benar-benar

@@ -200,7 +200,7 @@ let processedGiftEventsCleanupAt = 0;
 
 const GIFT_TTL = 60 * 1000;
 const GIFT_FINGERPRINT_TTL = 5000;
-const CROSS_TRANSPORT_TTL = 5000;
+const CROSS_TRANSPORT_TTL = 1200;
 const GIFT_RECEIPT_TTL = 60 * 1000;
 // TikTok/TikTool can occasionally deliver the same normal gift through
 // two channels with different transaction/message IDs. Keep a short semantic guard for that case; combo/streak gifts use their own delta logic.
@@ -209,7 +209,7 @@ const GIFT_SEMANTIC_TTL = 1200;
 // ulang gift yang sama beberapa detik kemudian dengan ID transport baru.
 // Guard ini hanya aktif ketika event baru datang dari jalur primary yang sama
 // dan participant/gift yang sama; combo tidak disentuh.
-const LATE_NORMAL_REPLAY_TTL = 15000;
+const LATE_NORMAL_REPLAY_TTL = 1200;
 const recentNormalGiftReceipts = new Map();
 // Once the normal `gift` listener has delivered a gift, the generic `event`
 // channel is treated as a fallback only. A duplicate can arrive there later
@@ -409,33 +409,21 @@ function unwrapTikTokEvent(event) {
 
     let next = null;
 
-    if (current.data !== undefined && current.data !== null) {
-      if (typeof current.data === "object") {
-        next = current.data;
-      } else if (typeof current.data === "string") {
-        try {
-          const parsed = JSON.parse(current.data);
-          if (parsed && typeof parsed === "object") next = parsed;
-        } catch (_) {}
-      }
-    } else if (current.payload !== undefined && current.payload !== null) {
-      if (typeof current.payload === "object") {
-        next = current.payload;
-      } else if (typeof current.payload === "string") {
-        try {
-          const parsed = JSON.parse(current.payload);
-          if (parsed && typeof parsed === "object") next = parsed;
-        } catch (_) {}
-      }
-    } else if (current.message !== undefined && current.message !== null) {
-      if (typeof current.message === "object") {
-        next = current.message;
-      } else if (typeof current.message === "string") {
-        try {
-          const parsed = JSON.parse(current.message);
-          if (parsed && typeof parsed === "object") next = parsed;
-        } catch (_) {}
-      }
+    if (
+      current.data &&
+      typeof current.data === "object"
+    ) {
+      next = current.data;
+    } else if (
+      current.payload &&
+      typeof current.payload === "object"
+    ) {
+      next = current.payload;
+    } else if (
+      current.message &&
+      typeof current.message === "object"
+    ) {
+      next = current.message;
     }
 
     if (!next || next === current) {
@@ -520,23 +508,16 @@ function findGiftPayload(value, depth = 0, seen = new Set()) {
     value.diamond_count !== undefined ||
     value.diamondCost !== undefined ||
     value.diamond_cost !== undefined ||
-    value.diamondValue !== undefined ||
-    value.diamond_value !== undefined ||
     value.giftDetails !== undefined ||
     value.extendedGiftInfo !== undefined ||
     value.gift?.giftId !== undefined ||
     value.gift?.gift_id !== undefined ||
     value.gift?.giftName !== undefined ||
-    value.gift?.gift_name !== undefined ||
     value.gift?.diamondCount !== undefined ||
-    value.gift?.diamond_count !== undefined ||
-    value.gift?.diamondValue !== undefined ||
-    value.gift?.diamond_value !== undefined;
+    value.gift?.diamond_count !== undefined;
 
   if (type === "gift" || hasGiftFields) {
-    // IMPORTANT: prefer the actual nested GiftEvent over a generic
-    // `{type:"gift", data:...}` envelope. A wrapper can itself be labelled
-    // "gift" while carrying the useful diamond fields one level deeper.
+    // If this is a gift envelope, prefer its actual data/payload child.
     const nested =
       value.data ??
       value.payload ??
@@ -548,8 +529,7 @@ function findGiftPayload(value, depth = 0, seen = new Set()) {
       if (nestedGift) return nestedGift;
     }
 
-    // Do not treat `type:"gift"` alone as a valid gift payload.
-    if (hasGiftFields) return value;
+    return value;
   }
 
   // Search common wrappers first.
@@ -732,32 +712,21 @@ function giftData(event) {
     event.diamond_count,
     event.diamondCost,
     event.diamond_cost,
-    // Some relay/event schemas expose the per-gift price as diamondValue.
-    // This is still an explicit per-gift diamond value, NOT a cumulative
-    // coin total, so accepting it cannot recreate the old double-coin bug.
-    event.diamondValue,
-    event.diamond_value,
 
     event.gift?.diamondCount,
     event.gift?.diamond_count,
     event.gift?.diamondCost,
     event.gift?.diamond_cost,
-    event.gift?.diamondValue,
-    event.gift?.diamond_value,
 
     event.giftDetails?.diamondCount,
     event.giftDetails?.diamond_count,
     event.giftDetails?.diamondCost,
     event.giftDetails?.diamond_cost,
-    event.giftDetails?.diamondValue,
-    event.giftDetails?.diamond_value,
 
     event.extendedGiftInfo?.diamondCount,
     event.extendedGiftInfo?.diamond_count,
     event.extendedGiftInfo?.diamondCost,
-    event.extendedGiftInfo?.diamond_cost,
-    event.extendedGiftInfo?.diamondValue,
-    event.extendedGiftInfo?.diamond_value
+    event.extendedGiftInfo?.diamond_cost
   );
 
   // Be tolerant of additional TikTool nesting (for example payloads
@@ -766,8 +735,7 @@ function giftData(event) {
   let resolvedDiamondCount = diamondCount;
   if (resolvedDiamondCount <= 0) {
     const valueKeys = new Set([
-      "diamondCount", "diamond_count", "diamondCost", "diamond_cost",
-      "diamondValue", "diamond_value"
+      "diamondCount", "diamond_count", "diamondCost", "diamond_cost"
     ]);
 
     const scanGiftValue = (value, depth = 0, seen = new Set()) => {
@@ -876,18 +844,9 @@ function giftData(event) {
   }
 
   if (resolvedDiamondCount <= 0) {
-    // Safe diagnostic: show only structural keys, never the complete TikTok
-    // payload. This makes the next Railway test immediately tell us whether
-    // TikTool delivered a wrapper or a genuinely incomplete gift frame.
-    let structuralKeys = [];
-    try {
-      structuralKeys = Object.keys(event || {}).slice(0, 40);
-    } catch (_) {}
-
     console.log(
       `[GIFT] ${giftName} diabaikan: diamondCount/diamondCost tidak ditemukan. ` +
-      `coinValue/coins tidak dipakai sebagai fallback agar tidak terjadi double/cumulative coin. ` +
-      `keys=${structuralKeys.join(",")}`
+      `coinValue/coins tidak dipakai sebagai fallback agar tidak terjadi double/cumulative coin.`
     );
 
     return null;
@@ -1602,27 +1561,43 @@ async function connectToLiveInternal(rawUsername) {
        dari orang yang sama tetap harus dihitung. Guard ini hanya aktif bila
        gift yang sama terlihat dari CHANNEL YANG BERBEDA dalam waktu singkat.
     ----------------------------------------------------- */
-    const crossTransportKey = !gift.isCombo
-      ? `cross:${String(gift.uniqueId || gift.username || gift.userId || gift.nickname || "viewer").trim().toLowerCase()}|${String(gift.giftId || gift.giftName || "gift").trim().toLowerCase()}|normal`
-      : null;
+    // IMPORTANT: protect BOTH normal and combo gifts. Earlier versions only
+    // guarded normal gifts here, so a Rose/other type-1 gift could arrive as
+    // combo=true on one channel and combo=false on another and be counted 2x.
+    // Do not use a broad sender+gift 5s key: that would block two legitimate
+    // gifts sent a few seconds apart. Prefer TikTok's event identity when it
+    // exists, otherwise use a very short same-event window.
+    const crossSender = String(
+      gift.uniqueId || gift.username || gift.userId || gift.nickname || "viewer"
+    ).trim().toLowerCase();
+    const crossGift = String(
+      gift.giftId || gift.giftName || "gift"
+    ).trim().toLowerCase();
+    const crossIdentity =
+      gift.createTime !== null && gift.createTime !== undefined && String(gift.createTime).trim() !== ""
+        ? `time:${String(gift.createTime).trim()}`
+        : gift.groupId
+          ? `group:${String(gift.groupId).trim()}`
+          : `fast:${Math.floor(eventReceivedAt / 500)}`;
+    const crossRepeat = gift.isCombo ? String(gift.repeatCount || 1) : "normal";
+    const crossTransportKey =
+      `cross:${crossSender}|${crossGift}|${crossRepeat}|${crossIdentity}`;
 
-    if (crossTransportKey) {
-      const previousCross = processedCrossTransportGifts.get(crossTransportKey);
-      if (
-        previousCross &&
-        previousCross.channel !== deliveryChannel &&
-        eventReceivedAt - previousCross.at <= CROSS_TRANSPORT_TTL
-      ) {
-        console.log(
-          `[GIFT] DUPLICATE cross-transport diabaikan: ${crossTransportKey} | ${previousCross.channel} -> ${deliveryChannel}`
-        );
-        return;
-      }
-      processedCrossTransportGifts.set(crossTransportKey, {
-        at: eventReceivedAt,
-        channel: deliveryChannel
-      });
+    const previousCross = processedCrossTransportGifts.get(crossTransportKey);
+    if (
+      previousCross &&
+      previousCross.channel !== deliveryChannel &&
+      eventReceivedAt - previousCross.at <= CROSS_TRANSPORT_TTL
+    ) {
+      console.log(
+        `[GIFT] DUPLICATE cross-transport diabaikan: ${crossTransportKey} | ${previousCross.channel} -> ${deliveryChannel}`
+      );
+      return;
     }
+    processedCrossTransportGifts.set(crossTransportKey, {
+      at: eventReceivedAt,
+      channel: deliveryChannel
+    });
 
     /*
      * FINAL RAPID-REPLAY GUARD FOR NORMAL GIFTS
@@ -1686,7 +1661,10 @@ async function connectToLiveInternal(rawUsername) {
           String(previousLateReceipt.msgId || "") !== String(gift.msgId || "") ||
           String(previousLateReceipt.createTime || "") !== String(gift.createTime || "");
 
-        if (elapsed >= 1500 && elapsed <= LATE_NORMAL_REPLAY_TTL && metadataChanged) {
+        // Only treat it as a replay when it is extremely close to the first
+        // delivery. A 15-second sender+gift window incorrectly blocked a
+        // legitimate second Rose sent by the same viewer.
+        if (elapsed <= LATE_NORMAL_REPLAY_TTL && metadataChanged) {
           console.log(
             `[GIFT] LATE REPLAY diabaikan: ${lateReplayKey} | +${elapsed}ms | metadata transport berubah`
           );

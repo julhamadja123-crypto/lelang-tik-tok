@@ -2429,6 +2429,41 @@
         let key = participantKey(incoming);
         let existing = state.participants.get(key);
 
+        if (existing) {
+          const incomingUniqueId = String(
+            incoming.uniqueId || ""
+          ).trim().toLowerCase();
+          const incomingUsername = String(
+            incoming.username || ""
+          ).trim().toLowerCase();
+
+          const existingUniqueId = String(
+            existing.uniqueId || ""
+          ).trim().toLowerCase();
+          const existingUsername = String(
+            existing.username || ""
+          ).trim().toLowerCase();
+
+          const uniqueMismatch =
+            incomingUniqueId &&
+            existingUniqueId &&
+            incomingUniqueId !== existingUniqueId;
+
+          const usernameMismatch =
+            incomingUsername &&
+            existingUsername &&
+            incomingUsername !== existingUsername;
+
+          if (uniqueMismatch || usernameMismatch) {
+            key = incomingUniqueId
+              ? `user:${incomingUniqueId}`
+              : incomingUsername
+                ? `user:${incomingUsername}`
+                : key;
+            existing = state.participants.get(key);
+          }
+        }
+
         if (!existing) {
           const incomingUnique = String(
             incoming.uniqueId || incoming.username || ""
@@ -2509,6 +2544,41 @@
           const incoming = { ...data.participant };
           let key = participantKey(incoming);
           let existing = state.participants.get(key);
+
+          if (existing) {
+            const incomingUniqueId = String(
+              incoming.uniqueId || ""
+            ).trim().toLowerCase();
+            const incomingUsername = String(
+              incoming.username || ""
+            ).trim().toLowerCase();
+
+            const existingUniqueId = String(
+              existing.uniqueId || ""
+            ).trim().toLowerCase();
+            const existingUsername = String(
+              existing.username || ""
+            ).trim().toLowerCase();
+
+            const uniqueMismatch =
+              incomingUniqueId &&
+              existingUniqueId &&
+              incomingUniqueId !== existingUniqueId;
+
+            const usernameMismatch =
+              incomingUsername &&
+              existingUsername &&
+              incomingUsername !== existingUsername;
+
+            if (uniqueMismatch || usernameMismatch) {
+              key = incomingUniqueId
+                ? `user:${incomingUniqueId}`
+                : incomingUsername
+                  ? `user:${incomingUsername}`
+                  : key;
+              existing = state.participants.get(key);
+            }
+          }
 
           if (!existing) {
             const incomingUnique =

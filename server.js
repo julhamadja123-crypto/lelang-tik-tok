@@ -200,6 +200,12 @@ const GIFT_RECEIPT_TTL = 60 * 1000;
 // TikTok/TikTool can occasionally deliver the same normal gift through
 // two channels with different transaction/message IDs. Keep a short semantic guard for that case; combo/streak gifts use their own delta logic.
 const GIFT_SEMANTIC_TTL = 1200;
+// Guard khusus replay terlambat pada gift biasa. TikTool kadang mengirim
+// ulang gift yang sama beberapa detik kemudian dengan ID transport baru.
+// Guard ini hanya aktif ketika event baru datang dari jalur primary yang sama
+// dan participant/gift yang sama; combo tidak disentuh.
+const LATE_NORMAL_REPLAY_TTL = 15000;
+const recentNormalGiftReceipts = new Map();
 // Once the normal `gift` listener has delivered a gift, the generic `event`
 // channel is treated as a fallback only. A duplicate can arrive there later
 // with fresh IDs and otherwise bypass the ID guards. This timestamp lets the
@@ -873,6 +879,12 @@ function giftData(event) {
       }
     }
 
+    for (const [key, info] of recentNormalGiftReceipts.entries()) {
+      if (!info || now - info.at > LATE_NORMAL_REPLAY_TTL) {
+        recentNormalGiftReceipts.delete(key);
+      }
+    }
+
     processedGiftEventsCleanupAt = now + 5000;
   }
 
@@ -1206,6 +1218,7 @@ async function connectToLiveInternal(rawUsername) {
   processedStreakProgress.clear();
   processedCrossTransportGifts.clear();
   processedGiftReceipts.clear();
+  recentNormalGiftReceipts.clear();
   processedGiftEventsCleanupAt = 0;
 
   manualDisconnect = false;
@@ -1401,6 +1414,50 @@ async function connectToLiveInternal(rawUsername) {
       processedCrossTransportGifts.set(rapidKey, {
         at: eventReceivedAt,
         channel: deliveryChannel
+      });
+    }
+
+    /*
+     * LATE REPLAY GUARD FOR NORMAL GIFTS
+     *
+     * TikTool dapat mengulang satu gift normal melalui listener primary
+     * beberapa detik setelah delivery pertama, dengan transactionId/msgId
+     * yang berbeda. Hal ini paling terlihat ketika gift pertama diterima
+     * jauh sebelum countdown selesai lalu salinannya muncul menjelang akhir.
+     *
+     * Jangan pakai guard ini untuk combo/streak. Untuk gift normal, simpan
+     * waktu receipt berdasarkan sender + gift. Jika event berikutnya datang
+     * dalam jendela replay dan metadata transport berbeda, anggap sebagai
+     * replay. Guard hanya berlaku pada primary `gift` channel; generic event
+     * sudah memiliki fallback guard tersendiri.
+     */
+    if (!gift.isCombo && deliveryChannel === "gift") {
+      const lateReplayKey =
+        `late:${String(gift.uniqueId || gift.username || gift.userId || gift.nickname || "viewer").trim().toLowerCase()}` +
+        `|${String(gift.giftId || gift.giftName || "gift").trim().toLowerCase()}`;
+
+      const previousLateReceipt = recentNormalGiftReceipts.get(lateReplayKey);
+
+      if (previousLateReceipt) {
+        const elapsed = eventReceivedAt - previousLateReceipt.at;
+        const metadataChanged =
+          String(previousLateReceipt.transactionId || "") !== String(gift.transactionId || "") ||
+          String(previousLateReceipt.msgId || "") !== String(gift.msgId || "") ||
+          String(previousLateReceipt.createTime || "") !== String(gift.createTime || "");
+
+        if (elapsed >= 1500 && elapsed <= LATE_NORMAL_REPLAY_TTL && metadataChanged) {
+          console.log(
+            `[GIFT] LATE REPLAY diabaikan: ${lateReplayKey} | +${elapsed}ms | metadata transport berubah`
+          );
+          return;
+        }
+      }
+
+      recentNormalGiftReceipts.set(lateReplayKey, {
+        at: eventReceivedAt,
+        transactionId: gift.transactionId || null,
+        msgId: gift.msgId || null,
+        createTime: gift.createTime || null
       });
     }
 

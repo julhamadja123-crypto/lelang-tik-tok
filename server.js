@@ -1559,12 +1559,67 @@ async function connectToLiveInternal(rawUsername) {
 
     let previous = participants.get(key);
 
-    if (!previous) {
-      const uniqueId =
-        String(gift.uniqueId || "").trim().toLowerCase();
-      const username =
-        String(gift.username || "").trim().toLowerCase();
+    const incomingUniqueId =
+      String(gift.uniqueId || "").trim().toLowerCase();
+    const incomingUsername =
+      String(gift.username || "").trim().toLowerCase();
 
+    /*
+       ID-COLLISION PROTECTION
+       -----------------------------------------------------
+       userId tetap menjadi key utama. Tetapi jika key tersebut ternyata
+       sudah berisi peserta lain, jangan pernah menambahkan coin peserta
+       baru ke peserta lama hanya karena userId dari TikTool bentrok/tidak
+       konsisten.
+
+       Contoh:
+         A = 1
+         B kirim 1
+       hasil wajib:
+         A = 1, B = 1
+    */
+    if (previous) {
+      const previousUniqueId =
+        String(previous?.uniqueId || "").trim().toLowerCase();
+      const previousUsername =
+        String(previous?.username || "").trim().toLowerCase();
+
+      const uniqueMismatch =
+        incomingUniqueId &&
+        previousUniqueId &&
+        incomingUniqueId !== previousUniqueId;
+
+      const usernameMismatch =
+        incomingUsername &&
+        previousUsername &&
+        incomingUsername !== previousUsername;
+
+      if (uniqueMismatch || usernameMismatch) {
+        const safeKey = incomingUniqueId
+          ? `unique:${incomingUniqueId}`
+          : incomingUsername
+            ? `username:${incomingUsername}`
+            : null;
+
+        if (safeKey) {
+          console.warn(
+            `[GIFT] ID COLLISION dicegah: key=${key} ` +
+            `existing=@${previousUniqueId || previousUsername || "unknown"} ` +
+            `incoming=@${incomingUniqueId || incomingUsername || "unknown"} ` +
+            `-> ${safeKey}`
+          );
+
+          key = safeKey;
+          previous = participants.get(key);
+        }
+      }
+    }
+
+    /*
+       Bila userId berubah tetapi uniqueId/username benar-benar sama,
+       tetap gabungkan ke peserta yang sama agar coin tidak terpecah.
+    */
+    if (!previous) {
       for (const [existingKey, existingParticipant] of participants.entries()) {
         const existingUniqueId =
           String(existingParticipant?.uniqueId || "").trim().toLowerCase();
@@ -1572,8 +1627,8 @@ async function connectToLiveInternal(rawUsername) {
           String(existingParticipant?.username || "").trim().toLowerCase();
 
         if (
-          (uniqueId && existingUniqueId === uniqueId) ||
-          (username && existingUsername === username)
+          (incomingUniqueId && existingUniqueId === incomingUniqueId) ||
+          (incomingUsername && existingUsername === incomingUsername)
         ) {
           key = existingKey;
           previous = existingParticipant;

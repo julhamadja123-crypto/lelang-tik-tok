@@ -424,6 +424,21 @@ function unwrapTikTokEvent(event) {
       typeof current.message === "object"
     ) {
       next = current.message;
+    } else if (
+      current.gift &&
+      typeof current.gift === "object"
+    ) {
+      next = current.gift;
+    } else if (
+      current.giftInfo &&
+      typeof current.giftInfo === "object"
+    ) {
+      next = current.giftInfo;
+    } else if (
+      current.giftData &&
+      typeof current.giftData === "object"
+    ) {
+      next = current.giftData;
     }
 
     if (!next || next === current) {
@@ -518,18 +533,39 @@ function findGiftPayload(value, depth = 0, seen = new Set()) {
 
   if (type === "gift" || hasGiftFields) {
     // If this is a gift envelope, prefer its actual data/payload child.
-    const nested =
-      value.data ??
-      value.payload ??
-      value.message ??
-      null;
-
-    if (nested && nested !== value) {
-      const nestedGift = findGiftPayload(nested, depth + 1, seen);
-      if (nestedGift) return nestedGift;
+    // IMPORTANT: a generic envelope can say event/type="gift" while the
+    // actual gift payload is in another argument or a nested wrapper. Do NOT
+    // return that empty envelope just because its event name is "gift".
+    // Otherwise the caller never reaches the real payload and diamondCount
+    // stays 0.
+    for (const key of [
+      "data",
+      "payload",
+      "message",
+      "body",
+      "result",
+      "response",
+      "eventData",
+      "event_data",
+      "gift",
+      "giftInfo",
+      "gift_info",
+      "giftData",
+      "gift_data",
+      "giftDetails",
+      "gift_details",
+      "extendedGiftInfo",
+      "extended_gift_info"
+    ]) {
+      if (value[key] !== undefined && value[key] !== value) {
+        const nestedGift = findGiftPayload(value[key], depth + 1, seen);
+        if (nestedGift) return nestedGift;
+      }
     }
 
-    return value;
+    // Only accept the current object as a gift payload when it actually has
+    // gift fields. A bare {event:"gift"} envelope is not enough.
+    if (hasGiftFields) return value;
   }
 
   // Search common wrappers first.
@@ -541,7 +577,16 @@ function findGiftPayload(value, depth = 0, seen = new Set()) {
     "result",
     "response",
     "eventData",
-    "event_data"
+    "event_data",
+    "gift",
+    "giftInfo",
+    "gift_info",
+    "giftData",
+    "gift_data",
+    "giftDetails",
+    "gift_details",
+    "extendedGiftInfo",
+    "extended_gift_info"
   ]) {
     if (value[key] !== undefined) {
       const found = findGiftPayload(value[key], depth + 1, seen);
@@ -678,6 +723,10 @@ function giftData(event) {
     event.gift?.gift_id ??
     event.giftDetails?.giftId ??
     event.giftDetails?.gift_id ??
+    event.giftInfo?.giftId ??
+    event.giftInfo?.gift_id ??
+    event.giftData?.giftId ??
+    event.giftData?.gift_id ??
     ""
   );
 
@@ -692,6 +741,10 @@ function giftData(event) {
     event.gift?.name ||
     event.giftDetails?.giftName ||
     event.giftDetails?.name ||
+    event.giftInfo?.giftName ||
+    event.giftInfo?.name ||
+    event.giftData?.giftName ||
+    event.giftData?.name ||
     (giftId ? `Gift #${giftId}` : "Gift");
 
   /* -------------------------------------------------------
@@ -726,7 +779,17 @@ function giftData(event) {
     event.extendedGiftInfo?.diamondCount,
     event.extendedGiftInfo?.diamond_count,
     event.extendedGiftInfo?.diamondCost,
-    event.extendedGiftInfo?.diamond_cost
+    event.extendedGiftInfo?.diamond_cost,
+
+    event.giftInfo?.diamondCount,
+    event.giftInfo?.diamond_count,
+    event.giftInfo?.diamondCost,
+    event.giftInfo?.diamond_cost,
+
+    event.giftData?.diamondCount,
+    event.giftData?.diamond_count,
+    event.giftData?.diamondCost,
+    event.giftData?.diamond_cost
   );
 
   // Be tolerant of additional TikTool nesting (for example payloads
@@ -804,6 +867,10 @@ function giftData(event) {
     event.gift?.gift_type ??
     event.giftDetails?.giftType ??
     event.giftDetails?.gift_type ??
+    event.giftInfo?.giftType ??
+    event.giftInfo?.gift_type ??
+    event.giftData?.giftType ??
+    event.giftData?.gift_type ??
     0;
 
   const giftType = Number(giftTypeRaw) || 0;

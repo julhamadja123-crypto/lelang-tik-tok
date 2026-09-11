@@ -1909,9 +1909,61 @@ async function connectToLiveInternal(rawUsername) {
       return;
     }
 
-    if (type !== "gift") return;
+    /*
+     * Some TikTool builds emit the generic `event` channel without a
+     * reliable event/type field. The Railway RAW EVENT log can therefore
+     * show `event` even though the payload itself is already a GiftEvent.
+     *
+     * Do not require type === "gift" when the payload itself clearly has
+     * gift fields. handleGiftEvent() remains the single gate for parsing,
+     * deduplication and coin updates.
+     */
+    const rawGiftCandidate = unwrapTikTokEvent(candidate);
 
-    console.log("[GIFT] diterima melalui generic event channel");
+    const hasGiftShape = (value) => {
+      if (!value || typeof value !== "object") return false;
+
+      return (
+        value.giftId !== undefined ||
+        value.gift_id !== undefined ||
+        value.giftName !== undefined ||
+        value.gift_name !== undefined ||
+        value.diamondCount !== undefined ||
+        value.diamond_count !== undefined ||
+        value.diamondCost !== undefined ||
+        value.diamond_cost !== undefined ||
+        value.giftDetails !== undefined ||
+        value.extendedGiftInfo !== undefined ||
+        value.gift?.giftId !== undefined ||
+        value.gift?.gift_id !== undefined ||
+        value.gift?.giftName !== undefined ||
+        value.gift?.diamondCount !== undefined ||
+        value.gift?.diamond_count !== undefined
+      );
+    };
+
+    const giftShaped =
+      hasGiftShape(candidate) ||
+      hasGiftShape(rawGiftCandidate) ||
+      hasGiftShape(candidate?.data) ||
+      hasGiftShape(candidate?.payload);
+
+    if (type !== "gift" && !giftShaped) return;
+
+    console.log(
+      type === "gift"
+        ? "[GIFT] diterima melalui generic event channel"
+        : "[GIFT] gift-shaped payload diterima melalui generic event channel"
+    );
+
+    /*
+     * Use the normalized gift payload for the fallback path.
+     * unwrapTikTokEvent() removes data/payload/message wrappers.
+     */
+    const genericGiftEvent =
+      rawGiftCandidate && typeof rawGiftCandidate === "object"
+        ? rawGiftCandidate
+        : candidate;
 
     // IMPORTANT:
     // If the primary `gift` listener has delivered a gift recently, the
@@ -1935,7 +1987,7 @@ async function connectToLiveInternal(rawUsername) {
     // Process generic gift events as a compatibility fallback.
     // The shared duplicate guards in handleGiftEvent() prevent the same
     // TikTok gift from being counted twice when it also arrives on `gift`.
-    handleGiftEvent(event, "event");
+    handleGiftEvent(genericGiftEvent, "event");
   });
 
   // TikTool v3 juga menyediakan streamEnd saat creator benar-benar

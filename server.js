@@ -199,7 +199,7 @@ const CROSS_TRANSPORT_TTL = 5000;
 const GIFT_RECEIPT_TTL = 60 * 1000;
 // TikTok/TikTool can occasionally deliver the same normal gift through
 // two channels with different transaction/message IDs. Keep a short semantic guard for that case; combo/streak gifts use their own delta logic.
-const GIFT_SEMANTIC_TTL = 5000;
+const GIFT_SEMANTIC_TTL = 1200;
 // TikTool can replay the first normal gift with a different event ID after
 // the initial delivery. The longer semantic window prevents that replay
 // from becoming a second coin while still keeping combo handling separate.
@@ -731,10 +731,11 @@ function giftData(event) {
         return null;
       }
 
-      processedStreakProgress.set(comboKey, repeatCount);
-
+      // Commit combo progress only after all duplicate guards pass.
+      // Otherwise a rejected first event can make the next event look
+      // already processed and the gift never reaches the participant.
       console.log(
-        `[GIFT-FAST] Combo @${user.uniqueId} | ${giftName} | x${repeatCount} | delta=${comboDelta} | final=${repeatEnd}`
+        `[GIFT-FAST] Combo candidate @${user.uniqueId} | ${giftName} | x${repeatCount} | delta=${comboDelta} | final=${repeatEnd}`
       );
     } else {
       // Jika transport benar-benar tidak menyediakan identitas combo,
@@ -992,6 +993,11 @@ function giftData(event) {
 
   if (semanticFingerprint) {
     processedGiftFingerprints.set(semanticFingerprint, now);
+  }
+
+  // Commit combo progress only after all duplicate guards pass.
+  if (isCombo && comboKey) {
+    processedStreakProgress.set(comboKey, repeatCount);
   }
 
   /* -------------------------------------------------------

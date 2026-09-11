@@ -1260,23 +1260,22 @@ async function connectToLiveInternal(rawUsername) {
    */
 
   // RESTORE MODE YANG SEBELUMNYA STABIL: direct + reconnect internal TikTool.
-  // Jangan memakai relayed sebagai default karena pada deployment terakhir
-  // connector terlihat connected tetapi tidak menerima event gift.
+  // Pada deployment server-65, relayed berhasil CONNECTED tetapi tidak
+  // menghasilkan event gift. Karena target utama sekarang adalah menerima
+  // event gift tanpa mengubah parser/auction, gunakan direct kembali.
   const conn = new Connector({
     uniqueId: username,
     apiKey: TIKTOOL_API_KEY,
     autoReconnect: true,
     maxReconnectAttempts: 5,
-    // Railway dapat membuat direct WebSocket TikTok tersambung tetapi
-    // tidak meneruskan event gift secara konsisten. Gunakan relayed TikTool
-    // agar event gift dikirim melalui transport yang dikelola TikTool.
-    // Railway memakai koneksi managed/relayed agar event gift tidak
-    // bergantung pada jalur WebSocket direct dari IP datacenter.
-    mode: "relayed",
+    // Server-65 memakai relayed: koneksi terlihat sehat, tetapi log
+    // tidak menerima satu pun event gift. Kembalikan jalur direct yang
+    // sebelumnya dipakai saat event gift berhasil masuk.
+    mode: "direct",
     debug: false
   });
 
-  console.log("[TikTok] Mode koneksi: relayed (managed gift event path)");
+  console.log("[TikTok] Mode koneksi: direct (primary gift event path)");
 
   liveConnection = conn;
 

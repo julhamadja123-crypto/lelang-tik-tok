@@ -409,21 +409,33 @@ function unwrapTikTokEvent(event) {
 
     let next = null;
 
-    if (
-      current.data &&
-      typeof current.data === "object"
-    ) {
-      next = current.data;
-    } else if (
-      current.payload &&
-      typeof current.payload === "object"
-    ) {
-      next = current.payload;
-    } else if (
-      current.message &&
-      typeof current.message === "object"
-    ) {
-      next = current.message;
+    if (current.data !== undefined && current.data !== null) {
+      if (typeof current.data === "object") {
+        next = current.data;
+      } else if (typeof current.data === "string") {
+        try {
+          const parsed = JSON.parse(current.data);
+          if (parsed && typeof parsed === "object") next = parsed;
+        } catch (_) {}
+      }
+    } else if (current.payload !== undefined && current.payload !== null) {
+      if (typeof current.payload === "object") {
+        next = current.payload;
+      } else if (typeof current.payload === "string") {
+        try {
+          const parsed = JSON.parse(current.payload);
+          if (parsed && typeof parsed === "object") next = parsed;
+        } catch (_) {}
+      }
+    } else if (current.message !== undefined && current.message !== null) {
+      if (typeof current.message === "object") {
+        next = current.message;
+      } else if (typeof current.message === "string") {
+        try {
+          const parsed = JSON.parse(current.message);
+          if (parsed && typeof parsed === "object") next = parsed;
+        } catch (_) {}
+      }
     }
 
     if (!next || next === current) {
@@ -508,16 +520,23 @@ function findGiftPayload(value, depth = 0, seen = new Set()) {
     value.diamond_count !== undefined ||
     value.diamondCost !== undefined ||
     value.diamond_cost !== undefined ||
+    value.diamondValue !== undefined ||
+    value.diamond_value !== undefined ||
     value.giftDetails !== undefined ||
     value.extendedGiftInfo !== undefined ||
     value.gift?.giftId !== undefined ||
     value.gift?.gift_id !== undefined ||
     value.gift?.giftName !== undefined ||
+    value.gift?.gift_name !== undefined ||
     value.gift?.diamondCount !== undefined ||
-    value.gift?.diamond_count !== undefined;
+    value.gift?.diamond_count !== undefined ||
+    value.gift?.diamondValue !== undefined ||
+    value.gift?.diamond_value !== undefined;
 
   if (type === "gift" || hasGiftFields) {
-    // If this is a gift envelope, prefer its actual data/payload child.
+    // IMPORTANT: prefer the actual nested GiftEvent over a generic
+    // `{type:"gift", data:...}` envelope. A wrapper can itself be labelled
+    // "gift" while carrying the useful diamond fields one level deeper.
     const nested =
       value.data ??
       value.payload ??
@@ -529,7 +548,8 @@ function findGiftPayload(value, depth = 0, seen = new Set()) {
       if (nestedGift) return nestedGift;
     }
 
-    return value;
+    // Do not treat `type:"gift"` alone as a valid gift payload.
+    if (hasGiftFields) return value;
   }
 
   // Search common wrappers first.
@@ -712,21 +732,32 @@ function giftData(event) {
     event.diamond_count,
     event.diamondCost,
     event.diamond_cost,
+    // Some relay/event schemas expose the per-gift price as diamondValue.
+    // This is still an explicit per-gift diamond value, NOT a cumulative
+    // coin total, so accepting it cannot recreate the old double-coin bug.
+    event.diamondValue,
+    event.diamond_value,
 
     event.gift?.diamondCount,
     event.gift?.diamond_count,
     event.gift?.diamondCost,
     event.gift?.diamond_cost,
+    event.gift?.diamondValue,
+    event.gift?.diamond_value,
 
     event.giftDetails?.diamondCount,
     event.giftDetails?.diamond_count,
     event.giftDetails?.diamondCost,
     event.giftDetails?.diamond_cost,
+    event.giftDetails?.diamondValue,
+    event.giftDetails?.diamond_value,
 
     event.extendedGiftInfo?.diamondCount,
     event.extendedGiftInfo?.diamond_count,
     event.extendedGiftInfo?.diamondCost,
-    event.extendedGiftInfo?.diamond_cost
+    event.extendedGiftInfo?.diamond_cost,
+    event.extendedGiftInfo?.diamondValue,
+    event.extendedGiftInfo?.diamond_value
   );
 
   // Be tolerant of additional TikTool nesting (for example payloads
@@ -735,7 +766,8 @@ function giftData(event) {
   let resolvedDiamondCount = diamondCount;
   if (resolvedDiamondCount <= 0) {
     const valueKeys = new Set([
-      "diamondCount", "diamond_count", "diamondCost", "diamond_cost"
+      "diamondCount", "diamond_count", "diamondCost", "diamond_cost",
+      "diamondValue", "diamond_value"
     ]);
 
     const scanGiftValue = (value, depth = 0, seen = new Set()) => {
@@ -844,9 +876,18 @@ function giftData(event) {
   }
 
   if (resolvedDiamondCount <= 0) {
+    // Safe diagnostic: show only structural keys, never the complete TikTok
+    // payload. This makes the next Railway test immediately tell us whether
+    // TikTool delivered a wrapper or a genuinely incomplete gift frame.
+    let structuralKeys = [];
+    try {
+      structuralKeys = Object.keys(event || {}).slice(0, 40);
+    } catch (_) {}
+
     console.log(
       `[GIFT] ${giftName} diabaikan: diamondCount/diamondCost tidak ditemukan. ` +
-      `coinValue/coins tidak dipakai sebagai fallback agar tidak terjadi double/cumulative coin.`
+      `coinValue/coins tidak dipakai sebagai fallback agar tidak terjadi double/cumulative coin. ` +
+      `keys=${structuralKeys.join(",")}`
     );
 
     return null;

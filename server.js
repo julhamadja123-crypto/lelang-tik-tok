@@ -1696,7 +1696,10 @@ async function connectToLiveInternal(rawUsername) {
     // metadata (including createTime), so it can evade ID-based dedupe.
     // Do NOT process generic gift events when the normal `gift` listener is
     // active; the primary listener already receives the same TikTool gift.
-    console.log("[GIFT] generic event gift diabaikan; gunakan primary gift listener");
+    // Process generic gift events as a compatibility fallback.
+    // The shared duplicate guards in handleGiftEvent() prevent the same
+    // TikTok gift from being counted twice when it also arrives on `gift`.
+    handleGiftEvent(event, "event");
   });
 
   // TikTool v3 juga menyediakan streamEnd saat creator benar-benar

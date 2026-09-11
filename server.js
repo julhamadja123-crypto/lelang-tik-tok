@@ -523,6 +523,12 @@ function findGiftPayload(value, depth = 0, seen = new Set()) {
     value.diamond_count !== undefined ||
     value.diamondCost !== undefined ||
     value.diamond_cost !== undefined ||
+    value.coinValue !== undefined ||
+    value.coin_value !== undefined ||
+    value.coins !== undefined ||
+    value.coinCount !== undefined ||
+    value.coin_count !== undefined ||
+    value.coin !== undefined ||
     value.giftDetails !== undefined ||
     value.extendedGiftInfo !== undefined ||
     value.gift?.giftId !== undefined ||
@@ -830,6 +836,68 @@ function giftData(event) {
     scanGiftValue(event);
   }
 
+  /*
+   * COIN FALLBACK
+   * Some TikTool relay payloads expose the per-gift value as coinValue,
+   * coins, coinCount, or coin instead of diamondCount/diamondCost.
+   * This fallback is used ONLY when no explicit diamond value exists.
+   * repeatCount is never used as the coin value.
+   */
+  let resolvedCoinFallback = 0;
+
+  if (resolvedDiamondCount <= 0) {
+    const coinValueKeys = new Set([
+      "coinValue",
+      "coin_value",
+      "coins",
+      "coinCount",
+      "coin_count",
+      "coin"
+    ]);
+
+    const scanCoinValue = (value, depth = 0, seen = new Set()) => {
+      if (
+        resolvedCoinFallback > 0 ||
+        depth > 6 ||
+        value === null ||
+        value === undefined
+      ) return;
+
+      if (typeof value !== "object" || seen.has(value)) return;
+      seen.add(value);
+
+      for (const [key, child] of Object.entries(value)) {
+        if (!coinValueKeys.has(key)) continue;
+        const n = Number(child);
+        if (Number.isFinite(n) && n > 0) {
+          resolvedCoinFallback = n;
+          return;
+        }
+      }
+
+      for (const key of [
+        "gift", "giftInfo", "giftData", "giftDetails",
+        "extendedGiftInfo", "data", "payload", "message",
+        "body", "result", "response", "eventData", "event_data"
+      ]) {
+        if (value[key] && typeof value[key] === "object") {
+          scanCoinValue(value[key], depth + 1, seen);
+          if (resolvedCoinFallback > 0) return;
+        }
+      }
+    };
+
+    scanCoinValue(event);
+  }
+
+  if (resolvedDiamondCount <= 0 && resolvedCoinFallback > 0) {
+    resolvedDiamondCount = resolvedCoinFallback;
+    console.log(
+      `[GIFT] coin fallback aktif: coinValue/coins=${resolvedCoinFallback} ` +
+      `(diamondCount/diamondCost tidak tersedia)`
+    );
+  }
+
   /* -------------------------------------------------------
      REPEAT COUNT
      ------------------------------------------------------- */
@@ -912,8 +980,8 @@ function giftData(event) {
 
   if (resolvedDiamondCount <= 0) {
     console.log(
-      `[GIFT] ${giftName} diabaikan: diamondCount/diamondCost tidak ditemukan. ` +
-      `coinValue/coins tidak dipakai sebagai fallback agar tidak terjadi double/cumulative coin.`
+      `[GIFT] ${giftName} diabaikan: nilai coin gift tidak ditemukan ` +
+      `(diamondCount/diamondCost/coinValue/coins).`
     );
 
     return null;

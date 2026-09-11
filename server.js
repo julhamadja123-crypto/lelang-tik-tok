@@ -187,11 +187,16 @@ const processedStreakProgress = new Map();
 // Protect against the same normal gift arriving through both TikTool
 // `gift` and generic `event` transports with different IDs.
 const processedCrossTransportGifts = new Map();
+// Receipt cache khusus normal gift yang memiliki createTime upstream.
+// Dipisahkan dari cache cross-transport 5 detik agar replay terlambat
+// dari gift yang sama tetap ditolak tanpa memblokir gift baru yang sah.
+const processedGiftReceipts = new Map();
 let processedGiftEventsCleanupAt = 0;
 
 const GIFT_TTL = 60 * 1000;
 const GIFT_FINGERPRINT_TTL = 5000;
 const CROSS_TRANSPORT_TTL = 5000;
+const GIFT_RECEIPT_TTL = 60 * 1000;
 // TikTok/TikTool can occasionally deliver the same normal gift through
 // two channels with different transaction/message IDs. Keep a short semantic guard for that case; combo/streak gifts use their own delta logic.
 const GIFT_SEMANTIC_TTL = 5000;
@@ -845,6 +850,12 @@ function giftData(event) {
       }
     }
 
+    for (const [key, info] of processedGiftReceipts.entries()) {
+      if (!info || now - info.at > GIFT_RECEIPT_TTL) {
+        processedGiftReceipts.delete(key);
+      }
+    }
+
     processedGiftEventsCleanupAt = now + 5000;
   }
 
@@ -1172,6 +1183,7 @@ async function connectToLiveInternal(rawUsername) {
   processedGiftFingerprints.clear();
   processedStreakProgress.clear();
   processedCrossTransportGifts.clear();
+  processedGiftReceipts.clear();
   processedGiftEventsCleanupAt = 0;
 
   manualDisconnect = false;
@@ -1383,12 +1395,12 @@ async function connectToLiveInternal(rawUsername) {
         : null;
 
       if (receiptKey) {
-        const previousReceipt = processedCrossTransportGifts.get(receiptKey);
+        const previousReceipt = processedGiftReceipts.get(receiptKey);
         if (previousReceipt) {
           console.log(`[GIFT] DUPLICATE receipt diabaikan: ${receiptKey}`);
           return;
         }
-        processedCrossTransportGifts.set(receiptKey, {
+        processedGiftReceipts.set(receiptKey, {
           at: eventReceivedAt,
           channel: deliveryChannel
         });

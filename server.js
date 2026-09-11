@@ -444,6 +444,117 @@ function unwrapTikTokEvent(event) {
   return current || {};
 }
 
+
+/* =========================================================
+   ROBUST GIFT PAYLOAD EXTRACTION
+   =========================================================
+   @tiktool/live normally emits:
+     { event: "gift", data: { user, giftName, diamondCount, ... } }
+
+   Some relayed/generic transports can add extra wrappers, arrays, or
+   JSON-string payloads. Find the actual gift object without changing
+   the TikTok connection itself.
+========================================================= */
+function findGiftPayload(value, depth = 0, seen = new Set()) {
+  if (depth > 8 || value === null || value === undefined) return null;
+
+  if (typeof value === "string") {
+    const text = value.trim();
+    if (!text) return null;
+
+    // Only parse strings that look like JSON objects/arrays.
+    if (text[0] === "{" || text[0] === "[") {
+      try {
+        return findGiftPayload(JSON.parse(text), depth + 1, seen);
+      } catch (_) {
+        return null;
+      }
+    }
+    return null;
+  }
+
+  if (typeof value !== "object") return null;
+
+  if (seen.has(value)) return null;
+  seen.add(value);
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = findGiftPayload(item, depth + 1, seen);
+      if (found) return found;
+    }
+    return null;
+  }
+
+  const type = String(
+    value.event ??
+    value.type ??
+    value.eventType ??
+    value.event_type ??
+    ""
+  ).toLowerCase();
+
+  const hasGiftFields =
+    value.giftId !== undefined ||
+    value.gift_id !== undefined ||
+    value.giftName !== undefined ||
+    value.gift_name !== undefined ||
+    value.diamondCount !== undefined ||
+    value.diamond_count !== undefined ||
+    value.diamondCost !== undefined ||
+    value.diamond_cost !== undefined ||
+    value.giftDetails !== undefined ||
+    value.extendedGiftInfo !== undefined ||
+    value.gift?.giftId !== undefined ||
+    value.gift?.gift_id !== undefined ||
+    value.gift?.giftName !== undefined ||
+    value.gift?.diamondCount !== undefined ||
+    value.gift?.diamond_count !== undefined;
+
+  if (type === "gift" || hasGiftFields) {
+    // If this is a gift envelope, prefer its actual data/payload child.
+    const nested =
+      value.data ??
+      value.payload ??
+      value.message ??
+      null;
+
+    if (nested && nested !== value) {
+      const nestedGift = findGiftPayload(nested, depth + 1, seen);
+      if (nestedGift) return nestedGift;
+    }
+
+    return value;
+  }
+
+  // Search common wrappers first.
+  for (const key of [
+    "data",
+    "payload",
+    "message",
+    "body",
+    "result",
+    "response",
+    "eventData",
+    "event_data"
+  ]) {
+    if (value[key] !== undefined) {
+      const found = findGiftPayload(value[key], depth + 1, seen);
+      if (found) return found;
+    }
+  }
+
+  // Last resort: inspect enumerable children. This is bounded by depth.
+  for (const child of Object.values(value)) {
+    if (child && (typeof child === "object" || typeof child === "string")) {
+      const found = findGiftPayload(child, depth + 1, seen);
+      if (found) return found;
+    }
+  }
+
+  return null;
+}
+
 function userData(event) {
   event = unwrapTikTokEvent(event);
   const user = event?.user || {};
@@ -1831,28 +1942,26 @@ async function connectToLiveInternal(rawUsername) {
         }
 
         const first = args[0];
-        if (first && typeof first === "object") {
-          const candidate = unwrapTikTokEvent(first);
-          const candidateType = String(
-            first?.event || first?.type || candidate?.event || candidate?.type || ""
-          ).toLowerCase();
+        const second = args[1];
+        const rawFirstCandidate = findGiftPayload(first);
+        const rawSecondCandidate = findGiftPayload(second);
+        const candidate = rawFirstCandidate || rawSecondCandidate || unwrapTikTokEvent(first);
+        const candidateType = String(
+          first?.event ||
+          first?.type ||
+          candidate?.event ||
+          candidate?.type ||
+          (typeof first === "string" ? first : "")
+        ).toLowerCase();
 
-          const looksLikeGift =
-            candidateType === "gift" ||
-            lowerName.includes("gift") ||
-            first?.giftId !== undefined ||
-            first?.gift_id !== undefined ||
-            first?.diamondCount !== undefined ||
-            first?.diamond_count !== undefined ||
-            candidate?.giftId !== undefined ||
-            candidate?.gift_id !== undefined ||
-            candidate?.diamondCount !== undefined ||
-            candidate?.diamond_count !== undefined;
+        const looksLikeGift =
+          candidateType === "gift" ||
+          lowerName.includes("gift") ||
+          Boolean(rawFirstCandidate || rawSecondCandidate);
 
-          if (looksLikeGift && !lowerName.includes("gift") && lowerName !== "event") {
-            console.log(`[TikTok RAW EVENT] gift-shaped payload on ${name}`);
-            handleGiftEvent(candidate, `raw:${name}`);
-          }
+        if (looksLikeGift && !lowerName.includes("gift") && lowerName !== "event") {
+          console.log(`[TikTok RAW EVENT] gift-shaped payload on ${name}`);
+          handleGiftEvent(candidate, `raw:${name}`);
         }
       }
 
@@ -1883,13 +1992,17 @@ async function connectToLiveInternal(rawUsername) {
 
     if (
       typeof incomingEvent === "string" &&
-      maybePayload &&
-      typeof maybePayload === "object"
+      maybePayload !== undefined
     ) {
       candidate = {
         type: incomingEvent,
         data: maybePayload
       };
+    } else if (
+      incomingEvent === undefined &&
+      maybePayload !== undefined
+    ) {
+      candidate = maybePayload;
     }
 
     const event = unwrapTikTokEvent(candidate);
@@ -1898,6 +2011,7 @@ async function connectToLiveInternal(rawUsername) {
       candidate?.type ||
       event?.event ||
       event?.type ||
+      (typeof incomingEvent === "string" ? incomingEvent : "") ||
       ""
     ).toLowerCase();
 
@@ -1919,36 +2033,21 @@ async function connectToLiveInternal(rawUsername) {
      * deduplication and coin updates.
      */
     const rawGiftCandidate = unwrapTikTokEvent(candidate);
+    const extractedGiftCandidate = findGiftPayload(candidate);
 
-    const hasGiftShape = (value) => {
-      if (!value || typeof value !== "object") return false;
+    const giftShaped = Boolean(
+      extractedGiftCandidate ||
+      findGiftPayload(rawGiftCandidate)
+    );
 
-      return (
-        value.giftId !== undefined ||
-        value.gift_id !== undefined ||
-        value.giftName !== undefined ||
-        value.gift_name !== undefined ||
-        value.diamondCount !== undefined ||
-        value.diamond_count !== undefined ||
-        value.diamondCost !== undefined ||
-        value.diamond_cost !== undefined ||
-        value.giftDetails !== undefined ||
-        value.extendedGiftInfo !== undefined ||
-        value.gift?.giftId !== undefined ||
-        value.gift?.gift_id !== undefined ||
-        value.gift?.giftName !== undefined ||
-        value.gift?.diamondCount !== undefined ||
-        value.gift?.diamond_count !== undefined
-      );
-    };
-
-    const giftShaped =
-      hasGiftShape(candidate) ||
-      hasGiftShape(rawGiftCandidate) ||
-      hasGiftShape(candidate?.data) ||
-      hasGiftShape(candidate?.payload);
-
-    if (type !== "gift" && !giftShaped) return;
+    if (type !== "gift" && !giftShaped) {
+      // Keep this diagnostic small: it tells us the generic event arrived
+      // but did not contain a recognizable gift payload.
+      if (String(type || "").includes("gift")) {
+        console.log("[GIFT] generic gift event tidak dapat diekstrak");
+      }
+      return;
+    }
 
     console.log(
       type === "gift"
@@ -1957,13 +2056,14 @@ async function connectToLiveInternal(rawUsername) {
     );
 
     /*
-     * Use the normalized gift payload for the fallback path.
-     * unwrapTikTokEvent() removes data/payload/message wrappers.
+     * Use the deepest actual gift object, not the outer `event` wrapper.
+     * This is the important fallback for relayed/generic payloads.
      */
     const genericGiftEvent =
-      rawGiftCandidate && typeof rawGiftCandidate === "object"
-        ? rawGiftCandidate
-        : candidate;
+      extractedGiftCandidate ||
+      findGiftPayload(rawGiftCandidate) ||
+      rawGiftCandidate ||
+      candidate;
 
     // IMPORTANT:
     // If the primary `gift` listener has delivered a gift recently, the

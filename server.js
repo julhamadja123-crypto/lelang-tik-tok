@@ -1682,10 +1682,15 @@ async function connectToLiveInternal(rawUsername) {
     console.log("[GIFT] diterima melalui generic event channel");
 
     // IMPORTANT:
-    // Some @tiktool/live transports deliver the gift ONLY through the
-    // generic "event" channel. The primary "gift" listener and this
-    // compatibility path share the same duplicate protection.
-    handleGiftEvent(candidate, "event");
+    // The primary `gift` listener is the authoritative gift path.
+    // The generic `event` channel is kept only as a compatibility fallback.
+    // If a transport exposes the same gift on both channels, processing both
+    // paths can make a 1-coin gift become 2 coins. The shared receipt guards
+    // above protect most cases, but the generic channel can rewrite transport
+    // metadata (including createTime), so it can evade ID-based dedupe.
+    // Do NOT process generic gift events when the normal `gift` listener is
+    // active; the primary listener already receives the same TikTool gift.
+    console.log("[GIFT] generic event gift diabaikan; gunakan primary gift listener");
   });
 
   // TikTool v3 juga menyediakan streamEnd saat creator benar-benar

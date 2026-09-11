@@ -722,7 +722,17 @@ function giftData(event) {
 
     if (comboKey) {
       const previousRepeat = Number(processedStreakProgress.get(comboKey) || 0);
-      comboDelta = repeatCount - previousRepeat;
+
+      // FAST + SAFE FIRST GIFT:
+      // TikTool can occasionally label the very first Rose event as a
+      // streak/combo and report repeatCount > 1 even though the viewer has
+      // only sent one gift. The first accepted event must therefore always
+      // contribute exactly ONE gift. Later events may add only the new
+      // repeat delta (x2 -> +1, x3 -> +1, etc.). This keeps the first 1-coin
+      // gift at 1 coin without introducing any artificial delay.
+      comboDelta = previousRepeat <= 0
+        ? 1
+        : repeatCount - previousRepeat;
 
       if (comboDelta <= 0) {
         console.log(

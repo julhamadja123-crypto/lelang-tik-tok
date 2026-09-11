@@ -1643,21 +1643,36 @@ async function connectToLiveInternal(rawUsername) {
 
     let key;
 
-    if (
-      gift.userId &&
-      gift.userId !== "unknown"
-    ) {
-      key = `id:${gift.userId}`;
-    } else if (
-      gift.uniqueId
-    ) {
-      key = `unique:${gift.uniqueId.toLowerCase()}`;
-    } else if (
-      gift.username
-    ) {
-      key = `username:${gift.username.toLowerCase()}`;
+    /*
+       PARTICIPANT IDENTITY HARDENING
+       -----------------------------------------------------
+       Pada beberapa payload TikTool, userId dapat kosong, berubah, atau
+       terbawa dari wrapper/transport yang berbeda. UniqueId/username justru
+       merupakan identitas akun yang tampil di LIVE dan stabil antar gift.
+
+       Gunakan uniqueId sebagai key utama agar gift peserta B TIDAK pernah
+       masuk ke participant A hanya karena userId dari relay bentrok.
+       userId tetap dipakai sebagai fallback jika uniqueId tidak tersedia.
+    */
+    const normalizedUniqueId = String(gift.uniqueId || "")
+      .trim()
+      .replace(/^@+/, "")
+      .toLowerCase();
+    const normalizedUsername = String(gift.username || "")
+      .trim()
+      .replace(/^@+/, "")
+      .toLowerCase();
+    const normalizedUserId = String(gift.userId || "")
+      .trim();
+
+    if (normalizedUniqueId && normalizedUniqueId !== "viewer") {
+      key = `unique:${normalizedUniqueId}`;
+    } else if (normalizedUsername && normalizedUsername !== "viewer") {
+      key = `username:${normalizedUsername}`;
+    } else if (normalizedUserId && normalizedUserId !== "unknown") {
+      key = `id:${normalizedUserId}`;
     } else {
-      key = `name:${String(gift.nickname || "viewer").toLowerCase()}`;
+      key = `name:${String(gift.nickname || "viewer").trim().toLowerCase()}`;
     }
 
     /* -----------------------------------------------------

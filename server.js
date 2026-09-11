@@ -1805,12 +1805,26 @@ async function connectToLiveInternal(rawUsername) {
   const handledGiftObjects = new WeakSet();
 
   const handleGiftEvent = (incomingEvent, deliveryChannel = "gift") => {
-    if (incomingEvent && typeof incomingEvent === "object") {
-      if (handledGiftObjects.has(incomingEvent)) {
-        console.log("[GIFT] DUPLICATE listener event diabaikan");
-        return;
-      }
-      handledGiftObjects.add(incomingEvent);
+    /*
+     * IMPORTANT:
+     * Jangan memasukkan object ke WeakSet SEBELUM giftData() berhasil.
+     *
+     * @tiktool/live dapat mengirim object gift yang sama lewat lebih dari satu
+     * jalur. Kadang listener pertama menerima wrapper/partial frame yang belum
+     * bisa diparse, lalu listener `event` / fallback menerima payload lengkap.
+     *
+     * Versi sebelumnya menandai object sebagai "handled" terlalu awal. Akibatnya
+     * kalau percobaan pertama gagal parse, fallback berikutnya langsung dianggap
+     * duplicate dan gift 1 coin hilang. Duplicate guard sekarang di-commit hanya
+     * setelah gift benar-benar valid.
+     */
+    if (
+      incomingEvent &&
+      typeof incomingEvent === "object" &&
+      handledGiftObjects.has(incomingEvent)
+    ) {
+      console.log("[GIFT] DUPLICATE listener event diabaikan");
+      return;
     }
 
     const eventReceivedAt = Date.now();
@@ -1834,9 +1848,16 @@ async function connectToLiveInternal(rawUsername) {
 
     if (!gift) {
       console.log(
-        "[GIFT] event diterima tetapi gift tidak valid/complete atau duplicate/progress combo"
+        `[GIFT] ${deliveryChannel} diterima tetapi gift belum valid/complete atau duplicate/progress combo`
       );
       return;
+    }
+
+    // IMPORTANT: commit the object-level duplicate guard ONLY after
+    // giftData() has produced a valid gift. This keeps fallback channels
+    // alive when the first listener saw only a partial wrapper.
+    if (incomingEvent && typeof incomingEvent === "object") {
+      handledGiftObjects.add(incomingEvent);
     }
 
     // Mark the primary channel only after giftData() has produced a valid
@@ -2257,6 +2278,44 @@ async function connectToLiveInternal(rawUsername) {
     let giftCandidate = null;
 
     for (const rawCandidate of candidates) {
+      /*
+       * FAST STANDARD ENVELOPE:
+       * TikTool documents gift frames as:
+       *   { event: "gift", data: { user, giftId, giftName, diamondCount, ... } }
+       *
+       * Prefer the explicit `data` object when the outer frame declares a gift.
+       * This avoids losing a valid 1-diamond gift when a transport wrapper is
+       * non-enumerable/partial and the generic recursive extractor cannot see
+       * the inner fields.
+       */
+      if (rawCandidate && typeof rawCandidate === "object") {
+        const rawType = String(
+          rawCandidate.event ??
+          rawCandidate.type ??
+          rawCandidate.eventType ??
+          rawCandidate.event_type ??
+          ""
+        ).toLowerCase();
+
+        if (
+          rawType === "gift" &&
+          rawCandidate.data &&
+          typeof rawCandidate.data === "object"
+        ) {
+          giftCandidate = rawCandidate.data;
+          break;
+        }
+
+        if (
+          rawType === "gift" &&
+          rawCandidate.payload &&
+          typeof rawCandidate.payload === "object"
+        ) {
+          giftCandidate = rawCandidate.payload;
+          break;
+        }
+      }
+
       const normalized = normalizeRawEventCandidate(rawCandidate);
       if (!candidate && normalized) candidate = normalized;
 
@@ -2355,7 +2414,34 @@ async function connectToLiveInternal(rawUsername) {
    * handleGiftEvent(), so this cannot create a second coin for the same gift.
    */
   conn.on("message", (rawMessage) => {
-    const giftCandidate =
+    let giftCandidate = null;
+
+    if (rawMessage && typeof rawMessage === "object") {
+      const rawType = String(
+        rawMessage.event ??
+        rawMessage.type ??
+        rawMessage.eventType ??
+        rawMessage.event_type ??
+        ""
+      ).toLowerCase();
+
+      if (
+        rawType === "gift" &&
+        rawMessage.data &&
+        typeof rawMessage.data === "object"
+      ) {
+        giftCandidate = rawMessage.data;
+      } else if (
+        rawType === "gift" &&
+        rawMessage.payload &&
+        typeof rawMessage.payload === "object"
+      ) {
+        giftCandidate = rawMessage.payload;
+      }
+    }
+
+    giftCandidate =
+      giftCandidate ||
       extractGiftPayloadStrict(rawMessage) ||
       normalizeRawEventCandidate(rawMessage);
     if (!giftCandidate) return;

@@ -623,6 +623,149 @@ function findGiftPayload(value, depth = 0, seen = new Set()) {
    This helper is ONLY for gift extraction. It does not alter the TikTok
    connection itself.
 ========================================================= */
+
+/* =========================================================
+   STRICT GIFT ENVELOPE EXTRACTOR — server-70
+   =========================================================
+   TikTool's documented websocket envelope is:
+     { event: "gift", data: { ...gift fields... } }
+
+   The previous generic extractor could still return the OUTER envelope in
+   some transports. That leaves giftData() looking at {event:"gift"} instead
+   of data.diamondCount, producing coin=0 and dropping the gift.
+
+   This helper deliberately unwraps event -> data first. It never uses
+   repeatCount as coin value and never changes the TikTok connection.
+========================================================= */
+function extractGiftPayloadStrict(value, depth = 0, seen = new Set()) {
+  if (depth > 10 || value === null || value === undefined) return null;
+
+  if (typeof value === "string") {
+    const text = value.trim();
+    if (!text || (text[0] !== "{" && text[0] !== "[")) return null;
+    try {
+      return extractGiftPayloadStrict(JSON.parse(text), depth + 1, seen);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  if (typeof value !== "object") return null;
+  if (seen.has(value)) return null;
+  seen.add(value);
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = extractGiftPayloadStrict(item, depth + 1, seen);
+      if (found) return found;
+    }
+    return null;
+  }
+
+  const eventType = String(
+    value.event ?? value.type ?? value.eventType ?? value.event_type ?? ""
+  ).trim().toLowerCase();
+
+  const hasActualGiftValue = (obj) => {
+    if (!obj || typeof obj !== "object") return false;
+    const positive = (v) => {
+      const n = Number(v);
+      return Number.isFinite(n) && n > 0;
+    };
+
+    return (
+      positive(obj.diamondCount) ||
+      positive(obj.diamond_count) ||
+      positive(obj.diamondCost) ||
+      positive(obj.diamond_cost) ||
+      positive(obj.coinValue) ||
+      positive(obj.coin_value) ||
+      positive(obj.coins) ||
+      positive(obj.coinCount) ||
+      positive(obj.coin_count) ||
+      positive(obj.coin) ||
+      obj.giftId !== undefined ||
+      obj.gift_id !== undefined ||
+      obj.giftName !== undefined ||
+      obj.gift_name !== undefined
+    );
+  };
+
+  // CRITICAL: for an explicit gift envelope, unwrap `data` FIRST.
+  // Do not accept the outer {event:"gift"} object when data exists.
+  if (eventType === "gift") {
+    const directKeys = [
+      "data",
+      "payload",
+      "message",
+      "body",
+      "eventData",
+      "event_data",
+      "gift",
+      "giftData",
+      "gift_data",
+      "giftInfo",
+      "gift_info",
+      "giftDetails",
+      "gift_details",
+      "extendedGiftInfo",
+      "extended_gift_info"
+    ];
+
+    for (const key of directKeys) {
+      if (value[key] === undefined || value[key] === null) continue;
+      const child = value[key];
+      const found = extractGiftPayloadStrict(child, depth + 1, seen);
+      if (found) return found;
+
+      // If the child itself is already the actual flat gift object, accept it.
+      if (typeof child === "object" && !Array.isArray(child) && hasActualGiftValue(child)) {
+        return child;
+      }
+    }
+
+    if (hasActualGiftValue(value)) return value;
+    return null;
+  }
+
+  // A flat gift payload may have no event/type field at all.
+  if (hasActualGiftValue(value)) return value;
+
+  // For non-gift wrappers, recursively inspect only known transport fields
+  // before falling back to generic object traversal.
+  for (const key of [
+    "data",
+    "payload",
+    "message",
+    "body",
+    "result",
+    "response",
+    "eventData",
+    "event_data",
+    "gift",
+    "giftData",
+    "gift_data",
+    "giftInfo",
+    "gift_info",
+    "giftDetails",
+    "gift_details",
+    "extendedGiftInfo",
+    "extended_gift_info"
+  ]) {
+    if (value[key] === undefined || value[key] === null) continue;
+    const found = extractGiftPayloadStrict(value[key], depth + 1, seen);
+    if (found) return found;
+  }
+
+  for (const child of Object.values(value)) {
+    if (!child || (typeof child !== "object" && typeof child !== "string")) continue;
+    const found = extractGiftPayloadStrict(child, depth + 1, seen);
+    if (found) return found;
+  }
+
+  return null;
+}
+
 function normalizeRawEventCandidate(value) {
   if (value === null || value === undefined) return null;
 
@@ -657,6 +800,72 @@ function normalizeRawEventCandidate(value) {
   } catch (_) {}
 
   return null;
+}
+
+
+/* =========================================================
+   GENERIC EVENT GIFT VALUE GUARD — server-70
+   =========================================================
+   EventEmitter `event` kadang mengirim envelope/heartbeat/partial event
+   yang memiliki bentuk mirip gift tetapi TIDAK memiliki nilai coin/diamond.
+
+   JANGAN kirim payload seperti itu ke giftData()/handleGiftEvent().
+   Jalur `gift` utama tetap tidak diubah. Guard ini hanya dipakai sebelum
+   fallback generic/raw mencoba memproses sebuah payload sebagai gift.
+========================================================= */
+function hasPositiveGiftValue(value, depth = 0, seen = new Set()) {
+  if (depth > 8 || value === null || value === undefined) return false;
+
+  if (typeof value === "string") {
+    const text = value.trim();
+    if (!text || (text[0] !== "{" && text[0] !== "[")) return false;
+    try {
+      return hasPositiveGiftValue(JSON.parse(text), depth + 1, seen);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  if (typeof value !== "object" || seen.has(value)) return false;
+  seen.add(value);
+
+  if (Array.isArray(value)) {
+    return value.some((item) =>
+      hasPositiveGiftValue(item, depth + 1, seen)
+    );
+  }
+
+  const valueKeys = [
+    "diamondCount", "diamond_count",
+    "diamondCost", "diamond_cost",
+    "coinValue", "coin_value",
+    "coinCount", "coin_count",
+    "coins", "coin"
+  ];
+
+  for (const key of valueKeys) {
+    if (value[key] === undefined || value[key] === null || value[key] === "") continue;
+    const n = Number(value[key]);
+    if (Number.isFinite(n) && n > 0) return true;
+  }
+
+  for (const key of [
+    "data", "payload", "message", "body", "result", "response",
+    "eventData", "event_data", "gift", "giftData", "gift_data",
+    "giftInfo", "gift_info", "giftDetails", "gift_details",
+    "extendedGiftInfo", "extended_gift_info"
+  ]) {
+    if (value[key] !== undefined && value[key] !== null &&
+        hasPositiveGiftValue(value[key], depth + 1, seen)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function isUsableGenericGiftPayload(value) {
+  return Boolean(value && typeof value === "object" && hasPositiveGiftValue(value));
 }
 
 function userData(event) {
@@ -1714,7 +1923,7 @@ async function connectToLiveInternal(rawUsername) {
         : gift.groupId
           ? `group:${String(gift.groupId).trim()}`
           : `fast:${Math.floor(eventReceivedAt / 500)}`;
-    const crossRepeat = gift.isCombo ? String(gift.repeatCount || 1) : "normal";
+    const crossRepeat = gift.combo ? String(gift.repeatCount || 1) : "normal";
     const crossTransportKey =
       `cross:${crossSender}|${crossGift}|${crossRepeat}|${crossIdentity}`;
 
@@ -2262,7 +2471,11 @@ async function connectToLiveInternal(rawUsername) {
       const normalized = normalizeRawEventCandidate(rawCandidate);
       if (!candidate && normalized) candidate = normalized;
 
+      // For gift events, ALWAYS prefer the strict event -> data -> gift
+      // extractor. The generic normalizer may otherwise return the outer
+      // {event:"gift"} envelope and hide data.diamondCount.
       const found =
+        extractGiftPayloadStrict(rawCandidate) ||
         normalizeRawEventCandidate(rawCandidate) ||
         findGiftPayload(rawCandidate);
 
@@ -2280,7 +2493,9 @@ async function connectToLiveInternal(rawUsername) {
           typeof incomingEvent === "string" ? incomingEvent : undefined,
         data: maybePayload !== undefined ? maybePayload : incomingEvent
       };
-      giftCandidate = normalizeRawEventCandidate(combined);
+      giftCandidate =
+        extractGiftPayloadStrict(combined) ||
+        normalizeRawEventCandidate(combined);
     }
 
     const event =
@@ -2309,15 +2524,25 @@ async function connectToLiveInternal(rawUsername) {
       // Keep diagnostics concise. We intentionally do not print full raw
       // payloads because they may contain a large amount of room metadata.
       if (type === "gift" || type.includes("gift")) {
-        console.log("[GIFT] generic event bertipe gift tetapi payload tidak dapat diekstrak");
+        console.log("[GIFT] generic event gift tidak lengkap -> diabaikan");
       }
+      return;
+    }
+
+    // IMPORTANT: a gift-shaped envelope with giftId/name but coin=0 is NOT
+    // a payable gift. Do not send it into handleGiftEvent(). This removes the
+    // repeated `giftId tidak ada / coin=0` noise seen in Railway and, more
+    // importantly, prevents partial generic events from competing with the
+    // working primary `gift` listener.
+    if (!isUsableGenericGiftPayload(giftCandidate)) {
+      console.log("[GIFT] generic event non-gift/partial -> diabaikan (coin/diamond=0)");
       return;
     }
 
     console.log(
       type === "gift"
         ? "[GIFT] diterima melalui generic event channel"
-        : "[GIFT] gift-shaped payload diterima melalui generic event channel"
+        : "[GIFT] gift-shaped payload valid melalui generic event channel"
     );
 
     // The same gift can arrive through both `gift` and `event`. If the
@@ -2344,7 +2569,9 @@ async function connectToLiveInternal(rawUsername) {
    * handleGiftEvent(), so this cannot create a second coin for the same gift.
    */
   conn.on("message", (rawMessage) => {
-    const giftCandidate = normalizeRawEventCandidate(rawMessage);
+    const giftCandidate =
+      extractGiftPayloadStrict(rawMessage) ||
+      normalizeRawEventCandidate(rawMessage);
     if (!giftCandidate) return;
 
     const type = String(
@@ -2360,7 +2587,14 @@ async function connectToLiveInternal(rawUsername) {
 
     if (!actualGift) return;
 
-    console.log("[GIFT] gift-shaped payload diterima melalui raw message channel");
+    // Raw message fallback also must contain a real positive coin/diamond
+    // value. giftId/name alone is not enough.
+    if (!isUsableGenericGiftPayload(actualGift)) {
+      console.log("[GIFT] raw message partial/non-gift -> diabaikan (coin/diamond=0)");
+      return;
+    }
+
+    console.log("[GIFT] gift-shaped payload valid melalui raw message channel");
 
     if (
       lastPrimaryGiftAt > 0 &&

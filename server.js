@@ -638,7 +638,7 @@ function findGiftPayload(value, depth = 0, seen = new Set()) {
    repeatCount as coin value and never changes the TikTok connection.
 ========================================================= */
 function extractGiftPayloadStrict(value, depth = 0, seen = new Set()) {
-  if (depth > 10 || value === null || value === undefined) return null;
+  if (depth > 12 || value === null || value === undefined) return null;
 
   if (typeof value === "string") {
     const text = value.trim();
@@ -654,6 +654,42 @@ function extractGiftPayloadStrict(value, depth = 0, seen = new Set()) {
   if (seen.has(value)) return null;
   seen.add(value);
 
+  const positive = (v) => {
+    const n = Number(v);
+    return Number.isFinite(n) && n > 0;
+  };
+
+  const hasPositiveValue = (obj) => {
+    if (!obj || typeof obj !== "object") return false;
+    return (
+      positive(obj.diamondCount) ||
+      positive(obj.diamond_count) ||
+      positive(obj.diamondCost) ||
+      positive(obj.diamond_cost) ||
+      positive(obj.coinValue) ||
+      positive(obj.coin_value) ||
+      positive(obj.coins) ||
+      positive(obj.coinCount) ||
+      positive(obj.coin_count) ||
+      positive(obj.coin)
+    );
+  };
+
+  const hasGiftIdentity = (obj) => {
+    if (!obj || typeof obj !== "object") return false;
+    return (
+      obj.giftId !== undefined ||
+      obj.gift_id !== undefined ||
+      obj.giftName !== undefined ||
+      obj.gift_name !== undefined ||
+      obj.gift !== undefined ||
+      obj.giftInfo !== undefined ||
+      obj.giftData !== undefined ||
+      obj.giftDetails !== undefined ||
+      obj.extendedGiftInfo !== undefined
+    );
+  };
+
   if (Array.isArray(value)) {
     for (const item of value) {
       const found = extractGiftPayloadStrict(item, depth + 1, seen);
@@ -666,74 +702,21 @@ function extractGiftPayloadStrict(value, depth = 0, seen = new Set()) {
     value.event ?? value.type ?? value.eventType ?? value.event_type ?? ""
   ).trim().toLowerCase();
 
-  const hasActualGiftValue = (obj) => {
-    if (!obj || typeof obj !== "object") return false;
-    const positive = (v) => {
-      const n = Number(v);
-      return Number.isFinite(n) && n > 0;
-    };
+  /*
+   * IMPORTANT:
+   * Never return a wrapper merely because it contains giftId/giftName.
+   * Some TikTool envelopes have the identity on the outer object while the
+   * actual diamond/coin value is several levels deeper. Returning the outer
+   * object made giftData() see coin=0 and drop the gift.
+   *
+   * Priority:
+   *   1. direct object with a positive per-gift value
+   *   2. known gift/data wrappers
+   *   3. bounded generic children
+   */
+  if (hasPositiveValue(value)) return value;
 
-    return (
-      positive(obj.diamondCount) ||
-      positive(obj.diamond_count) ||
-      positive(obj.diamondCost) ||
-      positive(obj.diamond_cost) ||
-      positive(obj.coinValue) ||
-      positive(obj.coin_value) ||
-      positive(obj.coins) ||
-      positive(obj.coinCount) ||
-      positive(obj.coin_count) ||
-      positive(obj.coin) ||
-      obj.giftId !== undefined ||
-      obj.gift_id !== undefined ||
-      obj.giftName !== undefined ||
-      obj.gift_name !== undefined
-    );
-  };
-
-  // CRITICAL: for an explicit gift envelope, unwrap `data` FIRST.
-  // Do not accept the outer {event:"gift"} object when data exists.
-  if (eventType === "gift") {
-    const directKeys = [
-      "data",
-      "payload",
-      "message",
-      "body",
-      "eventData",
-      "event_data",
-      "gift",
-      "giftData",
-      "gift_data",
-      "giftInfo",
-      "gift_info",
-      "giftDetails",
-      "gift_details",
-      "extendedGiftInfo",
-      "extended_gift_info"
-    ];
-
-    for (const key of directKeys) {
-      if (value[key] === undefined || value[key] === null) continue;
-      const child = value[key];
-      const found = extractGiftPayloadStrict(child, depth + 1, seen);
-      if (found) return found;
-
-      // If the child itself is already the actual flat gift object, accept it.
-      if (typeof child === "object" && !Array.isArray(child) && hasActualGiftValue(child)) {
-        return child;
-      }
-    }
-
-    if (hasActualGiftValue(value)) return value;
-    return null;
-  }
-
-  // A flat gift payload may have no event/type field at all.
-  if (hasActualGiftValue(value)) return value;
-
-  // For non-gift wrappers, recursively inspect only known transport fields
-  // before falling back to generic object traversal.
-  for (const key of [
+  const directKeys = [
     "data",
     "payload",
     "message",
@@ -751,16 +734,39 @@ function extractGiftPayloadStrict(value, depth = 0, seen = new Set()) {
     "gift_details",
     "extendedGiftInfo",
     "extended_gift_info"
-  ]) {
-    if (value[key] === undefined || value[key] === null) continue;
-    const found = extractGiftPayloadStrict(value[key], depth + 1, seen);
+  ];
+
+  /*
+   * For a named gift envelope, search all known children first.
+   * This fixes partial envelopes such as:
+   * { event:"gift", giftId:..., data:{ diamondCount:1, ... } }
+   */
+  for (const key of directKeys) {
+    const child = value[key];
+    if (child === undefined || child === null || child === value) continue;
+
+    const found = extractGiftPayloadStrict(child, depth + 1, seen);
     if (found) return found;
   }
 
-  for (const child of Object.values(value)) {
-    if (!child || (typeof child !== "object" && typeof child !== "string")) continue;
-    const found = extractGiftPayloadStrict(child, depth + 1, seen);
-    if (found) return found;
+  /*
+   * Some transports place the gift payload under an unusual wrapper.
+   * Only recurse into children when this object already looks gift-related
+   * or explicitly says it is a gift. This keeps the fast path cheap.
+   */
+  const looksGiftRelated =
+    eventType === "gift" ||
+    eventType.includes("gift") ||
+    hasGiftIdentity(value);
+
+  if (looksGiftRelated) {
+    for (const [key, child] of Object.entries(value)) {
+      if (directKeys.includes(key)) continue;
+      if (!child || (typeof child !== "object" && typeof child !== "string")) continue;
+
+      const found = extractGiftPayloadStrict(child, depth + 1, seen);
+      if (found) return found;
+    }
   }
 
   return null;

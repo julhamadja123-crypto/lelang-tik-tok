@@ -1281,7 +1281,7 @@ async function connectToLiveInternal(rawUsername) {
     debug: false
   });
 
-  console.log("[TikTok] Mode koneksi: direct (primary gift event path)");
+  console.log("[TikTok] Mode koneksi: auto (TikTool memilih mode yang sesuai API key)");
 
   liveConnection = conn;
 

@@ -1731,6 +1731,81 @@ async function connectToLiveInternal(rawUsername) {
     handleGiftEvent(event, "gift");
   });
 
+  /* =======================================================
+     GIFT EVENT COMPATIBILITY BRIDGE
+     =======================================================
+     Keep the working TikTok connection untouched. Some @tiktool/live
+     transports/adapters expose the same webcast gift under a slightly
+     different EventEmitter name. These listeners only forward gift-shaped
+     events into the existing handler; they do not change coin calculation.
+  ======================================================= */
+  const compatibilityGiftEvents = [
+    "giftEvent",
+    "gift_event",
+    "GiftEvent",
+    "TikTokGift",
+    "webcastGift",
+    "webcast_gift"
+  ];
+
+  for (const eventName of compatibilityGiftEvents) {
+    conn.on(eventName, (event) => {
+      console.log(`[TikTok] compatibility event received: ${eventName}`);
+      handleGiftEvent(event, `compat:${eventName}`);
+    });
+  }
+
+  /* =======================================================
+     RAW EVENT DIAGNOSTIC
+     =======================================================
+     If the connector is connected but its named gift listener stays silent,
+     expose the actual EventEmitter event names in Railway logs. This is only
+     a diagnostic tap: the original emit() is always called unchanged.
+     It also lets us recover gift payloads from an unexpected event name when
+     the payload itself clearly identifies a gift.
+  ======================================================= */
+  if (typeof conn.emit === "function" && !conn.__coinAuctionEmitTap) {
+    const originalEmit = conn.emit.bind(conn);
+    conn.emit = function(eventName, ...args) {
+      const name = String(eventName || "");
+      const lowerName = name.toLowerCase();
+
+      if (lowerName !== "connected" && lowerName !== "disconnected") {
+        if (lowerName.includes("gift") || lowerName === "event") {
+          console.log(`[TikTok RAW EVENT] ${name}`);
+        }
+
+        const first = args[0];
+        if (first && typeof first === "object") {
+          const candidate = unwrapTikTokEvent(first);
+          const candidateType = String(
+            first?.event || first?.type || candidate?.event || candidate?.type || ""
+          ).toLowerCase();
+
+          const looksLikeGift =
+            candidateType === "gift" ||
+            lowerName.includes("gift") ||
+            first?.giftId !== undefined ||
+            first?.gift_id !== undefined ||
+            first?.diamondCount !== undefined ||
+            first?.diamond_count !== undefined ||
+            candidate?.giftId !== undefined ||
+            candidate?.gift_id !== undefined ||
+            candidate?.diamondCount !== undefined ||
+            candidate?.diamond_count !== undefined;
+
+          if (looksLikeGift && !lowerName.includes("gift") && lowerName !== "event") {
+            console.log(`[TikTok RAW EVENT] gift-shaped payload on ${name}`);
+            handleGiftEvent(candidate, `raw:${name}`);
+          }
+        }
+      }
+
+      return originalEmit(eventName, ...args);
+    };
+    conn.__coinAuctionEmitTap = true;
+  }
+
   // Lightweight diagnostics: confirms that the live socket is actually
   // delivering named events. This does not alter auction processing.
   for (const eventName of ["roomInfo", "like", "member", "social", "subscribe", "viewerCount"]) {

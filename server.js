@@ -200,16 +200,16 @@ let processedGiftEventsCleanupAt = 0;
 
 const GIFT_TTL = 60 * 1000;
 const GIFT_FINGERPRINT_TTL = 5000;
-const CROSS_TRANSPORT_TTL = 1200;
+const CROSS_TRANSPORT_TTL = 5000;
 const GIFT_RECEIPT_TTL = 60 * 1000;
 // TikTok/TikTool can occasionally deliver the same normal gift through
 // two channels with different transaction/message IDs. Keep a short semantic guard for that case; combo/streak gifts use their own delta logic.
-const GIFT_SEMANTIC_TTL = 1200;
+const GIFT_SEMANTIC_TTL = 5000;
 // Guard khusus replay terlambat pada gift biasa. TikTool kadang mengirim
 // ulang gift yang sama beberapa detik kemudian dengan ID transport baru.
 // Guard ini hanya aktif ketika event baru datang dari jalur primary yang sama
 // dan participant/gift yang sama; combo tidak disentuh.
-const LATE_NORMAL_REPLAY_TTL = 1200;
+const LATE_NORMAL_REPLAY_TTL = 5000;
 const recentNormalGiftReceipts = new Map();
 // Once the normal `gift` listener has delivered a gift, the generic `event`
 // channel is treated as a fallback only. A duplicate can arrive there later

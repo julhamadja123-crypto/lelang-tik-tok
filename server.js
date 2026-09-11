@@ -1270,11 +1270,13 @@ async function connectToLiveInternal(rawUsername) {
     // Railway dapat membuat direct WebSocket TikTok tersambung tetapi
     // tidak meneruskan event gift secara konsisten. Gunakan relayed TikTool
     // agar event gift dikirim melalui transport yang dikelola TikTool.
-    mode: "direct",
+    // Railway memakai koneksi managed/relayed agar event gift tidak
+    // bergantung pada jalur WebSocket direct dari IP datacenter.
+    mode: "relayed",
     debug: false
   });
 
-  console.log("[TikTok] Mode koneksi: direct (gift event path)");
+  console.log("[TikTok] Mode koneksi: relayed (managed gift event path)");
 
   liveConnection = conn;
 

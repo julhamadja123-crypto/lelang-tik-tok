@@ -163,6 +163,35 @@
         word-break: break-word;
       }
 
+      #tiktokConnectionDashboard .tcd-read {
+        margin-top: 9px;
+        padding: 7px 9px;
+        border-radius: 9px;
+        font-size: 12px;
+        font-weight: 700;
+        background: rgba(113,113,122,.10);
+        border: 1px solid rgba(255,255,255,.07);
+        transition: opacity .2s ease, transform .2s ease;
+      }
+
+      #tiktokConnectionDashboard .tcd-read.active {
+        background: rgba(34,197,94,.10);
+        border-color: rgba(34,197,94,.22);
+        color: #22c55e;
+      }
+
+      #tiktokConnectionDashboard .tcd-read.gift {
+        background: rgba(250,204,21,.10);
+        border-color: rgba(250,204,21,.24);
+        color: #facc15;
+        animation: tcdReadPulse .45s ease;
+      }
+
+      @keyframes tcdReadPulse {
+        0% { transform: scale(.98); opacity: .72; }
+        100% { transform: scale(1); opacity: 1; }
+      }
+
       #tiktokConnectionDashboard .tcd-meta {
         display: flex;
         flex-wrap: wrap;
@@ -223,6 +252,7 @@
         <div class="tcd-title">TikTok: TERPUTUS</div>
       </div>
       <div class="tcd-message">Belum terhubung ke TikTok LIVE</div>
+      <div class="tcd-read" aria-live="polite">⚪ Web belum membaca event</div>
       <div class="tcd-meta">
         <span class="tcd-user">Akun: -</span>
         <span class="tcd-reconnect">Reconnect: 0</span>
@@ -1848,6 +1878,7 @@
       };
 
       updateTikTokConnectionDashboard(connectingStatus);
+      syncVisibleTikTokHeader(username, false);
 
       setConnectionText(
         connectingStatus.message,
@@ -1893,6 +1924,42 @@
     /* =======================================================
        CONNECTION STATUS
        ======================================================= */
+
+    function syncVisibleTikTokHeader(username, connected = false) {
+      const clean = String(username || "").replace(/^@/, "").trim();
+      if (!clean && connected) return;
+
+      // Sinkronkan placeholder header lama tanpa mengubah elemen lain.
+      document.querySelectorAll("body *").forEach(node => {
+        if (node.children.length > 0) return;
+        const text = String(node.textContent || "").trim();
+
+        if (/@Belum Terhubung/i.test(text)) {
+          node.textContent = connected
+            ? `@${clean}`
+            : "@Belum Terhubung";
+        }
+      });
+    }
+
+    function updateWebReadIndicator(message, kind = "active") {
+      const card = document.getElementById("tiktokConnectionDashboard");
+      if (!card) return;
+
+      const readEl = card.querySelector(".tcd-read");
+      if (!readEl) return;
+
+      readEl.textContent = String(message || "⚪ Web belum membaca event");
+      readEl.classList.remove("active", "gift");
+
+      if (kind === "gift") {
+        readEl.classList.add("gift");
+        void readEl.offsetWidth;
+        readEl.classList.add("gift");
+      } else if (kind === "active") {
+        readEl.classList.add("active");
+      }
+    }
 
     function updateTikTokConnectionDashboard(data = {}) {
       const card = document.getElementById("tiktokConnectionDashboard");
@@ -1946,6 +2013,7 @@
       const reconnectEl = card.querySelector(".tcd-reconnect");
       const eventsEl = card.querySelector(".tcd-events");
       const giftsEl = card.querySelector(".tcd-gifts");
+      const readEl = card.querySelector(".tcd-read");
 
       if (titleEl) titleEl.textContent = title;
       if (messageEl) messageEl.textContent = message;
@@ -1964,6 +2032,24 @@
       if (giftsEl) {
         giftsEl.textContent =
           `Gift: ${Number(data?.giftCount) || 0}`;
+      }
+
+      if (readEl) {
+        const eventCount = Number(data?.eventCount) || 0;
+        const giftCount = Number(data?.giftCount) || 0;
+
+        if (giftCount > 0) {
+          readEl.textContent = `🟢 Web membaca gift • ${giftCount} gift terbaca`;
+          readEl.classList.add("active");
+        } else if (eventCount > 0) {
+          readEl.textContent = `🟢 Web membaca event • ${eventCount} event terbaca`;
+          readEl.classList.add("active");
+        } else if (uiState === "connected") {
+          readEl.textContent = "🟢 Web siap membaca event TikTok";
+          readEl.classList.add("active");
+        } else {
+          readEl.textContent = "⚪ Web belum membaca event";
+        }
       }
     }
 
@@ -2069,6 +2155,8 @@
           message: "Koneksi ke server terputus. Menunggu koneksi kembali.",
           username: el.username?.value || "",
         });
+        updateWebReadIndicator("🔴 Web tidak menerima event (server terputus)", "none");
+        syncVisibleTikTokHeader(el.username?.value || "", false);
 
         updateButtons();
       }
@@ -2130,6 +2218,19 @@
           isConnecting;
 
         updateTikTokConnectionDashboard(data);
+        syncVisibleTikTokHeader(
+          data?.username || el.username?.value || "",
+          ok
+        );
+
+        if ((Number(data?.eventCount) || 0) > 0) {
+          updateWebReadIndicator(
+            (Number(data?.giftCount) || 0) > 0
+              ? `🟢 Web membaca gift • ${Number(data?.giftCount) || 0} gift terbaca`
+              : `🟢 Web membaca event • ${Number(data?.eventCount) || 0} event terbaca`,
+            "active"
+          );
+        }
 
         setConnectionText(
           message,
@@ -2172,6 +2273,7 @@
           message,
           username: el.username?.value || ""
         });
+        syncVisibleTikTokHeader(el.username?.value || "", false);
 
         updateButtons();
 
@@ -2405,6 +2507,16 @@
     socket.on(
       "live:gift",
       gift => {
+
+        // Bukti langsung bahwa browser benar-benar menerima event gift.
+        const giftNameRead = String(gift?.giftName || "Gift");
+        const giftCoinRead = Number(gift?.coinValue);
+        updateWebReadIndicator(
+          Number.isFinite(giftCoinRead) && giftCoinRead > 0
+            ? `🟡 GIFT TERBACA • ${giftNameRead} • ${giftCoinRead} coin`
+            : `🟡 EVENT GIFT TERBACA • ${giftNameRead}`,
+          "gift"
+        );
 
         if (
           !gift?.participant

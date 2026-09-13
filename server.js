@@ -2198,19 +2198,23 @@ async function connectToLiveInternal(rawUsername) {
   });
 
   /* =======================================================
-     GIFT-ONLY MODE
+     GIFT FALLBACK — GENERIC EVENT
      =======================================================
-     Hanya event `gift` yang diproses untuk lelang.
-     Event lain seperti generic `event`, like, member, chat, unknown,
-     message, battleArmies, dan fallback diagnostik TIDAK ikut masuk
-     ke jalur coin. Ini sengaja dibuat sederhana agar event TikTok
-     lain tidak mengganggu pembacaan Gift.
+     Beberapa versi/transport @tiktool/live dapat membawa gift melalui
+     event generic, bukan event `gift`. Hanya payload yang benar-benar
+     memiliki nilai diamond/coin positif yang diteruskan ke jalur gift.
+     Like, chat, member, follow, battle, dan event lain tetap diabaikan.
   ======================================================= */
 
-  conn.on("gift", (event) => {
-    // Satu pintu untuk semua coin: handleGiftEvent().
-    // Anti-duplicate dan validasi coin tetap dipusatkan di sana.
-    handleGiftEvent(event, "gift");
+  conn.on("event", (rawEvent) => {
+    const giftPayload = extractGiftPayloadStrict(rawEvent);
+
+    if (!giftPayload || !isUsableGenericGiftPayload(giftPayload)) {
+      return;
+    }
+
+    console.log("[GIFT-FALLBACK] gift ditemukan pada generic event");
+    handleGiftEvent(giftPayload, "event");
   });
 
   conn.on("streamEnd", (event) => {

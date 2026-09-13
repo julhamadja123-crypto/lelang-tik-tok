@@ -1969,7 +1969,20 @@ async function connectToLiveInternal(rawUsername) {
       );
     }
 
-    const event = unwrapTikTokEvent(incomingEvent);
+    // PRIMARY GIFT NORMALIZER
+    // Prefer the strict recursive extractor so both official flat GiftEvent
+    // and TikTool's { event:"gift", data:{...} } envelope reach the same
+    // parser. This does not change coin math or dedup rules.
+    const event =
+      findGiftPayload(incomingEvent) ||
+      unwrapTikTokEvent(incomingEvent);
+
+    if (!event || typeof event !== "object") {
+      console.log(
+        `[GIFT] ${deliveryChannel} payload tidak bisa dinormalisasi`
+      );
+      return;
+    }
 
     // FAST PATH: process the gift immediately; no artificial delay.
     // Keep Railway logging lightweight so a burst of gifts cannot spend
@@ -1983,6 +1996,25 @@ async function connectToLiveInternal(rawUsername) {
        yang datang melalui channel gift + generic event tidak tampil
        sebagai 2 gift di monitor.
        ----------------------------------------------------- */
+
+    // @tiktool/live documents GiftEvent as:
+    // user + giftId + giftName + diamondCount + repeatCount + combo/groupId.
+    // Log the canonical fields so Railway immediately shows whether TikTok
+    // delivered the gift before any auction/dedup gate can reject it.
+    if (
+      event?.giftId !== undefined ||
+      event?.gift_id !== undefined ||
+      event?.diamondCount !== undefined ||
+      event?.diamond_count !== undefined
+    ) {
+      console.log(
+        `[GIFT-CANONICAL] @${event?.user?.uniqueId || event?.uniqueId || "Viewer"} ` +
+        `giftId=${event?.giftId ?? event?.gift_id ?? "-"} ` +
+        `diamond=${event?.diamondCount ?? event?.diamond_count ?? "-"} ` +
+        `repeat=${event?.repeatCount ?? event?.repeat_count ?? "-"} ` +
+        `repeatEnd=${event?.repeatEnd ?? event?.repeat_end ?? "-"}`
+      );
+    }
 
     const gift =
       giftData(event);
@@ -2333,26 +2365,70 @@ async function connectToLiveInternal(rawUsername) {
      `viewer_count` adalah alias yang juga didukung oleh SDK.
      ======================================================= */
   const handleViewerCount = (event, channel = "roomUserSeq") => {
-    const viewerRaw =
-      event?.viewerCount ??
-      event?.viewer_count ??
-      event?.data?.viewerCount ??
-      event?.data?.viewer_count;
-    const totalRaw =
-      event?.totalViewers ??
-      event?.total_viewers ??
-      event?.data?.totalViewers ??
-      event?.data?.total_viewers;
+    // TikTool normally exposes viewerCount/totalViewers, but some
+    // transport/parser versions expose the underlying roomUserSeq fields
+    // (totalUser / total / popularity) or wrap them one level deeper.
+    const candidates = [
+      event,
+      event?.data,
+      event?.data?.data,
+      event?.payload,
+      event?.payload?.data
+    ].filter(Boolean);
 
-    const viewerCount = Number(viewerRaw);
-    const totalViewers = Number(totalRaw);
+    const firstNumber = (...keys) => {
+      for (const obj of candidates) {
+        for (const key of keys) {
+          const value = obj?.[key];
+          if (value !== undefined && value !== null && value !== "") {
+            const n = Number(value);
+            if (Number.isFinite(n) && n >= 0) return n;
+          }
+        }
+      }
+      return null;
+    };
 
-    if (!Number.isFinite(viewerCount) && !Number.isFinite(totalViewers)) return;
+    const viewerCount = firstNumber(
+      "viewerCount",
+      "viewer_count",
+      "totalUser",
+      "total_user",
+      "total",
+      "popularity"
+    );
 
-    if (Number.isFinite(viewerCount) && viewerCount >= 0) {
+    const totalViewers = firstNumber(
+      "totalViewers",
+      "total_viewers",
+      "viewerCount",
+      "viewer_count",
+      "totalUser",
+      "total_user",
+      "total"
+    );
+
+    if (viewerCount === null && totalViewers === null) {
+      console.log(
+        "[TikTok] VIEWS RAW tidak dikenali:",
+        JSON.stringify(event, (key, value) => {
+          if (typeof value === "bigint") return value.toString();
+          if (typeof value === "object" && value !== null) {
+            const keys = Object.keys(value);
+            if (keys.length > 80) {
+              return Object.fromEntries(keys.slice(0, 80).map(k => [k, value[k]]));
+            }
+          }
+          return value;
+        }).slice(0, 3000)
+      );
+      return;
+    }
+
+    if (viewerCount !== null) {
       tikTokViewerCount = viewerCount;
     }
-    if (Number.isFinite(totalViewers) && totalViewers >= 0) {
+    if (totalViewers !== null) {
       tikTokTotalViewers = totalViewers;
     }
 
@@ -2360,7 +2436,7 @@ async function connectToLiveInternal(rawUsername) {
 
     console.log(
       `[TikTok] VIEWS: ${tikTokViewerCount}` +
-      (tikTokTotalViewers > 0 ? ` | totalViewers=${tikTokTotalViewers}` : "") +
+      ` | totalViewers=${tikTokTotalViewers}` +
       ` | channel=${channel}`
     );
 

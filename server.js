@@ -1893,14 +1893,14 @@ async function connectToLiveInternal(rawUsername) {
     apiKey: TIKTOOL_API_KEY,
     autoReconnect: true,
     maxReconnectAttempts: 5,
-    // Server-65 memakai relayed: koneksi terlihat sehat, tetapi log
-    // tidak menerima satu pun event gift. Kembalikan jalur direct yang
-    // sebelumnya dipakai saat event gift berhasil masuk.
-    mode: "direct",
+    // PENTING: jangan paksa mode "direct" pada @tiktool/live 2.12.1.
+    // SDK akan memilih transport yang sesuai API key secara otomatis.
+    // Pada versi sebelumnya, mode direct berhasil membuka WS tetapi tidak
+    // mengirim callback event ke listener sehingga eventCount tetap 0.
     debug: false
   });
 
-  console.log("[TikTok] Mode koneksi: auto (TikTool memilih mode yang sesuai API key)");
+  console.log("[TikTok] Mode koneksi: AUTO (SDK memilih transport yang sesuai API key)");
 
   liveConnection = conn;
 

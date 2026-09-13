@@ -44,6 +44,8 @@ let tikTokLastGiftAt = 0;
 let tikTokConnectedAt = 0;
 let tikTokLastError = "";
 let tikTokReconnectCount = 0;
+let tikTokViewerCount = 0;
+let tikTokTotalViewers = 0;
 
 /* =========================================================
    AUCTION STATE
@@ -335,6 +337,8 @@ function noteTikTokEvent(type = "event") {
     lastGiftAt: tikTokLastGiftAt || null,
     connectedAt: tikTokConnectedAt || null,
     reconnectCount: tikTokReconnectCount,
+    viewerCount: tikTokViewerCount,
+    totalViewers: tikTokTotalViewers,
     error: tikTokLastError || null,
     serverTime: Date.now()
   });
@@ -1849,6 +1853,8 @@ async function connectToLiveInternal(rawUsername) {
   tikTokLastGiftAt = 0;
   tikTokConnectedAt = 0;
   tikTokLastError = "";
+  tikTokViewerCount = 0;
+  tikTokTotalViewers = 0;
 
   console.log(
     "================================================"
@@ -2321,6 +2327,59 @@ async function connectToLiveInternal(rawUsername) {
     handleGiftEvent(giftPayload, "event");
   });
 
+  /* =======================================================
+     VIEWER COUNT / VIEWS
+     @tiktool/live menggunakan roomUserSeq sebagai event viewer count.
+     `viewer_count` adalah alias yang juga didukung oleh SDK.
+     ======================================================= */
+  const handleViewerCount = (event, channel = "roomUserSeq") => {
+    const viewerRaw =
+      event?.viewerCount ??
+      event?.viewer_count ??
+      event?.data?.viewerCount ??
+      event?.data?.viewer_count;
+    const totalRaw =
+      event?.totalViewers ??
+      event?.total_viewers ??
+      event?.data?.totalViewers ??
+      event?.data?.total_viewers;
+
+    const viewerCount = Number(viewerRaw);
+    const totalViewers = Number(totalRaw);
+
+    if (!Number.isFinite(viewerCount) && !Number.isFinite(totalViewers)) return;
+
+    if (Number.isFinite(viewerCount) && viewerCount >= 0) {
+      tikTokViewerCount = viewerCount;
+    }
+    if (Number.isFinite(totalViewers) && totalViewers >= 0) {
+      tikTokTotalViewers = totalViewers;
+    }
+
+    noteTikTokEvent("views");
+
+    console.log(
+      `[TikTok] VIEWS: ${tikTokViewerCount}` +
+      (tikTokTotalViewers > 0 ? ` | totalViewers=${tikTokTotalViewers}` : "") +
+      ` | channel=${channel}`
+    );
+
+    io.emit("live:views", {
+      viewerCount: tikTokViewerCount,
+      totalViewers: tikTokTotalViewers,
+      username: activeUsername,
+      timestamp: Date.now()
+    });
+  };
+
+  conn.on("roomUserSeq", (event) => {
+    handleViewerCount(event, "roomUserSeq");
+  });
+
+  conn.on("viewer_count", (event) => {
+    handleViewerCount(event, "viewer_count");
+  });
+
   conn.on("streamEnd", (event) => {
     handleStreamEnd(
       conn,
@@ -2618,6 +2677,8 @@ io.on("connection", (socket) => {
       lastGiftAt: tikTokLastGiftAt || null,
       connectedAt: tikTokConnectedAt || null,
       reconnectCount: tikTokReconnectCount,
+      viewerCount: tikTokViewerCount,
+      totalViewers: tikTokTotalViewers,
       error: tikTokLastError || null,
       serverTime: Date.now()
     }
@@ -2711,6 +2772,8 @@ io.on("connection", (socket) => {
             lastGiftAt: tikTokLastGiftAt || null,
             connectedAt: tikTokConnectedAt || null,
             reconnectCount: tikTokReconnectCount,
+            viewerCount: tikTokViewerCount,
+            totalViewers: tikTokTotalViewers,
             error: tikTokLastError || null,
             serverTime: Date.now()
           });
@@ -2972,6 +3035,12 @@ app.get(
       reconnectCount:
         tikTokReconnectCount,
 
+      viewerCount:
+        tikTokViewerCount,
+
+      totalViewers:
+        tikTokTotalViewers,
+
       lastError:
         tikTokLastError || null,
 
@@ -3013,6 +3082,8 @@ setInterval(() => {
     lastGiftAt: tikTokLastGiftAt || null,
     connectedAt: tikTokConnectedAt || null,
     reconnectCount: tikTokReconnectCount,
+    viewerCount: tikTokViewerCount,
+    totalViewers: tikTokTotalViewers,
     error: tikTokLastError || null,
     serverTime: Date.now()
   });

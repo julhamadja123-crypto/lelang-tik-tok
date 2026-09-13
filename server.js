@@ -410,68 +410,147 @@ function numberPositive(...values) {
 
 function unwrapTikTokEvent(event) {
   /*
-   * TikTool's documented GiftEvent is normally already flat:
-   * { user, giftId, giftName, diamondCount, repeatCount, ... }.
-   * Some transports/wrappers can however deliver:
-   *   { event: "gift", data: {...} }
-   * or { type: "gift", payload: {...} }.
+   * IMPORTANT — DIRECT GIFT FIRST
    *
-   * Normalize ALL of those forms before parsing. This is deliberately
-   * limited to known wrapper fields so ordinary gift payload fields
-   * cannot be accidentally replaced.
+   * @tiktool/live emits GiftEvent as a FLAT object:
+   *   { user, giftId, giftName, diamondCount, repeatCount, ... }
+   *
+   * Older recovery versions blindly unwrapped ANY `data` / `message` field.
+   * That can accidentally throw away the real flat GiftEvent and make the
+   * parser see a partial object, so the gift disappears.
+   *
+   * Only unwrap when the current object is clearly an envelope. A normal
+   * flat GiftEvent is returned untouched.
    */
   let current = event || {};
 
-  for (let i = 0; i < 4; i++) {
-    if (!current || typeof current !== "object") {
-      break;
+  const hasDirectGiftValue = (obj) => {
+    if (!obj || typeof obj !== "object") return false;
+    const keys = [
+      "diamondCount", "diamond_count",
+      "diamondCost", "diamond_cost",
+      "diamondValue", "diamond_value"
+    ];
+    return keys.some((key) => {
+      const n = Number(obj[key]);
+      return Number.isFinite(n) && n > 0;
+    });
+  };
+
+  const hasDirectGiftIdentity = (obj) => {
+    if (!obj || typeof obj !== "object") return false;
+    return (
+      obj.giftId !== undefined ||
+      obj.gift_id !== undefined ||
+      obj.giftName !== undefined ||
+      obj.gift_name !== undefined ||
+      obj.repeatCount !== undefined ||
+      obj.repeat_count !== undefined ||
+      obj.giftType !== undefined ||
+      obj.gift_type !== undefined
+    );
+  };
+
+  for (let i = 0; i < 6; i++) {
+    if (!current || typeof current !== "object") break;
+
+    // Never unwrap a valid flat GiftEvent.
+    if (hasDirectGiftValue(current)) {
+      return current;
     }
+
+    const hasWrapperChild =
+      (current.data && typeof current.data === "object") ||
+      (current.payload && typeof current.payload === "object") ||
+      (current.message && typeof current.message === "object") ||
+      (current.gift && typeof current.gift === "object") ||
+      (current.giftInfo && typeof current.giftInfo === "object") ||
+      (current.giftData && typeof current.giftData === "object");
+
+    // A flat gift may omit diamondCount and rely on catalog fallback.
+    // Accept it only when there is no nested payload waiting to be parsed.
+    if (hasDirectGiftIdentity(current) && !hasWrapperChild) {
+      return current;
+    }
+
+    const eventType = String(
+      current.event ??
+      current.type ??
+      current.eventType ??
+      current.event_type ??
+      ""
+    ).trim().toLowerCase();
 
     let next = null;
 
+    // Only unwrap explicit event envelopes first.
     if (
+      (eventType === "gift" || eventType.includes("gift")) &&
       current.data &&
       typeof current.data === "object"
     ) {
       next = current.data;
     } else if (
+      (eventType === "gift" || eventType.includes("gift")) &&
       current.payload &&
       typeof current.payload === "object"
     ) {
       next = current.payload;
     } else if (
+      (eventType === "gift" || eventType.includes("gift")) &&
       current.message &&
       typeof current.message === "object"
     ) {
       next = current.message;
     } else if (
+      (eventType === "gift" || eventType.includes("gift")) &&
       current.gift &&
       typeof current.gift === "object"
     ) {
       next = current.gift;
     } else if (
+      !eventType &&
+      current.data &&
+      typeof current.data === "object"
+    ) {
+      // Generic wrapper without an event name.
+      next = current.data;
+    } else if (
+      !eventType &&
+      current.payload &&
+      typeof current.payload === "object"
+    ) {
+      next = current.payload;
+    } else if (
+      !eventType &&
+      current.message &&
+      typeof current.message === "object"
+    ) {
+      next = current.message;
+    } else if (
+      !eventType &&
+      current.gift &&
+      typeof current.gift === "object"
+    ) {
+      next = current.gift;
+    } else if (
+      !eventType &&
       current.giftInfo &&
       typeof current.giftInfo === "object"
     ) {
       next = current.giftInfo;
     } else if (
+      !eventType &&
       current.giftData &&
       typeof current.giftData === "object"
     ) {
       next = current.giftData;
     }
 
-    if (!next || next === current) {
-      break;
-    }
-
+    if (!next || next === current) break;
     current = next;
   }
 
-  /*
-   * A few webhook/transport adapters can put data in a JSON string.
-   * Accept it when it is an object-shaped JSON payload.
-   */
   if (typeof current === "string") {
     try {
       const parsed = JSON.parse(current);
@@ -483,7 +562,6 @@ function unwrapTikTokEvent(event) {
 
   return current || {};
 }
-
 
 /* =========================================================
    ROBUST GIFT PAYLOAD EXTRACTION
@@ -1859,6 +1937,20 @@ async function connectToLiveInternal(rawUsername) {
     }
 
     const eventReceivedAt = Date.now();
+
+    // Keep this diagnostic small: it tells Railway exactly which gift
+    // listener/channel is receiving data without dumping the whole TikTok
+    // protobuf/event object into the log.
+    if (deliveryChannel === "gift") {
+      const raw = incomingEvent || {};
+      console.log(
+        `[GIFT-RAW] channel=gift giftId=${raw?.giftId ?? raw?.gift_id ?? "-"} ` +
+        `giftName=${raw?.giftName ?? raw?.gift_name ?? "-"} ` +
+        `diamond=${raw?.diamondCount ?? raw?.diamond_count ?? "-"} ` +
+        `repeat=${raw?.repeatCount ?? raw?.repeat_count ?? "-"}`
+      );
+    }
+
     const event = unwrapTikTokEvent(incomingEvent);
 
     // FAST PATH: process the gift immediately; no artificial delay.

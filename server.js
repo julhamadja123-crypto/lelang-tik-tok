@@ -127,15 +127,7 @@ function startServerDrawTime(reason = "coin seri") {
     }
 
     // Coin sudah berbeda: FINISHED langsung.
-    auctionActive = false;
-    auctionDrawTime = false;
-    auctionFinishedAt = 0;
-    io.emit("auction:state", {
-      state: "finished",
-      active: false,
-      drawTime: false,
-      version: participantVersion
-    });
+    forceAuctionFinished("DRAW TIME selesai, coin tidak seri");
   }, 20000);
 
   return true;
@@ -162,10 +154,32 @@ function scheduleFinishGrace() {
     if (getTopTwoTie()) {
       startServerDrawTime("Grace 4 detik selesai dan coin seri");
     } else {
-      auctionFinishedAt = 0;
-      console.log("[Auction] Grace selesai -> coin tidak seri -> FINISHED");
+      forceAuctionFinished("grace selesai, coin tidak seri");
     }
   }, AUCTION_FINISH_GRACE_MS);
+}
+
+function forceAuctionFinished(reason = "timer 00:00") {
+  if (auctionDrawTime) return false;
+
+  clearTimeout(graceDrawCheckTimer);
+  graceDrawCheckTimer = null;
+  auctionFinishedAt = 0;
+  auctionActive = false;
+  auctionDrawTime = false;
+  drawTimeDeadline = 0;
+
+  console.log(`[Auction] FINISHED FINAL: ${reason}`);
+  io.emit("auction:state", {
+    state: "finished",
+    active: false,
+    drawTime: false,
+    finished: true,
+    final: true,
+    reason,
+    version: participantVersion
+  });
+  return true;
 }
 
 function checkGraceAfterGift() {
@@ -1375,12 +1389,15 @@ function giftData(event) {
     // dengan transactionId yang berbeda. Karena itu identitas combo harus
     // memakai identitas yang lebih stabil terlebih dahulu: groupId lalu
     // createTime, baru transactionId sebagai fallback.
+    // Prefer a stable combo/group identity. transactionId is safer than
+    // createTime for separate gifts sent close together: two legitimate
+    // gifts can share the same createTime and must NOT be collapsed.
     comboKey = groupId
       ? `group:${groupId}|${user.userId || user.uniqueId || user.nickname}|${giftId || giftName}`
-      : createTime
-        ? `time:${createTime}|${user.userId || user.uniqueId || user.nickname}|${giftId || giftName}`
-        : transactionId
-          ? `tx:${transactionId}|${user.userId || user.uniqueId || user.nickname}|${giftId || giftName}`
+      : transactionId
+        ? `tx:${transactionId}|${user.userId || user.uniqueId || user.nickname}|${giftId || giftName}`
+        : createTime
+          ? `time:${createTime}|${user.userId || user.uniqueId || user.nickname}|${giftId || giftName}`
           : null;
 
     if (comboKey) {

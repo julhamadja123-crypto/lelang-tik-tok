@@ -2272,6 +2272,90 @@ async function connectToLiveInternal(rawUsername) {
 
   // Lightweight diagnostics: confirms that the live socket is actually
   // delivering named events. This does not alter auction processing.
+  /*
+   * UNIVERSAL EVENT TAP
+   * -------------------
+   * Some @tiktool/live builds can deliver decoded events through their
+   * catch-all emitter in addition to the named listeners. Keep the normal
+   * `gift` listener above as the primary path, but also inspect the catch-all
+   * when the SDK exposes `onAny`. This is recovery-only: handleGiftEvent()
+   * remains the single place that can add coins, so it cannot create a second
+   * coin by itself.
+   */
+  if (typeof conn.onAny === "function" && !conn.__coinAuctionOnAnyGiftTap) {
+    conn.onAny((eventName, ...args) => {
+      const name = String(eventName || "").toLowerCase();
+      if (
+        name !== "gift" &&
+        !name.includes("gift") &&
+        name !== "event" &&
+        name !== "unknown"
+      ) {
+        return;
+      }
+
+      const candidates = [];
+      for (const arg of args) {
+        if (arg !== undefined && arg !== null) candidates.push(arg);
+      }
+
+      let candidate = null;
+
+      for (const raw of candidates) {
+        const rawType = String(
+          raw?.event ??
+          raw?.type ??
+          raw?.eventType ??
+          raw?.event_type ??
+          ""
+        ).toLowerCase();
+
+        if (
+          (rawType === "gift" || name === "gift" || name.includes("gift")) &&
+          raw?.data &&
+          typeof raw.data === "object"
+        ) {
+          candidate = raw.data;
+          break;
+        }
+
+        if (
+          (rawType === "gift" || name === "gift" || name.includes("gift")) &&
+          raw?.payload &&
+          typeof raw.payload === "object"
+        ) {
+          candidate = raw.payload;
+          break;
+        }
+
+        candidate =
+          extractGiftPayloadStrict(raw) ||
+          findGiftPayload(raw);
+
+        if (candidate) break;
+      }
+
+      if (!candidate && candidates.length >= 2) {
+        candidate =
+          extractGiftPayloadStrict({
+            event: eventName,
+            data: candidates[candidates.length - 1]
+          }) ||
+          findGiftPayload(candidates[candidates.length - 1]);
+      }
+
+      if (!candidate || !isUsableGenericGiftPayload(candidate)) return;
+
+      console.log(
+        `[GIFT] catch-all event recovery: ${eventName}`
+      );
+      handleGiftEvent(candidate, `onAny:${eventName}`);
+    });
+
+    conn.__coinAuctionOnAnyGiftTap = true;
+    console.log("[TikTok] Catch-all event recovery aktif.");
+  }
+
   for (const eventName of ["roomInfo", "like", "member", "social", "subscribe", "viewerCount"]) {
     conn.on(eventName, () => noteTikTokEvent(eventName));
   }

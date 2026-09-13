@@ -1582,7 +1582,19 @@ function giftData(event) {
     eventKey = `time:${String(createTime).trim()}|${senderKey}|${giftKey}|${repeatKey}`;
   }
 
-  if (eventKey) {
+  /*
+   * COMBO SPECIAL CASE
+   * Jangan pakai processedGiftEvents untuk combo/streak.
+   *
+   * TikTool dapat mengirim progress dan final dari combo yang sama dengan
+   * transaction/message ID berbeda. Event-key dedup di bawah sebelumnya bisa
+   * membuat combo candidate yang sudah valid ikut terbuang sebelum sampai ke
+   * participant/dashboard.
+   *
+   * Untuk combo, processedStreakProgress + recentComboReceipts di atas menjadi
+   * sumber dedup utama. Gift biasa tetap memakai event identity dedup penuh.
+   */
+  if (!isCombo && eventKey) {
     const previous = processedGiftEvents.get(eventKey);
     if (previous && now - previous <= GIFT_TTL) {
       console.log(`[GIFT] DUPLICATE diabaikan: ${eventKey}`);

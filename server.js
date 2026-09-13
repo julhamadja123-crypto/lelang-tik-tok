@@ -2435,6 +2435,114 @@ async function connectToLiveInternal(rawUsername) {
     handleGiftEvent(giftCandidate, "event");
   });
 
+  /* =======================================================
+     INLINE GIFT FALLBACK — TikTool v3.x
+     =======================================================
+     Pada sebagian room TikTok, event gift standalone dapat tidak dikirim
+     dan gift justru disisipkan pada battleArmies.lastGift. Ambil hanya
+     lastGift yang benar-benar memiliki diamondCount/giftId. transactionId
+     frame dipertahankan agar dedup combo tetap memakai identitas stabil.
+  ======================================================= */
+  conn.on("battleArmies", (frame) => {
+    try {
+      const data = frame?.data && typeof frame.data === "object"
+        ? frame.data
+        : frame;
+      const inlineGift = data?.lastGift;
+
+      if (!inlineGift || typeof inlineGift !== "object") return;
+
+      const giftId = inlineGift.giftId ?? inlineGift.gift_id;
+      const diamondCount = inlineGift.diamondCount ?? inlineGift.diamond_count;
+      const transactionId =
+        data?.transactionId ?? data?.transaction_id ?? inlineGift?.transactionId ?? null;
+
+      if (giftId === undefined || giftId === null) return;
+      if (!Number.isFinite(Number(diamondCount)) || Number(diamondCount) <= 0) return;
+
+      const senderUserId =
+        inlineGift.gifterUserId ??
+        inlineGift.gifter_user_id ??
+        inlineGift.senderUserId ??
+        inlineGift.sender_user_id ??
+        null;
+
+      const repeatCount =
+        inlineGift.repeatCount ??
+        inlineGift.repeat_count ??
+        inlineGift.count ??
+        1;
+
+      const normalized = {
+        ...inlineGift,
+        user: {
+          id: senderUserId,
+          userId: senderUserId,
+          uniqueId:
+            inlineGift.uniqueId ??
+            inlineGift.unique_id ??
+            inlineGift.gifterUniqueId ??
+            inlineGift.gifter_unique_id ??
+            "Viewer",
+          nickname:
+            inlineGift.nickname ??
+            inlineGift.gifterNickname ??
+            inlineGift.gifter_nickname ??
+            "Viewer",
+          profilePictureUrl:
+            inlineGift.profilePictureUrl ??
+            inlineGift.profile_picture_url ??
+            inlineGift.gifterAvatarUrl ??
+            inlineGift.gifter_avatar_url ??
+            null
+        },
+        senderUserId,
+        giftId,
+        giftName:
+          inlineGift.giftName ??
+          inlineGift.gift_name ??
+          `Gift #${giftId}`,
+        diamondCount: Number(diamondCount),
+        repeatCount: Number(repeatCount) > 0 ? Math.floor(Number(repeatCount)) : 1,
+        giftType: 1,
+        transactionId,
+        event: "gift"
+      };
+
+      console.log(
+        `[GIFT] inline battleArmies.lastGift terdeteksi: giftId=${giftId} diamond=${diamondCount} ` +
+        `repeat=${normalized.repeatCount} tx=${transactionId || "-"}`
+      );
+
+      handleGiftEvent(normalized, "battleArmies:lastGift");
+    } catch (err) {
+      console.warn("[GIFT] gagal memproses battleArmies.lastGift:", err?.message || err);
+    }
+  });
+
+  /* =======================================================
+     UNKNOWN EVENT FALLBACK
+     =======================================================
+     Jika TikTool mengirim gift pada event type baru yang belum mempunyai
+     named listener, tetap cari payload gift yang nyata. Duplicate protection
+     tetap terpusat di handleGiftEvent().
+  ======================================================= */
+  conn.on("unknown", (incomingEvent) => {
+    try {
+      const candidate =
+        extractGiftPayloadStrict(incomingEvent) ||
+        normalizeRawEventCandidate(incomingEvent) ||
+        findGiftPayload(incomingEvent);
+
+      if (!candidate || !isUsableGenericGiftPayload(candidate)) return;
+
+      console.log("[GIFT] gift-shaped payload diterima melalui unknown event");
+      handleGiftEvent(candidate, "unknown");
+    } catch (err) {
+      console.warn("[GIFT] unknown-event fallback gagal:", err?.message || err);
+    }
+  });
+
   /*
    * RAW MESSAGE FALLBACK
    *

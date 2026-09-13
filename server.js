@@ -1529,6 +1529,17 @@ function giftData(event) {
   // Combo progress is committed only after the event has passed dedup.
   if (isCombo && comboKey) {
     processedStreakProgress.set(comboKey, repeatCount);
+
+    // Simpan receipt SETELAH gift lolos semua duplicate guard.
+    // Ini membuat guard combo replay benar-benar aktif, tetapi hanya untuk
+    // identitas combo yang sama. Tidak ada lock sender+gift untuk gift sah
+    // berikutnya.
+    recentComboReceipts.set(comboReceiptKey, {
+      repeat: repeatCount,
+      final: repeatEnd,
+      at: now,
+      comboKey
+    });
   }
 
   if (processedGiftEventsCleanupAt === 0 || now >= processedGiftEventsCleanupAt) {
@@ -1537,6 +1548,9 @@ function giftData(event) {
     }
     for (const [key, info] of processedCrossTransportGifts.entries()) {
       if (!info || now - info.at > 2000) processedCrossTransportGifts.delete(key);
+    }
+    for (const [key, info] of recentComboReceipts.entries()) {
+      if (!info || now - info.at > COMBO_REPLAY_TTL) recentComboReceipts.delete(key);
     }
     processedGiftEventsCleanupAt = now + 5000;
   }

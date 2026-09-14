@@ -1932,6 +1932,7 @@ async function connectToLiveInternal(rawUsername) {
   const handledGiftObjects = new WeakSet();
 
   const handleGiftEvent = (incomingEvent, deliveryChannel = "gift") => {
+    try {
     /*
      * IMPORTANT:
      * Jangan memasukkan object ke WeakSet SEBELUM giftData() berhasil.
@@ -2049,8 +2050,10 @@ async function connectToLiveInternal(rawUsername) {
       giftData(event);
 
     if (!gift) {
+      // null here normally means the event was intentionally suppressed by
+      // duplicate/combo-progress protection, not that TikTok failed to read it.
       console.log(
-        `[GIFT] ${deliveryChannel} diterima tetapi gift belum valid/complete atau duplicate/progress combo`
+        `[GIFT-SKIP] ${deliveryChannel} gift dilewati: duplicate/progress combo atau nilai coin tidak valid.`
       );
       return;
     }
@@ -2355,7 +2358,16 @@ async function connectToLiveInternal(rawUsername) {
 
     // A late gift during the 4-second grace can create a tie.
     // Start DRAW TIME immediately instead of waiting for the grace timer.
+    console.log(
+      `[GIFT-ACCEPTED] @${participant.uniqueId} | ${gift.giftName} | +${giftCoins} coin | TOTAL=${participant.coins}`
+    );
     checkGraceAfterGift();
+    } catch (error) {
+      console.error(
+        `[GIFT-ERROR] ${deliveryChannel} gagal diproses:`,
+        error?.stack || error?.message || error
+      );
+    }
   };
 
   // Standard TikTool event. This is the authoritative/fast gift path.

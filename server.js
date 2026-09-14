@@ -2370,37 +2370,115 @@ async function connectToLiveInternal(rawUsername) {
     }
   };
 
-  // Standard TikTool event. This is the authoritative/fast gift path.
-  conn.on("gift", (...args) => {
-    // @tiktool/live normally passes exactly one flat GiftEvent. Keep support
-    // for relay/builds that pass an envelope plus payload as multiple args.
-    // Never wait for repeatEnd; a valid gift should enter immediately.
-    const candidates = args.filter((v) => v !== undefined && v !== null);
+  /* =======================================================
+     GIFT LISTENER — COMPATIBILITY BRIDGE
+     =======================================================
+     @tiktool/live documents `gift`, but some deployed SDK builds/relays can
+     expose the same payload through an alias or an EventEmitter `onAny`
+     channel. Keep the normal `gift` listener as the primary path and add
+     non-invasive fallbacks. All fallbacks go through handleGiftEvent(),
+     which keeps the existing 1:1 coin and duplicate protection intact.
+  ======================================================= */
+
+  const dispatchGiftCandidates = (args, channel = "gift") => {
+    const candidates = Array.from(args || []).filter(
+      (v) => v !== undefined && v !== null
+    );
 
     let handled = false;
+
     for (const candidate of candidates) {
       if (handled) break;
+
       const looksGift =
-        candidate && typeof candidate === "object" &&
-        (candidate.giftId !== undefined ||
-         candidate.gift_id !== undefined ||
-         candidate.giftName !== undefined ||
-         candidate.gift_name !== undefined ||
-         Number(candidate.diamondCount) > 0 ||
-         Number(candidate.diamond_count) > 0);
+        candidate &&
+        typeof candidate === "object" &&
+        (
+          candidate.giftId !== undefined ||
+          candidate.gift_id !== undefined ||
+          candidate.giftName !== undefined ||
+          candidate.gift_name !== undefined ||
+          Number(candidate.diamondCount) > 0 ||
+          Number(candidate.diamond_count) > 0 ||
+          Number(candidate.diamondCost) > 0 ||
+          Number(candidate.diamond_cost) > 0
+        );
 
       if (looksGift) {
-        handleGiftEvent(candidate, "gift");
+        console.log(
+          `[TikTok] GIFT EVENT diterima via ${channel}`
+        );
+        handleGiftEvent(candidate, channel);
         handled = true;
       }
     }
 
-    // If the SDK supplied an envelope/string as the first argument, let the
-    // existing recursive fallback try the complete argument list.
+    // Envelope fallback: let the existing recursive extractor inspect it.
     if (!handled && candidates.length) {
-      handleGiftEvent(candidates[0], "gift");
+      const first = candidates[0];
+
+      if (
+        first &&
+        typeof first === "object" &&
+        (
+          first.event === "gift" ||
+          first.type === "gift" ||
+          first.eventName === "gift"
+        )
+      ) {
+        console.log(
+          `[TikTok] GIFT ENVELOPE diterima via ${channel}`
+        );
+        handleGiftEvent(first, channel);
+      }
     }
+  };
+
+  // Primary documented @tiktool/live event.
+  conn.on("gift", (...args) => {
+    dispatchGiftCandidates(args, "gift");
   });
+
+  // Compatibility aliases used by some relay/SDK builds.
+  for (const giftEventName of ["giftEvent", "gift_event", "Gift"]) {
+    try {
+      conn.on(giftEventName, (...args) => {
+        dispatchGiftCandidates(args, giftEventName);
+      });
+    } catch (_) {
+      // Ignore unsupported event registration.
+    }
+  }
+
+  // Some EventEmitter implementations expose every emitted event through
+  // onAny(). Use it only as a compatibility bridge. We do NOT process
+  // non-gift events, so chat/like/member/follow remain ignored.
+  if (typeof conn.onAny === "function") {
+    try {
+      conn.onAny((eventName, ...args) => {
+        const name = String(eventName || "").toLowerCase();
+
+        if (
+          name === "gift" ||
+          name === "giftevent" ||
+          name === "gift_event"
+        ) {
+          dispatchGiftCandidates(args, `onAny:${eventName}`);
+        }
+      });
+
+      console.log("[TikTok] Gift compatibility bridge: onAny AKTIF.");
+    } catch (err) {
+      console.warn(
+        "[TikTok] Gift compatibility bridge onAny gagal diaktifkan:",
+        err?.message || err
+      );
+    }
+  } else {
+    console.log(
+      "[TikTok] Gift compatibility bridge: onAny tidak tersedia; memakai event gift standar."
+    );
+  }
 
   /* =======================================================
      GIFT FALLBACK — GENERIC EVENT

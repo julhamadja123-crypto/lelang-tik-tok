@@ -2490,14 +2490,97 @@ async function connectToLiveInternal(rawUsername) {
   ======================================================= */
 
   conn.on("event", (rawEvent) => {
-    const giftPayload = extractGiftPayloadStrict(rawEvent);
+    /*
+     * @tiktool/live generic event channel:
+     *   { type: "gift", ...GiftEvent }
+     * atau pada beberapa transport:
+     *   { type: "gift", data: { ...GiftEvent } }
+     *
+     * Jangan hanya mengandalkan recursive extractor di sini. Jika GiftEvent
+     * datang sebagai object SDK/class atau envelope yang berbeda, extractor
+     * lama bisa gagal sebelum jalur gift utama pernah melihatnya.
+     *
+     * Untuk event yang secara eksplisit bertipe "gift", langsung kirim
+     * payload gift ke handler utama. Coin/dedup tetap hanya dilakukan di
+     * handleGiftEvent()/giftData(), jadi jalur ini tidak membuat coin double.
+     */
+    try {
+      const eventType = String(
+        rawEvent?.type ??
+        rawEvent?.event ??
+        rawEvent?.eventType ??
+        rawEvent?.event_type ??
+        ""
+      ).trim().toLowerCase();
 
-    if (!giftPayload || !isUsableGenericGiftPayload(giftPayload)) {
-      return;
+      if (eventType === "gift" || eventType === "giftevent" || eventType === "gift_event") {
+        console.log(
+          `[GIFT-EVENT] generic event bertipe ${eventType} diterima`
+        );
+
+        const directGift =
+          rawEvent?.data &&
+          typeof rawEvent.data === "object"
+            ? rawEvent.data
+            : rawEvent;
+
+        /*
+         * Gabungkan field envelope yang mungkin berada di outer object
+         * dengan data gift tanpa merusak payload asli.
+         */
+        const giftPayload =
+          directGift &&
+          typeof directGift === "object"
+            ? {
+                ...directGift,
+                user: directGift.user || rawEvent?.user,
+                giftId: directGift.giftId ?? rawEvent?.giftId,
+                giftName: directGift.giftName ?? rawEvent?.giftName,
+                diamondCount:
+                  directGift.diamondCount ?? rawEvent?.diamondCount,
+                repeatCount:
+                  directGift.repeatCount ?? rawEvent?.repeatCount,
+                repeatEnd:
+                  directGift.repeatEnd ?? rawEvent?.repeatEnd,
+                giftType:
+                  directGift.giftType ?? rawEvent?.giftType,
+                groupId:
+                  directGift.groupId ?? rawEvent?.groupId,
+                transactionId:
+                  directGift.transactionId ?? rawEvent?.transactionId,
+                msgId:
+                  directGift.msgId ?? rawEvent?.msgId
+              }
+            : null;
+
+        if (giftPayload && (
+          isUsableGenericGiftPayload(giftPayload) ||
+          getCatalogDiamondCount(giftPayload.giftId) > 0
+        )) {
+          handleGiftEvent(giftPayload, "event");
+          return;
+        }
+
+        /*
+         * Kalau harga diamond belum ada di frame, biarkan extractor lama
+         * mencoba seluruh struktur sebagai fallback.
+         */
+      }
+
+      const giftPayload = extractGiftPayloadStrict(rawEvent);
+
+      if (!giftPayload || !isUsableGenericGiftPayload(giftPayload)) {
+        return;
+      }
+
+      console.log("[GIFT-FALLBACK] gift ditemukan pada generic event");
+      handleGiftEvent(giftPayload, "event");
+    } catch (err) {
+      console.error(
+        "[GIFT-EVENT] generic gift handler error:",
+        err?.message || err
+      );
     }
-
-    console.log("[GIFT-FALLBACK] gift ditemukan pada generic event");
-    handleGiftEvent(giftPayload, "event");
   });
 
   /* =======================================================

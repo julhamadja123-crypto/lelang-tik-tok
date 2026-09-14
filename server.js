@@ -2382,7 +2382,7 @@ async function connectToLiveInternal(rawUsername) {
 
   const dispatchGiftCandidates = (args, channel = "gift") => {
     const candidates = Array.from(args || []).filter(
-      (v) => v !== undefined && v !== null
+      (v) => v !== undefined && v !== nulll
     );
 
     let handled = false;

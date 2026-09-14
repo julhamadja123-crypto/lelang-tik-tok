@@ -1973,9 +1973,38 @@ async function connectToLiveInternal(rawUsername) {
     // Prefer the strict recursive extractor so both official flat GiftEvent
     // and TikTool's { event:"gift", data:{...} } envelope reach the same
     // parser. This does not change coin math or dedup rules.
+    // PRIMARY PATH: @tiktool/live 2.x documents `gift` as a FLAT GiftEvent
+    // containing user + giftId + giftName + diamondCount.  Keep that object
+    // intact first. The old recursive extractor could descend into a nested
+    // `gift` object and accidentally discard the top-level user/diamond fields.
+    // Only fall back to recursive extraction when the direct object is not a
+    // usable gift frame.
+    const directGift =
+      incomingEvent && typeof incomingEvent === "object"
+        ? incomingEvent
+        : null;
+
+    const directHasGiftValue = directGift && (
+      Number(directGift.diamondCount) > 0 ||
+      Number(directGift.diamond_count) > 0 ||
+      Number(directGift.diamondCost) > 0 ||
+      Number(directGift.diamond_cost) > 0 ||
+      Number(directGift.coinValue) > 0 ||
+      Number(directGift.coin_value) > 0
+    );
+
+    const directLooksLikeGift = directGift && (
+      directHasGiftValue ||
+      directGift.giftId !== undefined ||
+      directGift.gift_id !== undefined ||
+      directGift.giftName !== undefined ||
+      directGift.gift_name !== undefined
+    );
+
     const event =
-      findGiftPayload(incomingEvent) ||
-      unwrapTikTokEvent(incomingEvent);
+      directLooksLikeGift
+        ? directGift
+        : findGiftPayload(incomingEvent) || unwrapTikTokEvent(incomingEvent);
 
     if (!event || typeof event !== "object") {
       console.log(
@@ -2330,13 +2359,35 @@ async function connectToLiveInternal(rawUsername) {
   };
 
   // Standard TikTool event. This is the authoritative/fast gift path.
-  conn.on("gift", (event) => {
-    // Do not mark the primary path as successful until handleGiftEvent()
-    // confirms that the payload contains a valid gift. Some TikTool
-    // transports emit a named "gift" event with an incomplete wrapper;
-    // marking it here would suppress the generic fallback and make the
-    // gift disappear entirely.
-    handleGiftEvent(event, "gift");
+  conn.on("gift", (...args) => {
+    // @tiktool/live normally passes exactly one flat GiftEvent. Keep support
+    // for relay/builds that pass an envelope plus payload as multiple args.
+    // Never wait for repeatEnd; a valid gift should enter immediately.
+    const candidates = args.filter((v) => v !== undefined && v !== null);
+
+    let handled = false;
+    for (const candidate of candidates) {
+      if (handled) break;
+      const looksGift =
+        candidate && typeof candidate === "object" &&
+        (candidate.giftId !== undefined ||
+         candidate.gift_id !== undefined ||
+         candidate.giftName !== undefined ||
+         candidate.gift_name !== undefined ||
+         Number(candidate.diamondCount) > 0 ||
+         Number(candidate.diamond_count) > 0);
+
+      if (looksGift) {
+        handleGiftEvent(candidate, "gift");
+        handled = true;
+      }
+    }
+
+    // If the SDK supplied an envelope/string as the first argument, let the
+    // existing recursive fallback try the complete argument list.
+    if (!handled && candidates.length) {
+      handleGiftEvent(candidates[0], "gift");
+    }
   });
 
   /* =======================================================
